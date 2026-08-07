@@ -56,5 +56,17 @@ export const gallerySection: SectionDefinition<GalleryContent> = {
   category: 'Content',
   schema: galleryContentSchema,
   defaultContent: galleryDefaultContent,
+  editorFields: [
+    { type: 'text', name: 'heading', label: 'Heading' },
+    {
+      type: 'array',
+      name: 'images',
+      label: 'Images',
+      itemFields: [
+        { type: 'text', name: 'url', label: 'Image URL' },
+        { type: 'text', name: 'alt', label: 'Alt text' },
+      ],
+    },
+  ],
   Renderer: GalleryRenderer,
 }

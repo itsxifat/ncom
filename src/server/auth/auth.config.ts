@@ -20,7 +20,8 @@ export const authConfig = {
         nextUrl.pathname.startsWith('/templates') ||
         nextUrl.pathname.startsWith('/account') ||
         nextUrl.pathname.startsWith('/admin') ||
-        nextUrl.pathname.startsWith('/preview-render')
+        nextUrl.pathname.startsWith('/preview-render') ||
+        nextUrl.pathname.startsWith('/builder-canvas')
 
       if (isProtected) {
         return isLoggedIn

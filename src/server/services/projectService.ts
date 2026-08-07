@@ -7,6 +7,7 @@ import type {
   CreateProjectInput,
   UpdateProjectInput,
 } from '@/lib/validation/project'
+import type { UpdateThemeInput } from '@/lib/validation/theme'
 
 async function uniqueSubdomain(base: string): Promise<string> {
   let baseSlug = slugify(base) || 'site'
@@ -62,6 +63,38 @@ export async function getProject(organizationId: string, projectId: string) {
   })
   if (!project) throw new Error('Project not found')
   return project
+}
+
+export async function getProjectTheme(
+  organizationId: string,
+  projectId: string
+) {
+  await requireOrgAccess(organizationId, 'VIEWER')
+
+  const theme = await prisma.themeSettings.findFirst({
+    where: { project: { id: projectId, organizationId } },
+  })
+  if (!theme) throw new Error('Theme not found')
+  return theme
+}
+
+export async function updateProjectTheme(
+  organizationId: string,
+  projectId: string,
+  input: UpdateThemeInput
+) {
+  await requireOrgAccess(organizationId, 'EDITOR')
+
+  const project = await prisma.project.findFirst({
+    where: { id: projectId, organizationId },
+    select: { id: true },
+  })
+  if (!project) throw new Error('Project not found')
+
+  return prisma.themeSettings.update({
+    where: { projectId: project.id },
+    data: input,
+  })
 }
 
 export async function createProject(

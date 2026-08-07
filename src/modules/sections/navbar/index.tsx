@@ -76,5 +76,19 @@ export const navbarSection: SectionDefinition<NavbarContent> = {
   category: 'Structure',
   schema: navbarContentSchema,
   defaultContent: navbarDefaultContent,
+  editorFields: [
+    { type: 'text', name: 'logoText', label: 'Logo text' },
+    {
+      type: 'array',
+      name: 'links',
+      label: 'Links',
+      itemFields: [
+        { type: 'text', name: 'label', label: 'Label' },
+        { type: 'text', name: 'href', label: 'Link' },
+      ],
+    },
+    { type: 'text', name: 'ctaLabel', label: 'Button label' },
+    { type: 'text', name: 'ctaHref', label: 'Button link' },
+  ],
   Renderer: NavbarRenderer,
 }

@@ -56,5 +56,11 @@ export const ctaSection: SectionDefinition<CtaContent> = {
   category: 'Structure',
   schema: ctaContentSchema,
   defaultContent: ctaDefaultContent,
+  editorFields: [
+    { type: 'text', name: 'heading', label: 'Heading' },
+    { type: 'textarea', name: 'subheading', label: 'Subheading' },
+    { type: 'text', name: 'ctaLabel', label: 'Button label' },
+    { type: 'text', name: 'ctaHref', label: 'Button link' },
+  ],
   Renderer: CtaRenderer,
 }

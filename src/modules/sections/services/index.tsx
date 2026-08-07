@@ -82,5 +82,18 @@ export const servicesSection: SectionDefinition<ServicesContent> = {
   category: 'Content',
   schema: servicesContentSchema,
   defaultContent: servicesDefaultContent,
+  editorFields: [
+    { type: 'text', name: 'heading', label: 'Heading' },
+    {
+      type: 'array',
+      name: 'items',
+      label: 'Services',
+      itemFields: [
+        { type: 'text', name: 'title', label: 'Title' },
+        { type: 'textarea', name: 'description', label: 'Description' },
+        { type: 'text', name: 'priceLabel', label: 'Price label' },
+      ],
+    },
+  ],
   Renderer: ServicesRenderer,
 }

@@ -1,6 +1,7 @@
 import type { ZodType } from 'zod'
 import type { ComponentType } from 'react'
 import type { PageTheme, SectionConfig } from './types'
+import type { FieldConfig } from './editorFields'
 
 export interface SectionRendererProps<T> {
   content: T
@@ -14,6 +15,7 @@ export interface SectionDefinition<T = unknown> {
   category: string
   schema: ZodType<T>
   defaultContent: T
+  editorFields: FieldConfig[]
   Renderer: ComponentType<SectionRendererProps<T>>
 }
 

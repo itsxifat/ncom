@@ -71,5 +71,12 @@ export const contactSection: SectionDefinition<ContactContent> = {
   category: 'Conversion',
   schema: contactContentSchema,
   defaultContent: contactDefaultContent,
+  editorFields: [
+    { type: 'text', name: 'heading', label: 'Heading' },
+    { type: 'textarea', name: 'subheading', label: 'Subheading' },
+    { type: 'text', name: 'email', label: 'Email' },
+    { type: 'text', name: 'phone', label: 'Phone' },
+    { type: 'text', name: 'address', label: 'Address' },
+  ],
   Renderer: ContactRenderer,
 }

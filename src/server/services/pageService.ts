@@ -120,6 +120,91 @@ export async function getPageForRawPreview(pageId: string) {
   )
 }
 
+export interface SectionSaveInput {
+  id: string
+  componentDefinitionId: string
+  order: number
+  content: object
+  config: object
+  isVisible: boolean
+}
+
+/**
+ * Reconciles the builder's in-memory draft with PageSection rows: creates
+ * rows for client-generated temp ids, updates the rest, and deletes any
+ * row no longer present in the incoming list (sections removed in the
+ * editor since the last save). Returns a tempId -> realId map so the
+ * client can reconcile its own state after a successful save.
+ */
+export async function savePageSections(
+  organizationId: string,
+  projectId: string,
+  pageId: string,
+  sections: SectionSaveInput[]
+): Promise<Record<string, string>> {
+  await requireOrgAccess(organizationId, 'EDITOR')
+  await assertProjectInOrg(organizationId, projectId)
+
+  const page = await prisma.page.findFirst({
+    where: { id: pageId, projectId },
+    select: { id: true },
+  })
+  if (!page) throw new Error('Page not found')
+
+  const idMapping: Record<string, string> = {}
+
+  await prisma.$transaction(async (tx) => {
+    const existingIds = new Set(
+      (
+        await tx.pageSection.findMany({
+          where: { pageId },
+          select: { id: true },
+        })
+      ).map((s) => s.id)
+    )
+
+    const incomingRealIds = new Set<string>()
+
+    for (const section of sections) {
+      if (section.id.startsWith('temp-')) {
+        const created = await tx.pageSection.create({
+          data: {
+            pageId,
+            componentDefinitionId: section.componentDefinitionId,
+            order: section.order,
+            content: section.content,
+            config: section.config,
+            isVisible: section.isVisible,
+          },
+        })
+        idMapping[section.id] = created.id
+        incomingRealIds.add(created.id)
+      } else {
+        if (!existingIds.has(section.id)) continue
+        await tx.pageSection.update({
+          where: { id: section.id },
+          data: {
+            order: section.order,
+            content: section.content,
+            config: section.config,
+            isVisible: section.isVisible,
+          },
+        })
+        incomingRealIds.add(section.id)
+      }
+    }
+
+    const idsToDelete = [...existingIds].filter(
+      (id) => !incomingRealIds.has(id)
+    )
+    if (idsToDelete.length > 0) {
+      await tx.pageSection.deleteMany({ where: { id: { in: idsToDelete } } })
+    }
+  })
+
+  return idMapping
+}
+
 export async function deletePage(
   organizationId: string,
   projectId: string,

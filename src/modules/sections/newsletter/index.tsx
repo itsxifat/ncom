@@ -76,5 +76,11 @@ export const newsletterSection: SectionDefinition<NewsletterContent> = {
   category: 'Conversion',
   schema: newsletterContentSchema,
   defaultContent: newsletterDefaultContent,
+  editorFields: [
+    { type: 'text', name: 'heading', label: 'Heading' },
+    { type: 'textarea', name: 'subheading', label: 'Subheading' },
+    { type: 'text', name: 'placeholder', label: 'Input placeholder' },
+    { type: 'text', name: 'ctaLabel', label: 'Button label' },
+  ],
   Renderer: NewsletterRenderer,
 }

@@ -88,5 +88,19 @@ export const testimonialsSection: SectionDefinition<TestimonialsContent> = {
   category: 'Social proof',
   schema: testimonialsContentSchema,
   defaultContent: testimonialsDefaultContent,
+  editorFields: [
+    { type: 'text', name: 'heading', label: 'Heading' },
+    {
+      type: 'array',
+      name: 'items',
+      label: 'Testimonials',
+      itemFields: [
+        { type: 'textarea', name: 'quote', label: 'Quote' },
+        { type: 'text', name: 'authorName', label: 'Author name' },
+        { type: 'text', name: 'authorRole', label: 'Author role' },
+        { type: 'text', name: 'avatarUrl', label: 'Avatar URL' },
+      ],
+    },
+  ],
   Renderer: TestimonialsRenderer,
 }

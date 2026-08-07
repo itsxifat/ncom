@@ -92,5 +92,26 @@ export const footerSection: SectionDefinition<FooterContent> = {
   category: 'Structure',
   schema: footerContentSchema,
   defaultContent: footerDefaultContent,
+  editorFields: [
+    { type: 'text', name: 'logoText', label: 'Logo text' },
+    {
+      type: 'array',
+      name: 'columns',
+      label: 'Columns',
+      itemFields: [
+        { type: 'text', name: 'title', label: 'Column title' },
+        {
+          type: 'array',
+          name: 'links',
+          label: 'Links',
+          itemFields: [
+            { type: 'text', name: 'label', label: 'Label' },
+            { type: 'text', name: 'href', label: 'Link' },
+          ],
+        },
+      ],
+    },
+    { type: 'text', name: 'bottomText', label: 'Bottom text' },
+  ],
   Renderer: FooterRenderer,
 }

@@ -59,5 +59,17 @@ export const statisticsSection: SectionDefinition<StatisticsContent> = {
   category: 'Social proof',
   schema: statisticsContentSchema,
   defaultContent: statisticsDefaultContent,
+  editorFields: [
+    { type: 'text', name: 'heading', label: 'Heading' },
+    {
+      type: 'array',
+      name: 'items',
+      label: 'Statistics',
+      itemFields: [
+        { type: 'text', name: 'value', label: 'Value' },
+        { type: 'text', name: 'label', label: 'Label' },
+      ],
+    },
+  ],
   Renderer: StatisticsRenderer,
 }

@@ -39,6 +39,13 @@ export default async function ProjectDetailPage({
         <div className="flex gap-2">
           <Button
             variant="outline"
+            render={<Link href={`/projects/${project.id}/theme`} />}
+            nativeButton={false}
+          >
+            Theme
+          </Button>
+          <Button
+            variant="outline"
             render={<Link href={`/projects/${project.id}/settings`} />}
             nativeButton={false}
           >
@@ -96,7 +103,15 @@ export default async function ProjectDetailPage({
                 >
                   Preview
                 </Button>
-                <Button variant="outline" size="sm" disabled>
+                <Button
+                  size="sm"
+                  render={
+                    <Link
+                      href={`/projects/${project.id}/pages/${page.id}/edit`}
+                    />
+                  }
+                  nativeButton={false}
+                >
                   Edit
                 </Button>
                 <PageActionsMenu projectId={project.id} pageId={page.id} />

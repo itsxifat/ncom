@@ -92,5 +92,19 @@ export const heroSection: SectionDefinition<HeroContent> = {
   category: 'Structure',
   schema: heroContentSchema,
   defaultContent: heroDefaultContent,
+  editorFields: [
+    { type: 'text', name: 'eyebrow', label: 'Eyebrow' },
+    { type: 'text', name: 'headline', label: 'Headline' },
+    { type: 'textarea', name: 'subheadline', label: 'Subheadline' },
+    { type: 'text', name: 'primaryCtaLabel', label: 'Primary button label' },
+    { type: 'text', name: 'primaryCtaHref', label: 'Primary button link' },
+    {
+      type: 'text',
+      name: 'secondaryCtaLabel',
+      label: 'Secondary button label',
+    },
+    { type: 'text', name: 'secondaryCtaHref', label: 'Secondary button link' },
+    { type: 'text', name: 'imageUrl', label: 'Image URL' },
+  ],
   Renderer: HeroRenderer,
 }

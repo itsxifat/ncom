@@ -123,5 +123,23 @@ export const pricingSection: SectionDefinition<PricingContent> = {
   category: 'Content',
   schema: pricingContentSchema,
   defaultContent: pricingDefaultContent,
+  editorFields: [
+    { type: 'text', name: 'eyebrow', label: 'Eyebrow' },
+    { type: 'text', name: 'heading', label: 'Heading' },
+    {
+      type: 'array',
+      name: 'plans',
+      label: 'Plans',
+      itemFields: [
+        { type: 'text', name: 'name', label: 'Name' },
+        { type: 'text', name: 'price', label: 'Price' },
+        { type: 'text', name: 'period', label: 'Period (e.g. /mo)' },
+        { type: 'stringArray', name: 'features', label: 'Features' },
+        { type: 'text', name: 'ctaLabel', label: 'Button label' },
+        { type: 'text', name: 'ctaHref', label: 'Button link' },
+        { type: 'boolean', name: 'highlighted', label: 'Highlighted' },
+      ],
+    },
+  ],
   Renderer: PricingRenderer,
 }

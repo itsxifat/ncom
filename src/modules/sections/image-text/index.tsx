@@ -80,5 +80,19 @@ export const imageTextSection: SectionDefinition<ImageTextContent> = {
   category: 'Content',
   schema: imageTextContentSchema,
   defaultContent: imageTextDefaultContent,
+  editorFields: [
+    { type: 'text', name: 'imageUrl', label: 'Image URL' },
+    { type: 'text', name: 'altText', label: 'Alt text' },
+    { type: 'text', name: 'heading', label: 'Heading' },
+    { type: 'textarea', name: 'body', label: 'Body' },
+    {
+      type: 'select',
+      name: 'imagePosition',
+      label: 'Image position',
+      options: ['left', 'right'],
+    },
+    { type: 'text', name: 'ctaLabel', label: 'Button label' },
+    { type: 'text', name: 'ctaHref', label: 'Button link' },
+  ],
   Renderer: ImageTextRenderer,
 }

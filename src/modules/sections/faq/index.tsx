@@ -62,5 +62,17 @@ export const faqSection: SectionDefinition<FaqContent> = {
   category: 'Content',
   schema: faqContentSchema,
   defaultContent: faqDefaultContent,
+  editorFields: [
+    { type: 'text', name: 'heading', label: 'Heading' },
+    {
+      type: 'array',
+      name: 'items',
+      label: 'Questions',
+      itemFields: [
+        { type: 'text', name: 'question', label: 'Question' },
+        { type: 'textarea', name: 'answer', label: 'Answer' },
+      ],
+    },
+  ],
   Renderer: FaqRenderer,
 }

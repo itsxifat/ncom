@@ -35,5 +35,9 @@ export const textSection: SectionDefinition<TextContent> = {
   category: 'Content',
   schema: textContentSchema,
   defaultContent: textDefaultContent,
+  editorFields: [
+    { type: 'text', name: 'heading', label: 'Heading' },
+    { type: 'textarea', name: 'body', label: 'Body' },
+  ],
   Renderer: TextRenderer,
 }

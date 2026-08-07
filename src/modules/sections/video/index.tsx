@@ -72,5 +72,14 @@ export const videoSection: SectionDefinition<VideoContent> = {
   category: 'Content',
   schema: videoContentSchema,
   defaultContent: videoDefaultContent,
+  editorFields: [
+    { type: 'text', name: 'heading', label: 'Heading' },
+    {
+      type: 'text',
+      name: 'videoUrl',
+      label: 'Video URL (YouTube, Vimeo, or file)',
+    },
+    { type: 'text', name: 'posterUrl', label: 'Poster image URL' },
+  ],
   Renderer: VideoRenderer,
 }

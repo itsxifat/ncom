@@ -83,5 +83,19 @@ export const cardsSection: SectionDefinition<CardsContent> = {
   category: 'Content',
   schema: cardsContentSchema,
   defaultContent: cardsDefaultContent,
+  editorFields: [
+    { type: 'text', name: 'heading', label: 'Heading' },
+    {
+      type: 'array',
+      name: 'items',
+      label: 'Cards',
+      itemFields: [
+        { type: 'text', name: 'title', label: 'Title' },
+        { type: 'textarea', name: 'description', label: 'Description' },
+        { type: 'text', name: 'imageUrl', label: 'Image URL' },
+        { type: 'text', name: 'href', label: 'Link' },
+      ],
+    },
+  ],
   Renderer: CardsRenderer,
 }

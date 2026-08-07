@@ -77,5 +77,18 @@ export const featuresSection: SectionDefinition<FeaturesContent> = {
   category: 'Content',
   schema: featuresContentSchema,
   defaultContent: featuresDefaultContent,
+  editorFields: [
+    { type: 'text', name: 'eyebrow', label: 'Eyebrow' },
+    { type: 'text', name: 'heading', label: 'Heading' },
+    {
+      type: 'array',
+      name: 'items',
+      label: 'Features',
+      itemFields: [
+        { type: 'text', name: 'title', label: 'Title' },
+        { type: 'textarea', name: 'description', label: 'Description' },
+      ],
+    },
+  ],
   Renderer: FeaturesRenderer,
 }
