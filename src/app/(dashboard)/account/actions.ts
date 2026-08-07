@@ -1,7 +1,6 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { requireAuth } from '@/server/auth/rbac'
 import {
   updateProfile,
   changePassword,
@@ -25,8 +24,7 @@ export async function updateProfileAction(
     return { error: parsed.error.issues[0]?.message ?? 'Invalid input' }
   }
 
-  const session = await requireAuth()
-  const updated = await updateProfile(session.user.id, parsed.data)
+  const updated = await updateProfile(parsed.data)
 
   revalidatePath('/account/profile')
   revalidatePath('/', 'layout')
@@ -45,10 +43,8 @@ export async function changePasswordAction(
     return { error: parsed.error.issues[0]?.message ?? 'Invalid input' }
   }
 
-  const session = await requireAuth()
-
   try {
-    await changePassword(session.user.id, parsed.data)
+    await changePassword(parsed.data)
   } catch (error) {
     if (error instanceof InvalidCurrentPasswordError) {
       return { error: error.message }

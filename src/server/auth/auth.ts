@@ -5,6 +5,7 @@ import bcrypt from 'bcryptjs'
 import { prisma } from '@/server/db/client'
 import { authConfig } from './auth.config'
 import { loginSchema } from '@/lib/validation/auth'
+import { DUMMY_BCRYPT_HASH } from '@/lib/security'
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
@@ -22,12 +23,17 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
         const { email, password } = parsed.data
         const user = await prisma.user.findUnique({ where: { email } })
-        if (!user || !user.passwordHash || user.isSuspended) return null
 
+        // Always run bcrypt.compare, even when the user doesn't exist, so
+        // this takes the same time either way — otherwise the "no such
+        // user" path returns measurably faster than "wrong password" and
+        // lets an attacker enumerate registered emails via response timing.
         const isValidPassword = await bcrypt.compare(
           password,
-          user.passwordHash
+          user?.passwordHash ?? DUMMY_BCRYPT_HASH
         )
+
+        if (!user || !user.passwordHash || user.isSuspended) return null
         if (!isValidPassword) return null
 
         return {

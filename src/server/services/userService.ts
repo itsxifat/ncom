@@ -1,6 +1,8 @@
 import 'server-only'
 import bcrypt from 'bcryptjs'
 import { prisma } from '@/server/db/client'
+import { requireAuth } from '@/server/auth/rbac'
+import { BCRYPT_COST } from '@/lib/security'
 import type {
   UpdateProfileInput,
   ChangePasswordInput,
@@ -13,18 +15,24 @@ export class InvalidCurrentPasswordError extends Error {
   }
 }
 
-export async function updateProfile(userId: string, input: UpdateProfileInput) {
+/**
+ * Always acts on the caller's own account — derives the user id from a
+ * freshly-verified session rather than trusting a passed-in id, so this
+ * can never be called on someone else's account even by a future mistake.
+ */
+export async function updateProfile(input: UpdateProfileInput) {
+  const session = await requireAuth()
   return prisma.user.update({
-    where: { id: userId },
+    where: { id: session.user.id },
     data: { name: input.name },
   })
 }
 
-export async function changePassword(
-  userId: string,
-  input: ChangePasswordInput
-) {
-  const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } })
+export async function changePassword(input: ChangePasswordInput) {
+  const session = await requireAuth()
+  const user = await prisma.user.findUniqueOrThrow({
+    where: { id: session.user.id },
+  })
 
   if (!user.passwordHash) {
     throw new InvalidCurrentPasswordError()
@@ -35,9 +43,9 @@ export async function changePassword(
     throw new InvalidCurrentPasswordError()
   }
 
-  const newPasswordHash = await bcrypt.hash(input.newPassword, 10)
+  const newPasswordHash = await bcrypt.hash(input.newPassword, BCRYPT_COST)
   await prisma.user.update({
-    where: { id: userId },
+    where: { id: session.user.id },
     data: { passwordHash: newPasswordHash },
   })
 }

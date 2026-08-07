@@ -2,6 +2,7 @@ import 'server-only'
 import bcrypt from 'bcryptjs'
 import { prisma } from '@/server/db/client'
 import { slugify, withRandomSuffix } from '@/lib/slug'
+import { BCRYPT_COST } from '@/lib/security'
 import type { RegisterInput } from '@/lib/validation/auth'
 
 export class EmailAlreadyInUseError extends Error {
@@ -45,7 +46,7 @@ export async function registerUser({ name, email, password }: RegisterInput) {
     throw new EmailAlreadyInUseError()
   }
 
-  const passwordHash = await bcrypt.hash(password, 10)
+  const passwordHash = await bcrypt.hash(password, BCRYPT_COST)
   const orgSlug = await uniqueOrgSlug(name)
 
   return prisma.$transaction(async (tx) => {

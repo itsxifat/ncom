@@ -7,6 +7,7 @@ import {
   registerUser,
   EmailAlreadyInUseError,
 } from '@/server/services/authService'
+import { checkRateLimit, getClientIp } from '@/lib/rate-limit'
 
 export type AuthActionState = { error?: string } | undefined
 
@@ -14,6 +15,12 @@ export async function loginAction(
   _prevState: AuthActionState,
   formData: FormData
 ): Promise<AuthActionState> {
+  const ip = await getClientIp()
+  const rateLimit = await checkRateLimit(`login:${ip}`, 10, 15 * 60)
+  if (!rateLimit.allowed) {
+    return { error: 'Too many attempts. Try again in a few minutes.' }
+  }
+
   const parsed = loginSchema.safeParse({
     email: formData.get('email'),
     password: formData.get('password'),
@@ -41,6 +48,12 @@ export async function registerAction(
   _prevState: AuthActionState,
   formData: FormData
 ): Promise<AuthActionState> {
+  const ip = await getClientIp()
+  const rateLimit = await checkRateLimit(`register:${ip}`, 5, 15 * 60)
+  if (!rateLimit.allowed) {
+    return { error: 'Too many attempts. Try again in a few minutes.' }
+  }
+
   const parsed = registerSchema.safeParse({
     name: formData.get('name'),
     email: formData.get('email'),
