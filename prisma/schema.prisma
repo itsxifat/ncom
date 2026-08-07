@@ -1,0 +1,388 @@
+// NCOM V1 data model.
+//
+// Two parallel object graphs share the ComponentDefinition vocabulary but never share rows:
+//   - Definition side (admin-owned, reusable):  Template -> TemplateSection
+//   - Instance side (tenant-owned, per-page):    Page -> PageSection
+// Picking a template clones its TemplateSection rows into new PageSection rows; after that,
+// editing a page never touches the template it came from.
+//
+// Draft vs. published: live editing operates on normalized PageSection rows. Publishing
+// snapshots the current sections + SEO + theme into an immutable PageVersion.snapshot JSON
+// blob; Page.publishedVersionId points at it. The public renderer reads only
+// PageVersion.snapshot, never live PageSection rows.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ── Identity & Tenancy ──────────────────────────────────────────────────
+
+model User {
+  id            String       @id @default(cuid())
+  email         String       @unique
+  emailVerified DateTime?
+  passwordHash  String?
+  name          String?
+  image         String?
+  platformRole  PlatformRole @default(USER)
+  isSuspended   Boolean      @default(false)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  accounts     Account[]
+  sessions     Session[]
+  memberships  Membership[]
+  mediaAssets  MediaAsset[]  @relation("UploadedBy")
+  auditLogs    AuditLog[]
+  pageVersions PageVersion[]
+}
+
+enum PlatformRole {
+  USER
+  SUPER_ADMIN
+}
+
+// Auth.js (NextAuth) v5 Prisma adapter models.
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships Membership[]
+  projects    Project[]
+  mediaAssets MediaAsset[]
+}
+
+model Membership {
+  id             String   @id @default(cuid())
+  userId         String
+  organizationId String
+  role           OrgRole  @default(OWNER)
+  createdAt      DateTime @default(now())
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+}
+
+enum OrgRole {
+  OWNER
+  ADMIN
+  EDITOR
+  VIEWER
+}
+
+// ── Projects & Pages ─────────────────────────────────────────────────────
+
+model Project {
+  id                     String        @id @default(cuid())
+  organizationId         String
+  name                   String
+  type                   ProjectType   @default(LANDING) // reserved for a future Store module; only LANDING is used in V1
+  subdomain              String        @unique
+  customDomain           String?       @unique // reserved for a future custom-domain feature; not exposed in V1 UI
+  customDomainStatus     DomainStatus?
+  customDomainVerifiedAt DateTime?
+  isSearchIndexable      Boolean       @default(true)
+  createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
+
+  organization Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  pages        Page[]
+  theme        ThemeSettings?
+  integration  ProjectIntegrationConfig?
+  mediaAssets  MediaAsset[]
+  pageViews    PageView[]
+}
+
+enum ProjectType {
+  LANDING
+  STORE
+}
+
+enum DomainStatus {
+  PENDING
+  VERIFIED
+  FAILED
+}
+
+model ThemeSettings {
+  id              String      @id @default(cuid())
+  projectId       String      @unique
+  primaryColor    String
+  secondaryColor  String
+  backgroundColor String
+  textColor       String
+  headingFont     String
+  bodyFont        String
+  buttonStyle     ButtonStyle @default(SOLID)
+  borderRadius    String
+  spacingScale    String
+  containerWidth  String
+  customCss       String?
+  updatedAt       DateTime    @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+enum ButtonStyle {
+  SOLID
+  OUTLINE
+  GHOST
+}
+
+model ProjectIntegrationConfig {
+  id               String   @id @default(cuid())
+  projectId        String   @unique
+  gaMeasurementId  String?
+  gtmContainerId   String?
+  metaPixelId      String?
+  customHeadScript String?
+  updatedAt        DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model Page {
+  id                 String     @id @default(cuid())
+  projectId          String
+  slug               String
+  title              String
+  isHome             Boolean    @default(false)
+  status             PageStatus @default(DRAFT)
+  publishedVersionId String?    @unique
+  publishedAt        DateTime?
+  previewToken       String     @unique @default(cuid())
+
+  seoTitle       String?
+  seoDescription String?
+  ogImageMediaId String?
+  robotsIndex    Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project          Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sections         PageSection[]
+  versions         PageVersion[] @relation("PageVersions")
+  publishedVersion PageVersion?  @relation("PublishedVersion", fields: [publishedVersionId], references: [id])
+  ogImage          MediaAsset?   @relation(fields: [ogImageMediaId], references: [id], onDelete: SetNull)
+
+  @@unique([projectId, slug])
+}
+
+enum PageStatus {
+  DRAFT
+  PUBLISHED
+  UNPUBLISHED
+}
+
+model PageSection {
+  id                    String   @id @default(cuid())
+  pageId                String
+  componentDefinitionId String
+  order                 Int
+  content               Json
+  config                Json
+  isVisible             Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  page                Page                @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  componentDefinition ComponentDefinition @relation(fields: [componentDefinitionId], references: [id], onDelete: Restrict)
+
+  @@index([pageId, order])
+}
+
+model PageVersion {
+  id          String    @id @default(cuid())
+  pageId      String
+  label       String?
+  snapshot    Json
+  createdById String?
+  publishedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  page             Page  @relation("PageVersions", fields: [pageId], references: [id], onDelete: Cascade)
+  publishedForPage Page? @relation("PublishedVersion")
+  createdBy        User? @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([pageId, createdAt])
+}
+
+// ── Templates & Components ────────────────────────────────────────────────
+
+model TemplateCategory {
+  id        String  @id @default(cuid())
+  name      String
+  slug      String  @unique
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
+
+  templates Template[]
+}
+
+model Template {
+  id               String         @id @default(cuid())
+  name             String
+  slug             String         @unique
+  description      String?
+  categoryId       String?
+  status           TemplateStatus @default(DRAFT)
+  thumbnailMediaId String?
+  defaultTheme     Json
+  createdById      String?
+  version          Int            @default(1)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  category TemplateCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  sections TemplateSection[]
+}
+
+enum TemplateStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+model TemplateSection {
+  id                    String  @id @default(cuid())
+  templateId            String
+  componentDefinitionId String
+  order                 Int
+  defaultContent        Json
+  defaultConfig         Json
+  isRequired            Boolean @default(false)
+
+  template            Template            @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  componentDefinition ComponentDefinition @relation(fields: [componentDefinitionId], references: [id], onDelete: Restrict)
+
+  @@index([templateId, order])
+}
+
+// Mirrors modules/sections/registry.ts — `key` must match a registered section type.
+model ComponentDefinition {
+  id               String  @id @default(cuid())
+  key              String  @unique
+  name             String
+  category         String
+  description      String?
+  thumbnailMediaId String?
+  defaultContent   Json
+  isActive         Boolean @default(true)
+  sortOrder        Int     @default(0)
+
+  templateSections TemplateSection[]
+  pageSections     PageSection[]
+}
+
+// ── Media ───────────────────────────────────────────────────────────────
+
+model MediaAsset {
+  id             String   @id @default(cuid())
+  organizationId String
+  projectId      String?
+  uploadedById   String?
+  fileName       String
+  mimeType       String
+  sizeBytes      Int
+  storageKey     String
+  url            String
+  width          Int?
+  height         Int?
+  altText        String?
+  createdAt      DateTime @default(now())
+
+  organization        Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project             Project?     @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  uploadedBy          User?        @relation("UploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
+  pagesUsingAsOgImage Page[]
+
+  @@index([organizationId])
+}
+
+// ── Analytics ──────────────────────────────────────────────────────────
+
+model PageView {
+  id          String   @id @default(cuid())
+  pageId      String
+  projectId   String
+  path        String
+  referrer    String?
+  deviceType  String?
+  visitorHash String
+  createdAt   DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([pageId, createdAt])
+  @@index([projectId, createdAt])
+}
+
+// ── Platform admin ────────────────────────────────────────────────────────
+
+model PlatformSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  actorUserId String?
+  action      String
+  entityType  String
+  entityId    String
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  actor User? @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
