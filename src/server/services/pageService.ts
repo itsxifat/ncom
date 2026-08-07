@@ -77,6 +77,49 @@ export async function createPage(
   })
 }
 
+export async function getPageWithSections(
+  organizationId: string,
+  projectId: string,
+  pageId: string
+) {
+  await requireOrgAccess(organizationId, 'VIEWER')
+  await assertProjectInOrg(organizationId, projectId)
+
+  const page = await prisma.page.findFirst({
+    where: { id: pageId, projectId },
+    include: {
+      sections: {
+        orderBy: { order: 'asc' },
+        include: { componentDefinition: true },
+      },
+      project: { include: { theme: true } },
+    },
+  })
+  if (!page) throw new Error('Page not found')
+
+  return page
+}
+
+/**
+ * Resolves a page's tenant from the page id alone (no org/project in the
+ * URL) and authorizes against it — used by the chrome-free render route
+ * embedded in an iframe by both the authenticated preview and, later, the
+ * visual builder's canvas.
+ */
+export async function getPageForRawPreview(pageId: string) {
+  const page = await prisma.page.findUnique({
+    where: { id: pageId },
+    select: { projectId: true, project: { select: { organizationId: true } } },
+  })
+  if (!page) throw new Error('Page not found')
+
+  return getPageWithSections(
+    page.project.organizationId,
+    page.projectId,
+    pageId
+  )
+}
+
 export async function deletePage(
   organizationId: string,
   projectId: string,

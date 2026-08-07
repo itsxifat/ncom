@@ -84,6 +84,18 @@ export default async function ProjectDetailPage({
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  render={
+                    <Link
+                      href={`/projects/${project.id}/pages/${page.id}/preview`}
+                    />
+                  }
+                  nativeButton={false}
+                >
+                  Preview
+                </Button>
                 <Button variant="outline" size="sm" disabled>
                   Edit
                 </Button>
