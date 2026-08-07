@@ -25,7 +25,9 @@ export default function RegisterPage() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Create your account</CardTitle>
+        <CardTitle className="font-display text-2xl font-semibold">
+          Create your account
+        </CardTitle>
         <CardDescription>
           Start building landing pages with NCOM.
         </CardDescription>

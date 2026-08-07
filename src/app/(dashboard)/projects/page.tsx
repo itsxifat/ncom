@@ -12,7 +12,9 @@ export default async function ProjectsPage() {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Projects</h1>
+        <h1 className="font-display text-3xl font-semibold tracking-tight">
+          Projects
+        </h1>
         <Button render={<Link href="/projects/new" />} nativeButton={false}>
           New project
         </Button>

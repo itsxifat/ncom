@@ -25,7 +25,9 @@ export default function LoginPage() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Sign in</CardTitle>
+        <CardTitle className="font-display text-2xl font-semibold">
+          Sign in
+        </CardTitle>
         <CardDescription>
           Welcome back. Sign in to keep working on your landing pages.
         </CardDescription>

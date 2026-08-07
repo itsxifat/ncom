@@ -10,7 +10,9 @@ export default async function TemplatesPage() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-2xl font-semibold">Templates</h1>
+        <h1 className="font-display text-3xl font-semibold tracking-tight">
+          Templates
+        </h1>
         <p className="text-muted-foreground mt-1">
           Browse professionally designed templates to start a new project.
         </p>

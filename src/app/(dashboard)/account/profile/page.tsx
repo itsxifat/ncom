@@ -7,7 +7,9 @@ export default async function ProfilePage() {
 
   return (
     <div className="mx-auto max-w-lg">
-      <h1 className="mb-6 text-2xl font-semibold">Account settings</h1>
+      <h1 className="font-display mb-6 text-3xl font-semibold tracking-tight">
+        Account settings
+      </h1>
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Profile</CardTitle>

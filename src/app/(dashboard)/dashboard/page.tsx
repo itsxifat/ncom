@@ -11,7 +11,7 @@ export default async function DashboardPage() {
   return (
     <div className="flex flex-col gap-8">
       <div>
-        <h1 className="text-2xl font-semibold">
+        <h1 className="font-display text-3xl font-semibold tracking-tight">
           Welcome back, {session.user.name?.split(' ')[0] ?? 'there'}
         </h1>
         <p className="text-muted-foreground mt-1">

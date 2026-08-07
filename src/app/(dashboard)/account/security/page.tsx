@@ -4,7 +4,9 @@ import { PasswordForm } from '@/components/dashboard/password-form'
 export default function SecurityPage() {
   return (
     <div className="mx-auto max-w-lg">
-      <h1 className="mb-6 text-2xl font-semibold">Security</h1>
+      <h1 className="font-display mb-6 text-3xl font-semibold tracking-tight">
+        Security
+      </h1>
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Change password</CardTitle>

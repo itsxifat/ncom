@@ -29,7 +29,9 @@ export default function NewProjectPage() {
     <div className="mx-auto max-w-lg">
       <Card>
         <CardHeader>
-          <CardTitle>New project</CardTitle>
+          <CardTitle className="font-display text-2xl font-semibold">
+            New project
+          </CardTitle>
           <CardDescription>
             Give your landing page project a name. You can pick a template once
             it&apos;s created.

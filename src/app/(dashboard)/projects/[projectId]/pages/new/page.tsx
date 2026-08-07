@@ -32,7 +32,9 @@ export default function NewPagePage({
     <div className="mx-auto max-w-lg">
       <Card>
         <CardHeader>
-          <CardTitle>New page</CardTitle>
+          <CardTitle className="font-display text-2xl font-semibold">
+            New page
+          </CardTitle>
           <CardDescription>
             Add a page to this project. You&apos;ll be able to add sections once
             the visual builder is available.

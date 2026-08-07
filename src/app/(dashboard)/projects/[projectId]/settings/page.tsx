@@ -21,7 +21,9 @@ export default async function ProjectSettingsPage({
 
   return (
     <div className="mx-auto max-w-lg">
-      <h1 className="mb-6 text-2xl font-semibold">Project settings</h1>
+      <h1 className="font-display mb-6 text-3xl font-semibold tracking-tight">
+        Project settings
+      </h1>
       <Card>
         <CardHeader>
           <CardTitle className="text-base">General</CardTitle>
