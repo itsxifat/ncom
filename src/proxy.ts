@@ -59,8 +59,11 @@ export default function proxy(request: NextRequest, event: NextFetchEvent) {
   return authMiddleware(request, event)
 }
 
+// sitemap.xml/robots.txt are NOT excluded here (unlike the usual Next.js
+// convention) — a tenant subdomain request to either must still be rewritten
+// to that tenant's own sitemap/robots route, not fall through to NCOM's own
+// app/sitemap.ts. On the root domain they're harmless: authorized() doesn't
+// treat them as protected routes, so they pass through unchanged.
 export const config = {
-  matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt|api/auth).*)',
-  ],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|api/auth).*)'],
 }

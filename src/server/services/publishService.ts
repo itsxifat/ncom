@@ -22,6 +22,7 @@ export interface PageSnapshot {
   title: string
   seoTitle: string | null
   seoDescription: string | null
+  ogImageUrl: string | null
   robotsIndex: boolean
   theme: PageTheme
   sections: PageSnapshotSection[]
@@ -42,6 +43,7 @@ export async function publishPage(
         include: { componentDefinition: true },
       },
       project: { include: { theme: true } },
+      ogImage: true,
     },
   })
   if (!page) throw new Error('Page not found')
@@ -51,6 +53,7 @@ export async function publishPage(
     title: page.title,
     seoTitle: page.seoTitle,
     seoDescription: page.seoDescription,
+    ogImageUrl: page.ogImage?.url ?? null,
     robotsIndex: page.robotsIndex,
     theme: page.project.theme,
     sections: page.sections.map((section) => ({
@@ -193,12 +196,34 @@ export async function getPublishedPageForRender(
     where: slug
       ? { projectId: project.id, slug, status: 'PUBLISHED' }
       : { projectId: project.id, isHome: true, status: 'PUBLISHED' },
-    select: { publishedVersionId: true },
+    select: { id: true, publishedVersionId: true },
   })
   if (!page?.publishedVersionId) return null
 
   const snapshot = await getSnapshot(page.publishedVersionId)
   if (!snapshot) return null
 
-  return { project, snapshot }
+  // Not cached: analytics IDs should take effect on the next request, not
+  // wait for a republish, and this is one cheap indexed lookup per render.
+  const integration = await prisma.projectIntegrationConfig.findUnique({
+    where: { projectId: project.id },
+  })
+
+  return { project, page, snapshot, integration }
+}
+
+/** For the per-tenant sitemap.xml/robots.txt routes. */
+export async function getProjectForSeoRoutes(subdomain: string) {
+  return resolveProjectBySubdomain(subdomain)
+}
+
+export async function listIndexablePages(projectId: string) {
+  return prisma.page.findMany({
+    where: {
+      projectId,
+      status: 'PUBLISHED',
+      robotsIndex: true,
+    },
+    select: { slug: true, isHome: true, updatedAt: true },
+  })
 }

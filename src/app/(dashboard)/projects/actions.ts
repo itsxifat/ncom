@@ -8,6 +8,7 @@ import {
   deleteProject,
   duplicateProject,
   updateProject,
+  updateProjectIntegration,
 } from '@/server/services/projectService'
 import { createPage, deletePage } from '@/server/services/pageService'
 import {
@@ -20,6 +21,7 @@ import {
   updateProjectSchema,
 } from '@/lib/validation/project'
 import { createPageSchema } from '@/lib/validation/page'
+import { updateIntegrationSchema } from '@/lib/validation/integration'
 
 export type FormActionState = { error?: string } | undefined
 
@@ -105,6 +107,35 @@ export async function updateProjectAction(
   }
 
   revalidatePath(`/projects/${projectId}`)
+  revalidatePath(`/projects/${projectId}/settings`)
+  return { error: undefined }
+}
+
+export async function updateProjectIntegrationAction(
+  projectId: string,
+  _prevState: FormActionState,
+  formData: FormData
+): Promise<FormActionState> {
+  const parsed = updateIntegrationSchema.safeParse({
+    gaMeasurementId: formData.get('gaMeasurementId') || undefined,
+    gtmContainerId: formData.get('gtmContainerId') || undefined,
+    metaPixelId: formData.get('metaPixelId') || undefined,
+    customHeadScript: formData.get('customHeadScript') || undefined,
+  })
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? 'Invalid input' }
+  }
+
+  const { organization } = await getActiveOrganization()
+
+  try {
+    await updateProjectIntegration(organization.id, projectId, parsed.data)
+  } catch (error) {
+    return {
+      error: error instanceof Error ? error.message : 'Something went wrong',
+    }
+  }
+
   revalidatePath(`/projects/${projectId}/settings`)
   return { error: undefined }
 }

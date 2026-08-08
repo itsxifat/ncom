@@ -8,7 +8,7 @@ const RESERVED_PAGE_SLUGS = new Set([
   'robots.txt',
 ])
 
-const slugShape = z
+export const slugShape = z
   .string()
   .trim()
   .toLowerCase()
@@ -25,4 +25,14 @@ export const createPageSchema = z.object({
   slug: slugShape.optional(),
 })
 
+export const updatePageSeoSchema = z.object({
+  title: z.string().trim().min(1).max(150),
+  slug: slugShape,
+  seoTitle: z.string().trim().max(70).optional(),
+  seoDescription: z.string().trim().max(300).optional(),
+  ogImageMediaId: z.string().trim().min(1).optional(),
+  robotsIndex: z.boolean(),
+})
+
 export type CreatePageInput = z.infer<typeof createPageSchema>
+export type UpdatePageSeoInput = z.infer<typeof updatePageSeoSchema>

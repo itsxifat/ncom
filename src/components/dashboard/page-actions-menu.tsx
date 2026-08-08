@@ -1,6 +1,7 @@
 'use client'
 
 import { useTransition } from 'react'
+import Link from 'next/link'
 import { MoreHorizontal } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -38,7 +39,23 @@ export function PageActionsMenu({
         <MoreHorizontal className="size-4" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        {status === 'PUBLISHED' ? (
+        <DropdownMenuItem
+          render={
+            <Link href={`/projects/${projectId}/pages/${pageId}/settings`} />
+          }
+        >
+          Page settings
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => {
+            startTransition(() => {
+              publishPageAction(projectId, pageId)
+            })
+          }}
+        >
+          {status === 'PUBLISHED' ? 'Publish changes' : 'Publish'}
+        </DropdownMenuItem>
+        {status === 'PUBLISHED' && (
           <DropdownMenuItem
             onClick={() => {
               startTransition(() => {
@@ -47,16 +64,6 @@ export function PageActionsMenu({
             }}
           >
             Unpublish
-          </DropdownMenuItem>
-        ) : (
-          <DropdownMenuItem
-            onClick={() => {
-              startTransition(() => {
-                publishPageAction(projectId, pageId)
-              })
-            }}
-          >
-            Publish
           </DropdownMenuItem>
         )}
         <DropdownMenuItem

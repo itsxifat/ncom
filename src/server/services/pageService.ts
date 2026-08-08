@@ -2,7 +2,7 @@ import 'server-only'
 import { prisma } from '@/server/db/client'
 import { requireOrgAccess } from '@/server/auth/rbac'
 import { slugify, withRandomSuffix } from '@/lib/slug'
-import type { CreatePageInput } from '@/lib/validation/page'
+import type { CreatePageInput, UpdatePageSeoInput } from '@/lib/validation/page'
 
 async function assertProjectInOrg(organizationId: string, projectId: string) {
   const project = await prisma.project.findFirst({
@@ -75,6 +75,65 @@ export async function createPage(
       isHome: isFirstPage,
     },
   })
+}
+
+export async function updatePageSeo(
+  organizationId: string,
+  projectId: string,
+  pageId: string,
+  input: UpdatePageSeoInput
+) {
+  await requireOrgAccess(organizationId, 'EDITOR')
+  await assertProjectInOrg(organizationId, projectId)
+
+  const page = await prisma.page.findFirst({
+    where: { id: pageId, projectId },
+    select: { id: true },
+  })
+  if (!page) throw new Error('Page not found')
+
+  const collision = await prisma.page.findFirst({
+    where: { projectId, slug: input.slug, NOT: { id: pageId } },
+    select: { id: true },
+  })
+  if (collision) throw new Error('This slug is already used on this project')
+
+  if (input.ogImageMediaId) {
+    const asset = await prisma.mediaAsset.findFirst({
+      where: { id: input.ogImageMediaId, organizationId },
+      select: { id: true },
+    })
+    if (!asset) throw new Error('Image not found')
+  }
+
+  return prisma.page.update({
+    where: { id: pageId },
+    data: {
+      title: input.title,
+      slug: input.slug,
+      seoTitle: input.seoTitle || null,
+      seoDescription: input.seoDescription || null,
+      ogImageMediaId: input.ogImageMediaId || null,
+      robotsIndex: input.robotsIndex,
+    },
+  })
+}
+
+export async function getPageForSeoSettings(
+  organizationId: string,
+  projectId: string,
+  pageId: string
+) {
+  await requireOrgAccess(organizationId, 'VIEWER')
+  await assertProjectInOrg(organizationId, projectId)
+
+  const page = await prisma.page.findFirst({
+    where: { id: pageId, projectId },
+    include: { ogImage: true },
+  })
+  if (!page) throw new Error('Page not found')
+
+  return page
 }
 
 export async function getPageWithSections(

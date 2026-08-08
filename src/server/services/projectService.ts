@@ -9,6 +9,7 @@ import type {
   UpdateProjectInput,
 } from '@/lib/validation/project'
 import type { UpdateThemeInput } from '@/lib/validation/theme'
+import type { UpdateIntegrationInput } from '@/lib/validation/integration'
 
 async function uniqueSubdomain(base: string): Promise<string> {
   let baseSlug = slugify(base) || 'site'
@@ -82,6 +83,48 @@ export async function updateProjectTheme(
   return prisma.themeSettings.update({
     where: { projectId: project.id },
     data: input,
+  })
+}
+
+export async function getProjectIntegration(
+  organizationId: string,
+  projectId: string
+) {
+  await requireOrgAccess(organizationId, 'VIEWER')
+
+  const project = await prisma.project.findFirst({
+    where: { id: projectId, organizationId },
+    select: { id: true },
+  })
+  if (!project) throw new Error('Project not found')
+
+  return prisma.projectIntegrationConfig.findUnique({ where: { projectId } })
+}
+
+export async function updateProjectIntegration(
+  organizationId: string,
+  projectId: string,
+  input: UpdateIntegrationInput
+) {
+  await requireOrgAccess(organizationId, 'EDITOR')
+
+  const project = await prisma.project.findFirst({
+    where: { id: projectId, organizationId },
+    select: { id: true },
+  })
+  if (!project) throw new Error('Project not found')
+
+  const data = {
+    gaMeasurementId: input.gaMeasurementId || null,
+    gtmContainerId: input.gtmContainerId || null,
+    metaPixelId: input.metaPixelId || null,
+    customHeadScript: input.customHeadScript || null,
+  }
+
+  return prisma.projectIntegrationConfig.upsert({
+    where: { projectId },
+    create: { projectId, ...data },
+    update: data,
   })
 }
 
