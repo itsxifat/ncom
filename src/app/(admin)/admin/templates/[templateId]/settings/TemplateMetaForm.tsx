@@ -37,7 +37,7 @@ export function TemplateMetaForm({
           <FieldLabel htmlFor="name">Template name</FieldLabel>
           <Input id="name" name="name" defaultValue={name} required />
         </Field>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field>
             <FieldLabel htmlFor="categoryId">Category</FieldLabel>
             <select

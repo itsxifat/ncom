@@ -90,7 +90,7 @@ export function MediaLibraryClient({
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
           {assets.map((asset) => (
             <MediaCard
               key={asset.id}

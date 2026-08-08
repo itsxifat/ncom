@@ -31,7 +31,7 @@ export default async function ProjectsPage() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {projects.map((project) => (
             <Card
               key={project.id}

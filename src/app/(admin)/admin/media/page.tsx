@@ -35,7 +35,7 @@ export default async function AdminMediaPage() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           {assets.map((asset) => (
             <Card key={asset.id} className="overflow-hidden">
               <div className="bg-muted aspect-square">

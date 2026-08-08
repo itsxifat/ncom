@@ -13,7 +13,7 @@ const CARDS = [
   },
   {
     label: 'CTA',
-    dot: 'bg-amber',
+    dot: 'bg-vivid',
     rotate: 'rotate-5',
     translate: 'translate-x-13 translate-y-13',
     lines: ['w-16', 'w-10'],
@@ -40,12 +40,16 @@ export function SectionStack() {
       aria-hidden
       className="relative mx-auto h-80 w-full max-w-xs sm:h-96 sm:max-w-sm"
     >
+      <div
+        className="bg-primary/20 absolute inset-0 -z-10 rounded-full blur-[80px]"
+        style={{ transform: 'scale(0.7)' }}
+      />
       {CARDS.map((card, i) => (
         <div
           key={card.label}
           style={{ zIndex: i + 1 }}
           className={cn(
-            'bg-card border-border absolute top-8 left-8 w-48 rounded-xl border p-4 shadow-[0_8px_30px_-12px_rgb(0_0_0_/_0.25)] sm:w-56',
+            'bg-card border-border absolute top-8 left-8 w-48 rounded-2xl border p-4 shadow-[0_20px_50px_-15px_rgb(0_0_0_/_0.35)] sm:w-56',
             card.rotate,
             card.translate
           )}

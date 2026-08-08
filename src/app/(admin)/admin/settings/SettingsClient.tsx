@@ -31,7 +31,7 @@ export function SettingsClient({ settings }: { settings: Setting[] }) {
     <div className="flex flex-col gap-6">
       <form action={action}>
         <FieldGroup>
-          <div className="grid grid-cols-[1fr_2fr_auto] gap-2">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_2fr_auto]">
             <Field>
               <FieldLabel htmlFor="key">Key</FieldLabel>
               <Input id="key" name="key" placeholder="feature.betaBanner" />

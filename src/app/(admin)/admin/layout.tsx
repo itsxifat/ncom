@@ -1,7 +1,6 @@
-import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { auth } from '@/server/auth/auth'
-import { AdminSidebarNav } from '@/components/admin/admin-sidebar-nav'
+import { AdminShell } from '@/components/admin/admin-shell'
 
 export default async function AdminLayout({
   children,
@@ -16,23 +15,5 @@ export default async function AdminLayout({
   if (!session?.user) redirect('/login')
   if (session.user.platformRole !== 'SUPER_ADMIN') redirect('/dashboard')
 
-  return (
-    <div className="grid flex-1 grid-cols-[16rem_1fr]">
-      <aside className="bg-sidebar text-sidebar-foreground flex flex-col gap-6 border-r px-4 py-6">
-        <div className="flex items-center gap-2 px-1">
-          <span className="font-display text-lg font-semibold tracking-tight">
-            NCOM Admin
-          </span>
-        </div>
-        <AdminSidebarNav />
-        <Link
-          href="/dashboard"
-          className="text-muted-foreground hover:text-foreground mt-auto text-sm font-medium"
-        >
-          ← Back to dashboard
-        </Link>
-      </aside>
-      <main className="flex-1 overflow-y-auto p-8">{children}</main>
-    </div>
-  )
+  return <AdminShell>{children}</AdminShell>
 }
