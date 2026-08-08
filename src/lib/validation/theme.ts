@@ -18,3 +18,12 @@ export const updateThemeSchema = z.object({
 })
 
 export type UpdateThemeInput = z.infer<typeof updateThemeSchema>
+
+// A template's defaultTheme is stored as loose Json (it has no ThemeSettings
+// row of its own), so unlike updateThemeSchema this is used to *parse* that
+// Json defensively rather than to validate a trusted form submission.
+export const templateThemeSchema = updateThemeSchema.extend({
+  customCss: z.string().max(20000).optional(),
+})
+
+export type ThemeFormState = { error?: string; success?: string } | undefined

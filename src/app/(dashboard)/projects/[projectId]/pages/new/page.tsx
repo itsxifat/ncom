@@ -1,74 +1,31 @@
-'use client'
+import { getTemplateForPreview } from '@/server/services/templateService'
+import { NewPageForm } from './NewPageForm'
 
-import { use, useActionState } from 'react'
-import { createPageAction } from '@/app/(dashboard)/projects/actions'
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
-import {
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldGroup,
-  FieldLabel,
-} from '@/components/ui/field'
-import { Input } from '@/components/ui/input'
-import { Button } from '@/components/ui/button'
-
-export default function NewPagePage({
+export default async function NewPagePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ projectId: string }>
+  searchParams: Promise<{ template?: string }>
 }) {
-  const { projectId } = use(params)
-  const boundAction = createPageAction.bind(null, projectId)
-  const [state, action, pending] = useActionState(boundAction, undefined)
+  const { projectId } = await params
+  const { template: templateId } = await searchParams
+
+  let templateName: string | undefined
+  if (templateId) {
+    try {
+      const { template } = await getTemplateForPreview(templateId)
+      templateName = template.name
+    } catch {
+      // Invalid or unpublished template id — fall back to a blank page.
+    }
+  }
 
   return (
-    <div className="mx-auto max-w-lg">
-      <Card>
-        <CardHeader>
-          <CardTitle className="font-display text-2xl font-semibold">
-            New page
-          </CardTitle>
-          <CardDescription>
-            Add a page to this project. You&apos;ll be able to add sections once
-            the visual builder is available.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form action={action}>
-            <FieldGroup>
-              <Field>
-                <FieldLabel htmlFor="title">Page title</FieldLabel>
-                <Input
-                  id="title"
-                  name="title"
-                  placeholder="About us"
-                  required
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="slug">URL slug (optional)</FieldLabel>
-                <Input id="slug" name="slug" placeholder="about" />
-                <FieldDescription>
-                  Leave blank to generate one from the title.
-                </FieldDescription>
-              </Field>
-              {state?.error && <FieldError>{state.error}</FieldError>}
-              <Field>
-                <Button type="submit" disabled={pending}>
-                  {pending ? 'Creating…' : 'Create page'}
-                </Button>
-              </Field>
-            </FieldGroup>
-          </form>
-        </CardContent>
-      </Card>
-    </div>
+    <NewPageForm
+      projectId={projectId}
+      templateId={templateName ? templateId : undefined}
+      templateName={templateName}
+    />
   )
 }

@@ -13,7 +13,7 @@ import {
   Loader2,
 } from 'lucide-react'
 import { useBuilderStore, type BuilderSection, type Breakpoint } from './store'
-import { useAutosave } from './useAutosave'
+import { useAutosave, type SectionSavePayload } from './useAutosave'
 import { Canvas } from './Canvas'
 import { OutlinePanel } from './OutlinePanel'
 import { SectionPalette } from './SectionPalette'
@@ -33,26 +33,32 @@ const BREAKPOINTS: {
 ]
 
 export function BuilderShell({
-  projectId,
-  pageId,
-  pageTitle,
+  entityId,
+  backHref,
+  title,
   theme,
   initialSections,
   componentDefinitionIds,
+  canvasSrc,
+  onSave,
 }: {
-  projectId: string
-  pageId: string
-  pageTitle: string
+  entityId: string
+  backHref: string
+  title: string
   theme: PageTheme
   initialSections: BuilderSection[]
   componentDefinitionIds: Record<string, string>
+  canvasSrc: string
+  onSave: (
+    sections: SectionSavePayload[]
+  ) => Promise<{ idMapping: Record<string, string> }>
 }) {
   const setSections = useBuilderStore((s) => s.setSections)
   const setTheme = useBuilderStore((s) => s.setTheme)
   const breakpoint = useBuilderStore((s) => s.breakpoint)
   const setBreakpoint = useBuilderStore((s) => s.setBreakpoint)
 
-  const { status } = useAutosave(projectId, pageId)
+  const { status } = useAutosave(onSave)
 
   const temporal = useBuilderStore.temporal
   const canUndo = useStore(temporal, (s) => s.pastStates.length > 0)
@@ -62,7 +68,7 @@ export function BuilderShell({
     setSections(initialSections)
     setTheme(theme)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pageId])
+  }, [entityId])
 
   return (
     <div className="bg-background fixed inset-0 z-50 flex flex-col">
@@ -71,12 +77,12 @@ export function BuilderShell({
           <Button
             variant="ghost"
             size="sm"
-            render={<Link href={`/projects/${projectId}`} />}
+            render={<Link href={backHref} />}
             nativeButton={false}
           >
             ← Back
           </Button>
-          <span className="truncate text-sm font-medium">{pageTitle}</span>
+          <span className="truncate text-sm font-medium">{title}</span>
         </div>
 
         <div className="flex items-center gap-1 rounded-lg border p-0.5">
@@ -128,7 +134,7 @@ export function BuilderShell({
         </aside>
 
         <main className="overflow-hidden">
-          <Canvas pageId={pageId} />
+          <Canvas canvasSrc={canvasSrc} />
         </main>
 
         <aside className="overflow-y-auto border-l p-3">

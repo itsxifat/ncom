@@ -3,6 +3,7 @@ import { getActiveOrganization } from '@/server/services/organizationService'
 import { getProjectTheme } from '@/server/services/projectService'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ThemeForm } from '@/components/dashboard/theme-form'
+import { updateThemeAction } from './actions'
 
 export default async function ProjectThemePage({
   params,
@@ -31,7 +32,7 @@ export default async function ProjectThemePage({
         <CardContent>
           <ThemeForm
             key={theme.updatedAt.toISOString()}
-            projectId={projectId}
+            action={updateThemeAction.bind(null, projectId)}
             theme={theme}
           />
         </CardContent>

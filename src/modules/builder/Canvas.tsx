@@ -10,7 +10,7 @@ const BREAKPOINT_WIDTHS: Record<string, number> = {
   mobile: 375,
 }
 
-export function Canvas({ pageId }: { pageId: string }) {
+export function Canvas({ canvasSrc }: { canvasSrc: string }) {
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const [canvasReady, setCanvasReady] = useState(false)
   const breakpoint = useBuilderStore((s) => s.breakpoint)
@@ -49,7 +49,7 @@ export function Canvas({ pageId }: { pageId: string }) {
     <div className="bg-muted flex h-full items-start justify-center overflow-auto p-6">
       <iframe
         ref={iframeRef}
-        src={`/builder-canvas/${pageId}`}
+        src={canvasSrc}
         title="Page canvas"
         className={cn(
           'bg-background h-full rounded-lg border shadow-sm transition-[width] duration-200',

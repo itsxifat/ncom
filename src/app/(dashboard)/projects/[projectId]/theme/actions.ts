@@ -3,15 +3,13 @@
 import { revalidatePath } from 'next/cache'
 import { getActiveOrganization } from '@/server/services/organizationService'
 import { updateProjectTheme } from '@/server/services/projectService'
-import { updateThemeSchema } from '@/lib/validation/theme'
-
-export type ThemeActionState = { error?: string; success?: string } | undefined
+import { updateThemeSchema, type ThemeFormState } from '@/lib/validation/theme'
 
 export async function updateThemeAction(
   projectId: string,
-  _prevState: ThemeActionState,
+  _prevState: ThemeFormState,
   formData: FormData
-): Promise<ThemeActionState> {
+): Promise<ThemeFormState> {
   const parsed = updateThemeSchema.safeParse({
     primaryColor: formData.get('primaryColor'),
     secondaryColor: formData.get('secondaryColor'),

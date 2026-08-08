@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation'
 import { getPageForRawPreview } from '@/server/services/pageService'
-import { CanvasClient } from './CanvasClient'
+import { CanvasClient } from '@/modules/builder/CanvasFrame'
 
 export default async function BuilderCanvasPage({
   params,

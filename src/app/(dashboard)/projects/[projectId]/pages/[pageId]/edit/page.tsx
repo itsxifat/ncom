@@ -3,6 +3,7 @@ import { getActiveOrganization } from '@/server/services/organizationService'
 import { getPageWithSections } from '@/server/services/pageService'
 import { prisma } from '@/server/db/client'
 import { BuilderShell } from '@/modules/builder/BuilderShell'
+import { saveSectionsAction } from './actions'
 
 export default async function PageEditPage({
   params,
@@ -42,12 +43,14 @@ export default async function PageEditPage({
 
   return (
     <BuilderShell
-      projectId={projectId}
-      pageId={pageId}
-      pageTitle={page.title}
+      entityId={pageId}
+      backHref={`/projects/${projectId}`}
+      title={page.title}
       theme={page.project.theme}
       initialSections={initialSections}
       componentDefinitionIds={componentDefinitionIds}
+      canvasSrc={`/builder-canvas/${pageId}`}
+      onSave={saveSectionsAction.bind(null, projectId, pageId)}
     />
   )
 }

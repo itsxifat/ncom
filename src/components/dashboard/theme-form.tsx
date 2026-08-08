@@ -1,7 +1,7 @@
 'use client'
 
 import { useActionState } from 'react'
-import { updateThemeAction } from '@/app/(dashboard)/projects/[projectId]/theme/actions'
+import type { ThemeFormState } from '@/lib/validation/theme'
 import {
   Field,
   FieldError,
@@ -49,13 +49,15 @@ function ColorField({
 }
 
 export function ThemeForm({
-  projectId,
+  action: boundAction,
   theme,
 }: {
-  projectId: string
+  action: (
+    prevState: ThemeFormState,
+    formData: FormData
+  ) => Promise<ThemeFormState>
   theme: PageTheme
 }) {
-  const boundAction = updateThemeAction.bind(null, projectId)
   const [state, action, pending] = useActionState(boundAction, undefined)
 
   return (

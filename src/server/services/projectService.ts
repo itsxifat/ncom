@@ -3,6 +3,7 @@ import { prisma } from '@/server/db/client'
 import { requireOrgAccess } from '@/server/auth/rbac'
 import { slugify, withRandomSuffix } from '@/lib/slug'
 import { RESERVED_SUBDOMAINS } from '@/lib/reserved-subdomains'
+import { DEFAULT_THEME } from '@/lib/default-theme'
 import type {
   CreateProjectInput,
   UpdateProjectInput,
@@ -30,19 +31,6 @@ async function uniqueSubdomain(base: string): Promise<string> {
   }
 
   throw new Error('Could not generate a unique subdomain')
-}
-
-const DEFAULT_THEME = {
-  primaryColor: '#2563eb',
-  secondaryColor: '#7c3aed',
-  backgroundColor: '#ffffff',
-  textColor: '#0f172a',
-  headingFont: 'Inter',
-  bodyFont: 'Inter',
-  buttonStyle: 'SOLID' as const,
-  borderRadius: 'md',
-  spacingScale: 'comfortable',
-  containerWidth: '1200px',
 }
 
 export async function listProjects(organizationId: string) {

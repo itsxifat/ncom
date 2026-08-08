@@ -37,7 +37,9 @@ export default async function DashboardLayout({
           }))}
         />
 
-        <SidebarNav />
+        <SidebarNav
+          isPlatformAdmin={session.user.platformRole === 'SUPER_ADMIN'}
+        />
 
         <div className="mt-auto flex items-center justify-between gap-2 border-t pt-4">
           <div className="flex min-w-0 items-center gap-2">

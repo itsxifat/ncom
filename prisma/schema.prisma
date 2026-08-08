@@ -297,6 +297,7 @@ model TemplateSection {
   order                 Int
   defaultContent        Json
   defaultConfig         Json
+  isVisible             Boolean @default(true)
   isRequired            Boolean @default(false)
 
   template            Template            @relation(fields: [templateId], references: [id], onDelete: Cascade)

@@ -2,13 +2,25 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useBuilderStore } from './store'
-import { saveSectionsAction } from '@/app/(dashboard)/projects/[projectId]/pages/[pageId]/edit/actions'
 
 export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
 
+export interface SectionSavePayload {
+  id: string
+  componentDefinitionId: string
+  order: number
+  content: object
+  config: object
+  isVisible: boolean
+}
+
 const DEBOUNCE_MS = 800
 
-export function useAutosave(projectId: string, pageId: string) {
+export function useAutosave(
+  save: (
+    sections: SectionSavePayload[]
+  ) => Promise<{ idMapping: Record<string, string> }>
+) {
   const [status, setStatus] = useState<SaveStatus>('idle')
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const savingRef = useRef(false)
@@ -18,16 +30,14 @@ export function useAutosave(projectId: string, pageId: string) {
   const markClean = useBuilderStore((s) => s.markClean)
   const reconcileIds = useBuilderStore((s) => s.reconcileIds)
 
-  async function save() {
+  async function runSave() {
     if (savingRef.current) return
     savingRef.current = true
     setStatus('saving')
 
     try {
       const currentSections = useBuilderStore.getState().sections
-      const { idMapping } = await saveSectionsAction(
-        projectId,
-        pageId,
+      const { idMapping } = await save(
         currentSections.map((s) => ({
           id: s.id,
           componentDefinitionId: s.componentDefinitionId,
@@ -54,7 +64,7 @@ export function useAutosave(projectId: string, pageId: string) {
     if (!isDirty) return
 
     if (timeoutRef.current) clearTimeout(timeoutRef.current)
-    timeoutRef.current = setTimeout(save, DEBOUNCE_MS)
+    timeoutRef.current = setTimeout(runSave, DEBOUNCE_MS)
 
     return () => {
       if (timeoutRef.current) clearTimeout(timeoutRef.current)
@@ -62,5 +72,5 @@ export function useAutosave(projectId: string, pageId: string) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sections, isDirty])
 
-  return { status, saveNow: save }
+  return { status, saveNow: runSave }
 }
