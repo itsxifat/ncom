@@ -1,11 +1,7 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { auth } from '@/server/auth/auth'
-
-const NAV_ITEMS = [
-  { href: '/admin/templates', label: 'Templates' },
-  { href: '/admin/templates/categories', label: 'Categories' },
-]
+import { AdminSidebarNav } from '@/components/admin/admin-sidebar-nav'
 
 export default async function AdminLayout({
   children,
@@ -21,32 +17,22 @@ export default async function AdminLayout({
   if (session.user.platformRole !== 'SUPER_ADMIN') redirect('/dashboard')
 
   return (
-    <div className="flex flex-1 flex-col">
-      <header className="flex items-center justify-between border-b px-6 py-4">
-        <div className="flex items-center gap-6">
-          <span className="font-display text-base font-semibold tracking-tight">
+    <div className="grid flex-1 grid-cols-[16rem_1fr]">
+      <aside className="bg-sidebar text-sidebar-foreground flex flex-col gap-6 border-r px-4 py-6">
+        <div className="flex items-center gap-2 px-1">
+          <span className="font-display text-lg font-semibold tracking-tight">
             NCOM Admin
           </span>
-          <nav className="flex items-center gap-1">
-            {NAV_ITEMS.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className="text-muted-foreground hover:bg-accent hover:text-accent-foreground rounded-md px-3 py-1.5 text-sm font-medium transition-colors"
-              >
-                {item.label}
-              </Link>
-            ))}
-          </nav>
         </div>
+        <AdminSidebarNav />
         <Link
           href="/dashboard"
-          className="text-muted-foreground hover:text-foreground text-sm font-medium"
+          className="text-muted-foreground hover:text-foreground mt-auto text-sm font-medium"
         >
           ← Back to dashboard
         </Link>
-      </header>
-      <main className="flex-1 p-8">{children}</main>
+      </aside>
+      <main className="flex-1 overflow-y-auto p-8">{children}</main>
     </div>
   )
 }

@@ -25,12 +25,21 @@ export default async function AdminTemplatesPage() {
             Curate the templates tenants can start a project from.
           </p>
         </div>
-        <Button
-          render={<Link href="/admin/templates/new" />}
-          nativeButton={false}
-        >
-          New template
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            render={<Link href="/admin/templates/categories" />}
+            nativeButton={false}
+          >
+            Categories
+          </Button>
+          <Button
+            render={<Link href="/admin/templates/new" />}
+            nativeButton={false}
+          >
+            New template
+          </Button>
+        </div>
       </div>
 
       {templates.length === 0 ? (
