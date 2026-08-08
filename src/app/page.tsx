@@ -61,7 +61,8 @@ export default async function Home() {
               Landing pages, composed
             </span>
             <h1 className="font-display mt-4 text-5xl leading-[1.05] font-semibold tracking-tight text-balance sm:text-6xl">
-              Build pages that look <em className="text-primary">designed</em>.
+              Build pages that look <span className="text-amber">designed</span>
+              .
               <br />
               Not templated.
             </h1>
