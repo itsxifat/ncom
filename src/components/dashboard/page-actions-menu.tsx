@@ -34,7 +34,14 @@ export function PageActionsMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        render={<Button variant="ghost" size="icon" disabled={isPending} />}
+        render={
+          <Button
+            variant="ghost"
+            size="icon"
+            disabled={isPending}
+            aria-label="Page actions"
+          />
+        }
       >
         <MoreHorizontal className="size-4" />
       </DropdownMenuTrigger>

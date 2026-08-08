@@ -45,3 +45,9 @@ next-env.d.ts
 
 # local-driver media storage (dev-only; production uses S3-compatible storage)
 /public/media-uploads
+
+# playwright
+/test-results
+/playwright-report
+/blob-report
+/playwright/.cache
