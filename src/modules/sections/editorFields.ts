@@ -8,6 +8,7 @@
  */
 export type FieldConfig =
   | { type: 'text'; name: string; label: string }
+  | { type: 'image'; name: string; label: string }
   | { type: 'textarea'; name: string; label: string }
   | { type: 'boolean'; name: string; label: string }
   | { type: 'select'; name: string; label: string; options: string[] }

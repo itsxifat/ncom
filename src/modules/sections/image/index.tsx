@@ -48,7 +48,7 @@ export const imageSection: SectionDefinition<ImageContent> = {
   schema: imageContentSchema,
   defaultContent: imageDefaultContent,
   editorFields: [
-    { type: 'text', name: 'imageUrl', label: 'Image URL' },
+    { type: 'image', name: 'imageUrl', label: 'Image' },
     { type: 'text', name: 'altText', label: 'Alt text' },
     { type: 'text', name: 'caption', label: 'Caption' },
   ],

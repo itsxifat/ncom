@@ -12,6 +12,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { Plus, Trash2, GripVertical } from 'lucide-react'
 import type { FieldConfig } from '../sections/editorFields'
 import type { SectionDefinition } from '../sections/registry'
+import { ImagePicker } from './ImagePicker'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
@@ -39,6 +40,24 @@ function FieldRenderer({
         <FieldLabel>{field.label}</FieldLabel>
         <Input {...register(name)} />
       </Field>
+    )
+  }
+
+  if (field.type === 'image') {
+    return (
+      <Controller
+        name={name}
+        control={control}
+        render={({ field: controllerField }) => (
+          <Field>
+            <FieldLabel>{field.label}</FieldLabel>
+            <ImagePicker
+              value={(controllerField.value as string) ?? ''}
+              onChange={controllerField.onChange}
+            />
+          </Field>
+        )}
+      />
     )
   }
 

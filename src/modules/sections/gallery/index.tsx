@@ -63,7 +63,7 @@ export const gallerySection: SectionDefinition<GalleryContent> = {
       name: 'images',
       label: 'Images',
       itemFields: [
-        { type: 'text', name: 'url', label: 'Image URL' },
+        { type: 'image', name: 'url', label: 'Image' },
         { type: 'text', name: 'alt', label: 'Alt text' },
       ],
     },

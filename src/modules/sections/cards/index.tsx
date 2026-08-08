@@ -92,7 +92,7 @@ export const cardsSection: SectionDefinition<CardsContent> = {
       itemFields: [
         { type: 'text', name: 'title', label: 'Title' },
         { type: 'textarea', name: 'description', label: 'Description' },
-        { type: 'text', name: 'imageUrl', label: 'Image URL' },
+        { type: 'image', name: 'imageUrl', label: 'Image' },
         { type: 'text', name: 'href', label: 'Link' },
       ],
     },

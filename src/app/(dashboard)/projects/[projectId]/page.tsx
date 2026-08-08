@@ -46,6 +46,13 @@ export default async function ProjectDetailPage({
           </Button>
           <Button
             variant="outline"
+            render={<Link href={`/projects/${project.id}/media`} />}
+            nativeButton={false}
+          >
+            Media
+          </Button>
+          <Button
+            variant="outline"
             render={<Link href={`/projects/${project.id}/settings`} />}
             nativeButton={false}
           >

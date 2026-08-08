@@ -81,7 +81,7 @@ export const imageTextSection: SectionDefinition<ImageTextContent> = {
   schema: imageTextContentSchema,
   defaultContent: imageTextDefaultContent,
   editorFields: [
-    { type: 'text', name: 'imageUrl', label: 'Image URL' },
+    { type: 'image', name: 'imageUrl', label: 'Image' },
     { type: 'text', name: 'altText', label: 'Alt text' },
     { type: 'text', name: 'heading', label: 'Heading' },
     { type: 'textarea', name: 'body', label: 'Body' },

@@ -79,7 +79,7 @@ export const videoSection: SectionDefinition<VideoContent> = {
       name: 'videoUrl',
       label: 'Video URL (YouTube, Vimeo, or file)',
     },
-    { type: 'text', name: 'posterUrl', label: 'Poster image URL' },
+    { type: 'image', name: 'posterUrl', label: 'Poster image' },
   ],
   Renderer: VideoRenderer,
 }

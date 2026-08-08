@@ -98,7 +98,7 @@ export const testimonialsSection: SectionDefinition<TestimonialsContent> = {
         { type: 'textarea', name: 'quote', label: 'Quote' },
         { type: 'text', name: 'authorName', label: 'Author name' },
         { type: 'text', name: 'authorRole', label: 'Author role' },
-        { type: 'text', name: 'avatarUrl', label: 'Avatar URL' },
+        { type: 'image', name: 'avatarUrl', label: 'Avatar' },
       ],
     },
   ],

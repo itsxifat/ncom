@@ -104,7 +104,7 @@ export const heroSection: SectionDefinition<HeroContent> = {
       label: 'Secondary button label',
     },
     { type: 'text', name: 'secondaryCtaHref', label: 'Secondary button link' },
-    { type: 'text', name: 'imageUrl', label: 'Image URL' },
+    { type: 'image', name: 'imageUrl', label: 'Image' },
   ],
   Renderer: HeroRenderer,
 }
