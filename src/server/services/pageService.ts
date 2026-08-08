@@ -120,6 +120,29 @@ export async function getPageForRawPreview(pageId: string) {
   )
 }
 
+/**
+ * Resolves a page by its shareable `previewToken` — deliberately unauthenticated
+ * (the token itself, a random cuid, is the credential) so a client can be
+ * sent a link to sign off on a draft before it's published. Renders live
+ * section rows, not a published snapshot, since the whole point is
+ * previewing unpublished work.
+ */
+export async function getPageByPreviewToken(token: string) {
+  const page = await prisma.page.findUnique({
+    where: { previewToken: token },
+    include: {
+      sections: {
+        orderBy: { order: 'asc' },
+        include: { componentDefinition: true },
+      },
+      project: { include: { theme: true } },
+    },
+  })
+  if (!page) throw new Error('Page not found')
+
+  return page
+}
+
 export interface SectionSaveInput {
   id: string
   componentDefinitionId: string

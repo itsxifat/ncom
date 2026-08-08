@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation'
 import { getActiveOrganization } from '@/server/services/organizationService'
 import { getProject } from '@/server/services/projectService'
 import { listPages } from '@/server/services/pageService'
+import { env } from '@/lib/env'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
@@ -98,6 +99,22 @@ export default async function ProjectDetailPage({
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-2">
+                {page.status === 'PUBLISHED' && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    render={
+                      <a
+                        href={`http://${project.subdomain}.${env.ROOT_DOMAIN}${page.isHome ? '' : `/${page.slug}`}`}
+                        target="_blank"
+                        rel="noreferrer"
+                      />
+                    }
+                    nativeButton={false}
+                  >
+                    View live
+                  </Button>
+                )}
                 <Button
                   variant="outline"
                   size="sm"
@@ -121,7 +138,12 @@ export default async function ProjectDetailPage({
                 >
                   Edit
                 </Button>
-                <PageActionsMenu projectId={project.id} pageId={page.id} />
+                <PageActionsMenu
+                  projectId={project.id}
+                  pageId={page.id}
+                  status={page.status}
+                  previewToken={page.previewToken}
+                />
               </div>
             </div>
           ))}

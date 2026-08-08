@@ -14,6 +14,7 @@ import {
   createProjectFromTemplate,
   createPageFromTemplate,
 } from '@/server/services/templateService'
+import { publishPage, unpublishPage } from '@/server/services/publishService'
 import {
   createProjectSchema,
   updateProjectSchema,
@@ -181,5 +182,17 @@ export async function createPageFromTemplateAction(
 export async function deletePageAction(projectId: string, pageId: string) {
   const { organization } = await getActiveOrganization()
   await deletePage(organization.id, projectId, pageId)
+  revalidatePath(`/projects/${projectId}`)
+}
+
+export async function publishPageAction(projectId: string, pageId: string) {
+  const { organization } = await getActiveOrganization()
+  await publishPage(organization.id, projectId, pageId)
+  revalidatePath(`/projects/${projectId}`)
+}
+
+export async function unpublishPageAction(projectId: string, pageId: string) {
+  const { organization } = await getActiveOrganization()
+  await unpublishPage(organization.id, projectId, pageId)
   revalidatePath(`/projects/${projectId}`)
 }
