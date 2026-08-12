@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useStore } from 'zustand'
 import {
@@ -16,10 +16,18 @@ import { useBuilderStore, type BuilderSection, type Breakpoint } from './store'
 import { useAutosave, type SectionSavePayload } from './useAutosave'
 import { Canvas } from './Canvas'
 import { OutlinePanel } from './OutlinePanel'
-import { SectionPalette } from './SectionPalette'
+import { SectionPalette, type BuilderLiquidSection } from './SectionPalette'
+import { ImportLiquidDialog } from './ImportLiquidDialog'
+import type { ImportState } from '@/app/(dashboard)/stores/[storeId]/pages/[pageId]/edit/import-actions'
 import { InspectorPanel } from './InspectorPanel'
+import { OffersPanel, type OffersPanelProps } from './OffersPanel'
+import {
+  ProductCatalogProvider,
+  type SellableVariant,
+} from './ProductCatalogContext'
 import type { PageTheme } from '../sections/types'
 import { Button } from '@/components/ui/button'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
 
 const BREAKPOINTS: {
@@ -39,6 +47,11 @@ export function BuilderShell({
   theme,
   initialSections,
   componentDefinitionIds,
+  liquidSections = [],
+  products = [],
+  offers,
+  renderSection,
+  importAction,
   canvasSrc,
   onSave,
 }: {
@@ -48,11 +61,43 @@ export function BuilderShell({
   theme: PageTheme
   initialSections: BuilderSection[]
   componentDefinitionIds: Record<string, string>
+  /** Custom Liquid sections available to this organisation. */
+  liquidSections?: BuilderLiquidSection[]
+  /** Sellable variants, for sections that take orders. Empty for templates,
+   *  which are designed without a store behind them. */
+  products?: SellableVariant[]
+  /**
+   * What this page sells. Absent for the template builder, which designs a
+   * layout with no store, no catalogue and therefore nothing to sell — the
+   * Offers tab is hidden entirely there rather than shown empty.
+   */
+  offers?: OffersPanelProps
+  /** Compiles a Liquid or custom-code section to HTML for the canvas. */
+  renderSection?: (input: {
+    sectionId: string
+    componentDefinitionId: string
+    content: Record<string, unknown>
+  }) => Promise<{ ok: true; html: string } | { ok: false; error: string }>
+  /** Builds this page's layers from a pasted Liquid document. */
+  importAction?: (prev: ImportState, formData: FormData) => Promise<ImportState>
   canvasSrc: string
   onSave: (
     sections: SectionSavePayload[]
   ) => Promise<{ idMapping: Record<string, string> }>
 }) {
+  // Which sections must be compiled on the server before the canvas can show
+  // them: every custom Liquid section, plus the built-in custom-code block.
+  const serverRenderedIds = new Set(
+    [
+      ...liquidSections.map((section) => section.componentDefinitionId),
+      componentDefinitionIds['custom-code'],
+    ].filter((id): id is string => Boolean(id))
+  )
+
+  // Commerce sections quote the page's offers, so the canvas has to recompile
+  // when they change even though no section's own content did.
+  const [offersRevision, setOffersRevision] = useState(0)
+
   const setSections = useBuilderStore((s) => s.setSections)
   const setTheme = useBuilderStore((s) => s.setTheme)
   const breakpoint = useBuilderStore((s) => s.breakpoint)
@@ -70,78 +115,127 @@ export function BuilderShell({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entityId])
 
+  const inspectorLiquidSections = Object.fromEntries(
+    liquidSections.map((section) => [
+      section.componentDefinitionId,
+      { name: section.name, editorFields: section.editorFields },
+    ])
+  )
+
   return (
-    <div className="bg-background fixed inset-0 z-50 flex flex-col">
-      <header className="flex h-14 shrink-0 items-center justify-between border-b px-4">
-        <div className="flex min-w-0 items-center gap-3">
-          <Button
-            variant="ghost"
-            size="sm"
-            render={<Link href={backHref} />}
-            nativeButton={false}
-          >
-            ← Back
-          </Button>
-          <span className="truncate text-sm font-medium">{title}</span>
-        </div>
-
-        <div className="flex items-center gap-1 rounded-lg border p-0.5">
-          {BREAKPOINTS.map(({ value, icon: Icon, label }) => (
+    <ProductCatalogProvider variants={products}>
+      <div className="bg-background fixed inset-0 z-50 flex flex-col">
+        <header className="flex h-14 shrink-0 items-center justify-between border-b px-4">
+          <div className="flex min-w-0 items-center gap-3">
             <Button
-              key={value}
-              type="button"
-              variant={breakpoint === value ? 'secondary' : 'ghost'}
-              size="icon-sm"
-              onClick={() => setBreakpoint(value)}
-              title={label}
-            >
-              <Icon className="size-4" />
-            </Button>
-          ))}
-        </div>
-
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1">
-            <Button
-              type="button"
               variant="ghost"
-              size="icon-sm"
-              disabled={!canUndo}
-              onClick={() => temporal.getState().undo()}
-              title="Undo"
+              size="sm"
+              render={<Link href={backHref} />}
+              nativeButton={false}
             >
-              <Undo2 className="size-4" />
+              ← Back
             </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              disabled={!canRedo}
-              onClick={() => temporal.getState().redo()}
-              title="Redo"
-            >
-              <Redo2 className="size-4" />
-            </Button>
+            <span className="truncate text-sm font-medium">{title}</span>
           </div>
-          <SaveStatusIndicator status={status} />
+
+          <div className="flex items-center gap-1 rounded-lg border p-0.5">
+            {BREAKPOINTS.map(({ value, icon: Icon, label }) => (
+              <Button
+                key={value}
+                type="button"
+                variant={breakpoint === value ? 'secondary' : 'ghost'}
+                size="icon-sm"
+                onClick={() => setBreakpoint(value)}
+                title={label}
+              >
+                <Icon className="size-4" />
+              </Button>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                disabled={!canUndo}
+                onClick={() => temporal.getState().undo()}
+                title="Undo"
+              >
+                <Undo2 className="size-4" />
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                disabled={!canRedo}
+                onClick={() => temporal.getState().redo()}
+                title="Redo"
+              >
+                <Redo2 className="size-4" />
+              </Button>
+            </div>
+            <SaveStatusIndicator status={status} />
+          </div>
+        </header>
+
+        <div className="grid flex-1 grid-cols-[16rem_1fr_20rem] overflow-hidden">
+          <aside className="flex flex-col gap-3 overflow-y-auto border-r p-3">
+            <OutlinePanel />
+            <SectionPalette
+              componentDefinitionIds={componentDefinitionIds}
+              liquidSections={liquidSections}
+            />
+            {importAction && <ImportLiquidDialog action={importAction} />}
+          </aside>
+
+          <main className="overflow-hidden">
+            <Canvas
+              canvasSrc={canvasSrc}
+              renderSection={renderSection}
+              serverRenderedIds={serverRenderedIds}
+              offersRevision={offersRevision}
+            />
+          </main>
+
+          <aside className="flex flex-col overflow-hidden border-l">
+            {offers ? (
+              <Tabs
+                defaultValue="section"
+                className="flex min-h-0 flex-1 flex-col gap-0"
+              >
+                <TabsList className="mx-3 mt-3">
+                  <TabsTrigger value="section">Section</TabsTrigger>
+                  <TabsTrigger value="offers">Offers</TabsTrigger>
+                </TabsList>
+                <TabsContent
+                  value="section"
+                  className="min-h-0 flex-1 overflow-y-auto p-3"
+                >
+                  <InspectorPanel liquidSections={inspectorLiquidSections} />
+                </TabsContent>
+                <TabsContent
+                  value="offers"
+                  className="min-h-0 flex-1 overflow-y-auto p-3"
+                >
+                  <OffersPanel
+                    {...offers}
+                    onOffersChange={() =>
+                      setOffersRevision((revision) => revision + 1)
+                    }
+                  />
+                </TabsContent>
+              </Tabs>
+            ) : (
+              <div className="flex-1 overflow-y-auto p-3">
+                <InspectorPanel liquidSections={inspectorLiquidSections} />
+              </div>
+            )}
+          </aside>
         </div>
-      </header>
-
-      <div className="grid flex-1 grid-cols-[16rem_1fr_20rem] overflow-hidden">
-        <aside className="flex flex-col gap-3 overflow-y-auto border-r p-3">
-          <OutlinePanel />
-          <SectionPalette componentDefinitionIds={componentDefinitionIds} />
-        </aside>
-
-        <main className="overflow-hidden">
-          <Canvas canvasSrc={canvasSrc} />
-        </main>
-
-        <aside className="overflow-y-auto border-l p-3">
-          <InspectorPanel />
-        </aside>
       </div>
-    </div>
+    </ProductCatalogProvider>
   )
 }
 

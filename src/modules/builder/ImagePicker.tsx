@@ -28,7 +28,7 @@ export function ImagePicker({
     <div className="flex items-center gap-2">
       {value ? (
         <div className="bg-muted relative size-14 shrink-0 overflow-hidden rounded-md border">
-          {/* eslint-disable-next-line @next/next/no-img-element -- arbitrary user-supplied/local-driver URLs aren't in next/image's remote allowlist */}
+          {/* eslint-disable-next-line @next/next/no-img-element -- arbitrary user-supplied/CDN URLs aren't in next/image's remote allowlist */}
           <img src={value} alt="" className="size-full object-cover" />
         </div>
       ) : (
@@ -212,7 +212,7 @@ function LibraryTab({
           onClick={() => onSelect(asset.url)}
           className="bg-muted hover:ring-ring aspect-square overflow-hidden rounded-md border transition-shadow hover:ring-2"
         >
-          {/* eslint-disable-next-line @next/next/no-img-element -- arbitrary local-driver/S3 URLs */}
+          {/* eslint-disable-next-line @next/next/no-img-element -- arbitrary CDN-hosted URLs */}
           <img
             src={asset.url}
             alt={asset.altText ?? ''}

@@ -1,7 +1,7 @@
 'use client'
 
 import { useActionState } from 'react'
-import { updateProjectIntegrationAction } from '@/app/(dashboard)/projects/actions'
+import { updateStoreIntegrationAction } from '@/app/(dashboard)/stores/actions'
 import {
   Field,
   FieldDescription,
@@ -14,19 +14,19 @@ import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
 
 export function IntegrationForm({
-  projectId,
+  storeId,
   gaMeasurementId,
   gtmContainerId,
   metaPixelId,
   customHeadScript,
 }: {
-  projectId: string
+  storeId: string
   gaMeasurementId: string | null
   gtmContainerId: string | null
   metaPixelId: string | null
   customHeadScript: string | null
 }) {
-  const boundAction = updateProjectIntegrationAction.bind(null, projectId)
+  const boundAction = updateStoreIntegrationAction.bind(null, storeId)
   const [state, action, pending] = useActionState(boundAction, undefined)
 
   return (

@@ -9,13 +9,17 @@ const envSchema = z.object({
 
   ROOT_DOMAIN: z.string().min(1),
 
-  STORAGE_DRIVER: z.enum(['s3', 'local']),
-  S3_ENDPOINT: z.string().optional(),
-  S3_REGION: z.string().optional(),
-  S3_BUCKET: z.string().optional(),
-  S3_ACCESS_KEY_ID: z.string().optional(),
-  S3_SECRET_ACCESS_KEY: z.string().optional(),
-  S3_PUBLIC_URL: z.string().optional(),
+  // EnCDN — the media CDN every upload is stored on and served from.
+  CDN_BASE_URL: z.url(),
+  CDN_API_KEY: z.string().min(1),
+  CDN_API_SECRET: z.string().min(1),
+  // Normally read out of the `publicUrl` EnCDN returns on upload; only set
+  // this to override that.
+  CDN_CLIENT_ID: z.string().min(1).optional(),
+  CDN_SIGNED_URLS: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((value) => value === 'true'),
 
   REDIS_URL: z.string().min(1),
 })
@@ -29,24 +33,6 @@ function loadEnv() {
       z.treeifyError(parsed.error)
     )
     throw new Error('Invalid environment variables — see .env.example')
-  }
-
-  if (parsed.data.STORAGE_DRIVER === 's3') {
-    const required = [
-      'S3_ENDPOINT',
-      'S3_REGION',
-      'S3_BUCKET',
-      'S3_ACCESS_KEY_ID',
-      'S3_SECRET_ACCESS_KEY',
-      'S3_PUBLIC_URL',
-    ] as const
-
-    const missing = required.filter((key) => !parsed.data[key])
-    if (missing.length > 0) {
-      throw new Error(
-        `STORAGE_DRIVER=s3 requires: ${missing.join(', ')} — see .env.example`
-      )
-    }
   }
 
   return parsed.data

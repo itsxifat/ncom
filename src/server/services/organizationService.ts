@@ -2,7 +2,8 @@ import 'server-only'
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { prisma } from '@/server/db/client'
-import { requireAuth } from '@/server/auth/rbac'
+import { requireAuth, requireOrgAccess } from '@/server/auth/rbac'
+import { slugify, withRandomSuffix } from '@/lib/slug'
 
 const ACTIVE_ORG_COOKIE = 'ncom_active_org'
 
@@ -49,5 +50,64 @@ export async function setActiveOrganizationCookie(organizationId: string) {
     sameSite: 'lax',
     path: '/',
     maxAge: 60 * 60 * 24 * 365,
+  })
+}
+
+/**
+ * Renames an organisation and reslugs it.
+ *
+ * The slug is derived rather than user-supplied: it only appears in internal
+ * URLs, and letting it drift from the name is a support burden with no upside.
+ */
+export async function updateOrganization(
+  organizationId: string,
+  input: { name: string }
+) {
+  await requireOrgAccess(organizationId, 'ADMIN')
+
+  const slug = await uniqueOrgSlugExcluding(input.name, organizationId)
+
+  return prisma.organization.update({
+    where: { id: organizationId },
+    data: { name: input.name, slug },
+  })
+}
+
+async function uniqueOrgSlugExcluding(
+  base: string,
+  excludeId: string
+): Promise<string> {
+  const baseSlug = slugify(base) || 'workspace'
+
+  const existing = await prisma.organization.findFirst({
+    where: { slug: baseSlug, NOT: { id: excludeId } },
+    select: { id: true },
+  })
+  if (!existing) return baseSlug
+
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const candidate = withRandomSuffix(baseSlug)
+    const collision = await prisma.organization.findUnique({
+      where: { slug: candidate },
+      select: { id: true },
+    })
+    if (!collision) return candidate
+  }
+
+  throw new Error('Could not generate a unique workspace address')
+}
+
+/** Every organisation the signed-in user belongs to, for the switcher. */
+export async function listMyOrganizations() {
+  const session = await requireAuth()
+
+  return prisma.membership.findMany({
+    where: { userId: session.user.id },
+    include: {
+      organization: {
+        include: { _count: { select: { stores: true, memberships: true } } },
+      },
+    },
+    orderBy: { createdAt: 'asc' },
   })
 }

@@ -2,16 +2,17 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { getTemplateForPreview } from '@/server/services/templateService'
 import { Button } from '@/components/ui/button'
+import { PageHeader } from '@/components/app/page-header'
 
 export default async function TemplatePreviewPage({
   params,
   searchParams,
 }: {
   params: Promise<{ templateId: string }>
-  searchParams: Promise<{ forProject?: string }>
+  searchParams: Promise<{ forStore?: string }>
 }) {
   const { templateId } = await params
-  const { forProject } = await searchParams
+  const { forStore } = await searchParams
 
   let result
   try {
@@ -21,32 +22,28 @@ export default async function TemplatePreviewPage({
   }
   const { template } = result
 
-  const templateUseHref = forProject
-    ? `/projects/${forProject}/pages/new?template=${templateId}`
-    : `/projects/new?template=${templateId}`
-  const backHref = forProject
-    ? `/templates?forProject=${forProject}`
-    : '/templates'
+  const templateUseHref = forStore
+    ? `/stores/${forStore}/pages/new?template=${templateId}`
+    : `/stores/new?template=${templateId}`
+  const backHref = forStore ? `/templates?forStore=${forStore}` : '/templates'
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <Link href={backHref} className="text-muted-foreground text-sm">
-            ← Back to templates
-          </Link>
-          <h1 className="font-display mt-1 text-2xl font-semibold tracking-tight">
-            {template.name}
-          </h1>
-        </div>
-        <Button render={<Link href={templateUseHref} />} nativeButton={false}>
-          Use this template
-        </Button>
-      </div>
+    <div className="flex h-[calc(100svh-12rem)] min-h-125 flex-col gap-6">
+      <PageHeader
+        backHref={backHref}
+        backLabel="Templates"
+        eyebrow={template.category?.name ?? 'Uncategorized'}
+        title={template.name}
+        actions={
+          <Button render={<Link href={templateUseHref} />} nativeButton={false}>
+            Use this template
+          </Button>
+        }
+      />
       <iframe
         src={`/preview-render/template/${template.id}`}
         title={`Preview of ${template.name}`}
-        className="bg-card flex-1 rounded-lg border"
+        className="bg-card ring-foreground/6 shadow-panel flex-1 overflow-hidden rounded-xl ring-1"
       />
     </div>
   )

@@ -6,7 +6,18 @@ import {
   requirePlatformAdmin,
 } from '@/server/auth/rbac'
 import { logAudit } from '@/server/services/auditService'
+import {
+  requireFeature,
+  requireQuota,
+} from '@/server/services/entitlementService'
 import { slugify, withRandomSuffix } from '@/lib/slug'
+import {
+  provisionCommerce,
+  provisionStorefrontCode,
+  themeToCreateInput,
+} from './storeService'
+import { parseAndValidateLiquidDocument } from '@/lib/liquid/document'
+import type { Prisma } from '@/generated/prisma/client'
 import { DEFAULT_THEME } from '@/lib/default-theme'
 import { templateThemeSchema } from '@/lib/validation/theme'
 import type { PageTheme } from '@/modules/sections/types'
@@ -220,6 +231,7 @@ export async function updateTemplateMeta(
       description: input.description,
       categoryId: input.categoryId ?? null,
       status: input.status,
+      isPremium: input.isPremium,
     },
   })
 
@@ -354,35 +366,47 @@ async function getPublishedTemplateWithSections(templateId: string) {
 }
 
 /**
- * Creates a new Project seeded from a template: theme comes from
+ * Creates a new Store seeded from a template: theme comes from
  * `defaultTheme`, and a home page is cloned from the template's sections.
  */
-export async function createProjectFromTemplate(
+export async function createStoreFromTemplate(
   organizationId: string,
   input: { name: string; subdomain?: string; templateId: string }
 ) {
   await requireOrgAccess(organizationId, 'EDITOR')
+  await requireQuota(organizationId, 'STORES')
+  await requireQuota(organizationId, 'PAGES')
 
   const template = await getPublishedTemplateWithSections(input.templateId)
+  // Refused, not just hidden. The template picker filters premium templates out
+  // for plans without the entitlement, but a template id is a plain string in a
+  // form post and hiding a card is not a control.
+  if (template.isPremium) {
+    await requireFeature(organizationId, 'PREMIUM_TEMPLATES')
+  }
   const theme = resolveTemplateTheme(template.defaultTheme)
 
   const subdomain = input.subdomain
     ? input.subdomain
-    : await uniqueProjectSubdomain(input.name)
+    : await uniqueStoreSubdomain(input.name)
 
   return prisma.$transaction(async (tx) => {
-    const project = await tx.project.create({
+    const store = await tx.store.create({
       data: {
         organizationId,
         name: input.name,
         subdomain,
-        theme: { create: theme },
+        theme: { create: themeToCreateInput(theme) },
       },
     })
 
+    // A store built from a template still has to be able to sell.
+    await provisionCommerce(tx, organizationId, input.name, 'USD')
+    await provisionStorefrontCode(tx, store.id)
+
     const page = await tx.page.create({
       data: {
-        projectId: project.id,
+        storeId: store.id,
         title: 'Home',
         slug: 'home',
         isHome: true,
@@ -402,15 +426,15 @@ export async function createProjectFromTemplate(
       })
     }
 
-    return project
+    return store
   })
 }
 
-async function uniqueProjectSubdomain(base: string): Promise<string> {
+async function uniqueStoreSubdomain(base: string): Promise<string> {
   const baseSlug = slugify(base) || 'site'
   const candidate = baseSlug.length < 3 ? `${baseSlug}-site` : baseSlug
 
-  const existing = await prisma.project.findUnique({
+  const existing = await prisma.store.findUnique({
     where: { subdomain: candidate },
     select: { id: true },
   })
@@ -418,7 +442,7 @@ async function uniqueProjectSubdomain(base: string): Promise<string> {
 
   for (let attempt = 0; attempt < 5; attempt++) {
     const suffixed = withRandomSuffix(candidate)
-    const collision = await prisma.project.findUnique({
+    const collision = await prisma.store.findUnique({
       where: { subdomain: suffixed },
       select: { id: true },
     })
@@ -428,32 +452,36 @@ async function uniqueProjectSubdomain(base: string): Promise<string> {
   throw new Error('Could not generate a unique subdomain')
 }
 
-/** Creates a new Page in an existing project, cloned from a template. */
+/** Creates a new Page in an existing store, cloned from a template. */
 export async function createPageFromTemplate(
   organizationId: string,
-  projectId: string,
+  storeId: string,
   input: { title: string; slug?: string; templateId: string }
 ) {
   await requireOrgAccess(organizationId, 'EDITOR')
 
-  const project = await prisma.project.findFirst({
-    where: { id: projectId, organizationId },
+  const store = await prisma.store.findFirst({
+    where: { id: storeId, organizationId },
     select: { id: true },
   })
-  if (!project) throw new Error('Project not found')
+  if (!store) throw new Error('Store not found')
+  await requireQuota(organizationId, 'PAGES')
 
   const template = await getPublishedTemplateWithSections(input.templateId)
+  if (template.isPremium) {
+    await requireFeature(organizationId, 'PREMIUM_TEMPLATES')
+  }
 
   const slug = input.slug
     ? input.slug
-    : await uniquePageSlug(projectId, input.title)
+    : await uniquePageSlug(storeId, input.title)
 
-  const isFirstPage = (await prisma.page.count({ where: { projectId } })) === 0
+  const isFirstPage = (await prisma.page.count({ where: { storeId } })) === 0
 
   return prisma.$transaction(async (tx) => {
     const page = await tx.page.create({
       data: {
-        projectId,
+        storeId,
         title: input.title,
         slug,
         isHome: isFirstPage,
@@ -477,14 +505,11 @@ export async function createPageFromTemplate(
   })
 }
 
-async function uniquePageSlug(
-  projectId: string,
-  base: string
-): Promise<string> {
+async function uniquePageSlug(storeId: string, base: string): Promise<string> {
   const baseSlug = slugify(base) || 'page'
 
   const existing = await prisma.page.findUnique({
-    where: { projectId_slug: { projectId, slug: baseSlug } },
+    where: { storeId_slug: { storeId, slug: baseSlug } },
     select: { id: true },
   })
   if (!existing) return baseSlug
@@ -492,11 +517,99 @@ async function uniquePageSlug(
   for (let attempt = 0; attempt < 5; attempt++) {
     const candidate = withRandomSuffix(baseSlug)
     const collision = await prisma.page.findUnique({
-      where: { projectId_slug: { projectId, slug: candidate } },
+      where: { storeId_slug: { storeId, slug: candidate } },
       select: { id: true },
     })
     if (!collision) return candidate
   }
 
   throw new Error('Could not generate a unique page slug')
+}
+
+/**
+ * Imports a pasted Liquid document as a template's editable layers.
+ *
+ * This is the whole point of the feature: one paste produces the same stack of
+ * components a designer would have assembled by hand in the builder. Each
+ * `{% section %}` in the document becomes its own ComponentDefinition and its
+ * own TemplateSection, so after import a merchant can reorder the layers, hide
+ * one, duplicate another, and edit each one's settings through the form
+ * generated from its schema. Nothing is frozen by having been pasted.
+ *
+ * Definitions are keyed per template (`tpl-{slug}-{handle}`) so two templates
+ * can both contain a section called "hero" without colliding, and re-importing
+ * the same template updates its layers in place rather than accumulating
+ * duplicates.
+ */
+export async function importTemplateLiquid(templateId: string, source: string) {
+  await requirePlatformAdmin()
+
+  const template = await prisma.template.findUnique({
+    where: { id: templateId },
+    select: { id: true, name: true, slug: true },
+  })
+  if (!template) throw new Error('Template not found')
+
+  const parsed = await parseAndValidateLiquidDocument(source)
+  if (parsed.error) throw new Error(parsed.error)
+  if (parsed.layers.length === 0) {
+    throw new Error('No sections found in that document')
+  }
+
+  return prisma.$transaction(async (tx) => {
+    // Replace rather than append: re-importing a template is "here is the new
+    // design", not "add another copy of it".
+    await tx.templateSection.deleteMany({ where: { templateId } })
+
+    for (const [index, layer] of parsed.layers.entries()) {
+      const key = `tpl-${template.slug}-${layer.handle}`
+
+      const definition = await tx.componentDefinition.upsert({
+        where: { key },
+        create: {
+          key,
+          name: layer.name,
+          category: layer.category,
+          renderMode: 'LIQUID',
+          liquidSource: layer.template,
+          schemaJson: {
+            schema: layer.schema,
+            editorFields: layer.editorFields,
+          } as unknown as Prisma.InputJsonValue,
+          defaultContent: layer.defaultContent as Prisma.InputJsonValue,
+          isActive: true,
+          sortOrder: index,
+          // Platform-global, so every store that picks this template can use it.
+        },
+        update: {
+          name: layer.name,
+          category: layer.category,
+          liquidSource: layer.template,
+          schemaJson: {
+            schema: layer.schema,
+            editorFields: layer.editorFields,
+          } as unknown as Prisma.InputJsonValue,
+          defaultContent: layer.defaultContent as Prisma.InputJsonValue,
+          sortOrder: index,
+        },
+        select: { id: true },
+      })
+
+      await tx.templateSection.create({
+        data: {
+          templateId,
+          componentDefinitionId: definition.id,
+          order: index,
+          defaultContent: layer.defaultContent as Prisma.InputJsonValue,
+          defaultConfig: {},
+          isVisible: true,
+        },
+      })
+    }
+
+    return tx.template.update({
+      where: { id: templateId },
+      data: { liquidSource: source },
+    })
+  })
 }

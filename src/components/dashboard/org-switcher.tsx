@@ -23,9 +23,11 @@ type OrgOption = {
 export function OrgSwitcher({
   activeOrgId,
   organizations,
+  className,
 }: {
   activeOrgId: string
   organizations: OrgOption[]
+  className?: string
 }) {
   const [isPending, startTransition] = useTransition()
   const active = organizations.find((org) => org.id === activeOrgId)
@@ -35,16 +37,24 @@ export function OrgSwitcher({
       <DropdownMenuTrigger
         render={
           <Button
-            variant="outline"
-            className="w-full justify-between"
+            variant="ghost"
+            className={cn('h-10 max-w-full justify-start gap-2.5', className)}
             disabled={isPending}
           />
         }
       >
-        <span className="truncate">{active?.name ?? 'Select workspace'}</span>
-        <ChevronsUpDown className="size-4 shrink-0 opacity-50" />
+        <span className="bg-lime text-lime-foreground font-display flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-bold">
+          {(active?.name ?? '?').slice(0, 1).toUpperCase()}
+        </span>
+        <span className="flex min-w-0 flex-col items-start gap-1">
+          <span className="eyebrow text-ink-muted">Workspace</span>
+          <span className="max-w-full truncate text-sm font-medium">
+            {active?.name ?? 'Select workspace'}
+          </span>
+        </span>
+        <ChevronsUpDown className="ml-auto size-4 shrink-0 opacity-40" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-56">
+      <DropdownMenuContent align="start" className="w-60">
         <DropdownMenuGroup>
           <DropdownMenuLabel>Workspaces</DropdownMenuLabel>
           <DropdownMenuSeparator />

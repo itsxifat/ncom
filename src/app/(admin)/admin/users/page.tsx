@@ -1,7 +1,10 @@
+import { Search, Users } from 'lucide-react'
 import { auth } from '@/server/auth/auth'
 import { listUsers } from '@/server/services/adminService'
-import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { PageHeader } from '@/components/app/page-header'
+import { EmptyState } from '@/components/app/empty-state'
+import { ListPanel } from '@/components/app/list-panel'
 import { UserRow } from './UserRow'
 
 export default async function AdminUsersPage({
@@ -14,33 +17,37 @@ export default async function AdminUsersPage({
   const users = await listUsers(q)
 
   return (
-    <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="font-display text-3xl font-semibold tracking-tight">
-          Users
-        </h1>
-        <p className="text-muted-foreground mt-1">
-          {users.length} {users.length === 1 ? 'user' : 'users'}
-          {q ? ` matching "${q}"` : ''}.
-        </p>
-      </div>
-
-      <form method="get" className="max-w-sm">
-        <Input
-          name="q"
-          defaultValue={q}
-          placeholder="Search by name or email"
-        />
-      </form>
+    <div className="flex flex-col gap-8">
+      <PageHeader
+        eyebrow="Platform"
+        title="Users"
+        description={`${users.length} ${users.length === 1 ? 'user' : 'users'}${q ? ` matching “${q}”` : ''}.`}
+        actions={
+          <form method="get" className="relative w-full sm:w-80">
+            <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2" />
+            <Input
+              name="q"
+              defaultValue={q}
+              placeholder="Search by name or email"
+              aria-label="Search users"
+              className="pl-10"
+            />
+          </form>
+        }
+      />
 
       {users.length === 0 ? (
-        <Card>
-          <CardContent className="text-muted-foreground py-10 text-center">
-            No users found.
-          </CardContent>
-        </Card>
+        <EmptyState
+          icon={Users}
+          title="No users found"
+          description={
+            q
+              ? 'Nothing matched that search. Try a different name or email.'
+              : 'Users appear here once someone registers.'
+          }
+        />
       ) : (
-        <div className="flex flex-col divide-y rounded-lg border">
+        <ListPanel>
           {users.map((user) => (
             <UserRow
               key={user.id}
@@ -53,7 +60,7 @@ export default async function AdminUsersPage({
               isSelf={user.id === session?.user.id}
             />
           ))}
-        </div>
+        </ListPanel>
       )}
     </div>
   )

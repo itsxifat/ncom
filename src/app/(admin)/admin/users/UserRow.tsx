@@ -3,6 +3,11 @@
 import { useTransition } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  ListRow,
+  ListRowActions,
+  ListRowText,
+} from '@/components/app/list-panel'
 import { setUserPlatformRoleAction, setUserSuspendedAction } from './actions'
 import type { PlatformRole } from '@/generated/prisma/enums'
 
@@ -26,21 +31,22 @@ export function UserRow({
   const [isPending, startTransition] = useTransition()
 
   return (
-    <div className="flex items-center justify-between gap-4 px-4 py-3">
-      <div className="min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="truncate font-medium">{name ?? email}</span>
-          {platformRole === 'SUPER_ADMIN' && (
-            <Badge variant="default">Admin</Badge>
-          )}
-          {isSuspended && <Badge variant="destructive">Suspended</Badge>}
-        </div>
-        <p className="text-muted-foreground truncate text-sm">
-          {email} · {membershipCount} {membershipCount === 1 ? 'org' : 'orgs'}
-        </p>
-      </div>
+    <ListRow>
+      <ListRowText
+        title={name ?? email}
+        meta={`${email} · ${membershipCount} ${membershipCount === 1 ? 'org' : 'orgs'}`}
+        badges={
+          <>
+            {platformRole === 'SUPER_ADMIN' && (
+              <Badge variant="lime">Admin</Badge>
+            )}
+            {isSuspended && <Badge variant="destructive">Suspended</Badge>}
+            {isSelf && <Badge variant="outline">You</Badge>}
+          </>
+        }
+      />
       {!isSelf && (
-        <div className="flex shrink-0 items-center gap-2">
+        <ListRowActions>
           <Button
             type="button"
             variant="outline"
@@ -59,9 +65,8 @@ export function UserRow({
           </Button>
           <Button
             type="button"
-            variant="outline"
+            variant={isSuspended ? 'outline' : 'destructive'}
             size="sm"
-            className={isSuspended ? '' : 'text-destructive'}
             disabled={isPending}
             onClick={() => {
               startTransition(() => {
@@ -71,8 +76,8 @@ export function UserRow({
           >
             {isSuspended ? 'Unsuspend' : 'Suspend'}
           </Button>
-        </div>
+        </ListRowActions>
       )}
-    </div>
+    </ListRow>
   )
 }

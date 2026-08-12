@@ -1,5 +1,7 @@
 import Link from 'next/link'
 
+import { BrandMark } from '@/components/app/brand-mark'
+
 const FOOTER_LINKS: {
   title: string
   links: { label: string; href: string }[]
@@ -34,17 +36,12 @@ const FOOTER_LINKS: {
 
 export function Footer() {
   return (
-    <footer className="bg-[#0a0a0a] text-white">
+    <footer className="border-border/60 bg-ink border-t text-white">
       <div className="mx-auto max-w-6xl px-6 py-16 sm:px-10">
         <div className="grid grid-cols-2 gap-10 sm:grid-cols-4">
           <div className="col-span-2 sm:col-span-1">
-            <Link href="/" className="flex items-center gap-2">
-              <span className="bg-primary flex size-7 items-center justify-center rounded-lg text-sm font-bold text-white">
-                N
-              </span>
-              <span className="font-display text-lg font-semibold tracking-tight">
-                NCOM
-              </span>
+            <Link href="/" aria-label="NCOM home">
+              <BrandMark tone="onDark" size="lg" />
             </Link>
             <p className="mt-4 max-w-40 text-sm text-white/50">
               Landing pages that look designed, not templated.

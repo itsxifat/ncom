@@ -18,6 +18,7 @@ export function TemplateMetaForm({
   description,
   categoryId,
   status,
+  isPremium,
   categories,
 }: {
   templateId: string
@@ -25,6 +26,7 @@ export function TemplateMetaForm({
   description: string | null
   categoryId: string | null
   status: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED'
+  isPremium: boolean
   categories: { id: string; name: string }[]
 }) {
   const boundAction = updateTemplateMetaAction.bind(null, templateId)
@@ -44,7 +46,7 @@ export function TemplateMetaForm({
               id="categoryId"
               name="categoryId"
               defaultValue={categoryId ?? ''}
-              className="border-input h-8 rounded-lg border bg-transparent px-2.5 text-sm"
+              className="border-input bg-card h-10 rounded-[0.875rem] border px-3 text-sm"
             >
               <option value="">Uncategorized</option>
               {categories.map((category) => (
@@ -60,7 +62,7 @@ export function TemplateMetaForm({
               id="status"
               name="status"
               defaultValue={status}
-              className="border-input h-8 rounded-lg border bg-transparent px-2.5 text-sm"
+              className="border-input bg-card h-10 rounded-[0.875rem] border px-3 text-sm"
             >
               <option value="DRAFT">Draft</option>
               <option value="PUBLISHED">Published</option>
@@ -76,6 +78,22 @@ export function TemplateMetaForm({
             defaultValue={description ?? ''}
           />
         </Field>
+        <label className="hover:bg-muted/40 flex cursor-pointer items-start gap-3 rounded-xl p-2">
+          <input
+            type="checkbox"
+            name="isPremium"
+            defaultChecked={isPremium}
+            className="mt-0.5 size-4 shrink-0"
+          />
+          <span>
+            <span className="block text-sm font-medium">Premium template</span>
+            <span className="text-muted-foreground block text-xs">
+              Only usable on plans that include premium templates. Tenants
+              without that entitlement see it locked, and applying it is refused
+              server-side.
+            </span>
+          </span>
+        </label>
         {state?.error && <FieldError>{state.error}</FieldError>}
         <Field>
           <Button type="submit" disabled={pending}>

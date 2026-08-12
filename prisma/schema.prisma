@@ -1,4 +1,8 @@
-// NCOM V1 data model.
+// NCOM data model.
+//
+// Every Store is an ecommerce store: there is no landing-page-only mode. A
+// Store owns its pages, its theme, and its whole commerce graph, and is
+// reachable at its own subdomain.
 //
 // Two parallel object graphs share the ComponentDefinition vocabulary but never share rows:
 //   - Definition side (admin-owned, reusable):  Template -> TemplateSection
@@ -23,16 +27,21 @@ datasource db {
 // ── Identity & Tenancy ──────────────────────────────────────────────────
 
 model User {
-  id            String       @id @default(cuid())
-  email         String       @unique
+  id            String         @id @default(cuid())
+  email         String         @unique
   emailVerified DateTime?
   passwordHash  String?
   name          String?
   image         String?
-  platformRole  PlatformRole @default(USER)
-  isSuspended   Boolean      @default(false)
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
+  platformRole  PlatformRole   @default(USER)
+  isSuspended   Boolean        @default(false)
+  // Captured at signup. Drives onboarding and tells us who is actually here —
+  // an existing merchant migrating needs a different first-run than someone
+  // who has never sold anything.
+  signupPurpose SignupPurpose?
+  onboardedAt   DateTime?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
 
   accounts     Account[]
   sessions     Session[]
@@ -40,11 +49,21 @@ model User {
   mediaAssets  MediaAsset[]  @relation("UploadedBy")
   auditLogs    AuditLog[]
   pageVersions PageVersion[]
+
+  verificationCodes EmailVerificationCode[]
+  couponsCreated    PlanCoupon[]
 }
 
 enum PlatformRole {
   USER
   SUPER_ADMIN
+}
+
+enum SignupPurpose {
+  START_SELLING
+  MOVE_EXISTING_STORE
+  BUILD_FOR_CLIENT
+  JUST_EXPLORING
 }
 
 // Auth.js (NextAuth) v5 Prisma adapter models.
@@ -91,9 +110,56 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  memberships Membership[]
-  projects    Project[]
-  mediaAssets MediaAsset[]
+  memberships          Membership[]
+  invitations          OrgInvitation[]
+  stores               Store[]
+  mediaAssets          MediaAsset[]
+  componentDefinitions ComponentDefinition[]
+
+  // Commerce lives here, not on Store. One catalogue, one inventory, one order
+  // book, one set of payment/shipping/tax settings — reused by every storefront
+  // the organisation runs. A store is a website; this is the business.
+  settings         OrganizationSettings?
+  products         Product[]
+  collections      Collection[]
+  customers        Customer[]
+  carts            Cart[]
+  orders           Order[]
+  discounts        Discount[]
+  locations        Location[]
+  shippingZones    ShippingZone[]
+  taxRates         TaxRate[]
+  paymentProviders PaymentProviderConfig[]
+
+  // What the organisation buys from NCOM, and what it has used of it.
+  subscription      Subscription?
+  planOrders        PlanOrder[]
+  couponRedemptions PlanCouponRedemption[]
+  usageCounters     UsageCounter[]
+  customDomains     CustomDomain[]
+}
+
+// A pending invitation to join an organisation.
+//
+// Separate from Membership because the invitee may not have an account yet —
+// the invite is addressed to an email, and becomes a Membership only when a
+// real user accepts it. `tokenHash` is stored rather than the token so a
+// leaked database cannot be used to join organisations.
+model OrgInvitation {
+  id             String    @id @default(cuid())
+  organizationId String
+  email          String
+  role           OrgRole   @default(VIEWER)
+  tokenHash      String    @unique
+  invitedById    String?
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, email])
+  @@index([email])
 }
 
 model Membership {
@@ -116,32 +182,37 @@ enum OrgRole {
   VIEWER
 }
 
-// ── Projects & Pages ─────────────────────────────────────────────────────
+// ── Stores & Pages ───────────────────────────────────────────────────────
 
-model Project {
-  id                     String        @id @default(cuid())
-  organizationId         String
-  name                   String
-  type                   ProjectType   @default(LANDING) // reserved for a future Store module; only LANDING is used in V1
-  subdomain              String        @unique
-  customDomain           String?       @unique // reserved for a future custom-domain feature; not exposed in V1 UI
-  customDomainStatus     DomainStatus?
-  customDomainVerifiedAt DateTime?
-  isSearchIndexable      Boolean       @default(true)
-  createdAt              DateTime      @default(now())
-  updatedAt              DateTime      @updatedAt
+model Store {
+  id                String   @id @default(cuid())
+  organizationId    String
+  name              String
+  subdomain         String   @unique
+  isSearchIndexable Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
-  organization Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  pages        Page[]
-  theme        ThemeSettings?
-  integration  ProjectIntegrationConfig?
-  mediaAssets  MediaAsset[]
-  pageViews    PageView[]
-}
+  organization  Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  pages         Page[]
+  theme         ThemeSettings?
+  integration   StoreIntegrationConfig?
+  mediaAssets   MediaAsset[]
+  pageViews     PageView[]
+  // Extra hostnames this store answers on. The subdomain above is always
+  // available; these are the tenant's own domains and are quota'd by plan.
+  customDomains CustomDomain[]
 
-enum ProjectType {
-  LANDING
-  STORE
+  // Storefront code for the data-driven routes (product/collection/cart), which
+  // are presentation and therefore belong to the site, not the catalogue.
+  storefrontTemplates StorefrontTemplate[]
+  liquidSnippets      LiquidSnippet[]
+
+  // Attribution only. Carts and orders are owned by the organisation; these
+  // record which storefront the sale came through, so a merchant running three
+  // landing pages off one catalogue can tell which one is working.
+  carts  Cart[]
+  orders Order[]
 }
 
 enum DomainStatus {
@@ -152,7 +223,7 @@ enum DomainStatus {
 
 model ThemeSettings {
   id              String      @id @default(cuid())
-  projectId       String      @unique
+  storeId         String      @unique
   primaryColor    String
   secondaryColor  String
   backgroundColor String
@@ -164,9 +235,23 @@ model ThemeSettings {
   spacingScale    String
   containerWidth  String
   customCss       String?
-  updatedAt       DateTime    @updatedAt
 
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  // Brand assets, stored as URLs to match how every section already stores
+  // images (hero.imageUrl and friends). EnCDN delivery URLs are lifetime
+  // signed, so there is no re-signing step to protect against, and keeping
+  // URLs means the render path never has to resolve a media id.
+  logoUrl          String?
+  logoWidth        Int?    @default(140)
+  faviconUrl       String?
+  // Extra design controls surfaced in the builder's Design tab.
+  headingWeight    String  @default("600")
+  bodyScale        String  @default("1")
+  sectionSpacing   String  @default("comfortable")
+  showStickyHeader Boolean @default(true)
+
+  updatedAt DateTime @updatedAt
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
 }
 
 enum ButtonStyle {
@@ -175,21 +260,21 @@ enum ButtonStyle {
   GHOST
 }
 
-model ProjectIntegrationConfig {
+model StoreIntegrationConfig {
   id               String   @id @default(cuid())
-  projectId        String   @unique
+  storeId          String   @unique
   gaMeasurementId  String?
   gtmContainerId   String?
   metaPixelId      String?
   customHeadScript String?
   updatedAt        DateTime @updatedAt
 
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
 }
 
 model Page {
   id                 String     @id @default(cuid())
-  projectId          String
+  storeId            String
   slug               String
   title              String
   isHome             Boolean    @default(false)
@@ -206,19 +291,246 @@ model Page {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  project          Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  store            Store         @relation(fields: [storeId], references: [id], onDelete: Cascade)
   sections         PageSection[]
   versions         PageVersion[] @relation("PageVersions")
   publishedVersion PageVersion?  @relation("PublishedVersion", fields: [publishedVersionId], references: [id])
   ogImage          MediaAsset?   @relation(fields: [ogImageMediaId], references: [id], onDelete: SetNull)
+  offers           Offer[]
+  checkout         PageCheckout?
+  orders           Order[]
 
-  @@unique([projectId, slug])
+  @@unique([storeId, slug])
 }
 
 enum PageStatus {
   DRAFT
   PUBLISHED
   UNPUBLISHED
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// What a landing page sells
+//
+// A landing page does not sell variants, it sells OFFERS: "just the one",
+// "2-piece combo — ৳1800", "any 3 from this set — ৳2500". That is the shape of
+// the market this platform serves, and it is not expressible as a variant plus
+// a quantity, because the price of three pieces is whatever the merchant
+// negotiated rather than three times the price of one.
+//
+// Offers hang off the Page rather than the Organization on purpose. The
+// catalogue, the inventory and the order book are the business and are shared
+// by every storefront; an offer is a *campaign* — this page, this ad, this
+// price — and two pages may sell the very same product at two different
+// bundle prices without either being wrong.
+//
+// No price here is ever trusted from the browser. lib/offers/pricing.ts is the
+// single rule, and the order route re-derives every figure from these rows and
+// the live variant prices. See that module for the arithmetic.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum OfferKind {
+  /// An exact set of products and quantities sold together for one price.
+  FIXED
+  /// A pool the buyer mixes and matches from; the total quantity picks a rung
+  /// of the manual price ladder (`tiers`), whatever they chose.
+  COLLECTION
+  /// A pool the buyer freely picks from, each item at its own price, with an
+  /// optional flat discount over the resulting cart.
+  ALACARTE
+}
+
+enum OfferPricingMode {
+  /// The regular total, no discount.
+  AUTO
+  /// `priceCents` is the total for the whole offer. FIXED offers only.
+  FIXED
+  /// `discountBps` basis points off the regular total.
+  PERCENT
+  /// `priceCents` off the regular total.
+  AMOUNT
+}
+
+model Offer {
+  id     String @id @default(cuid())
+  pageId String
+
+  /// Stable identity posted by the public order form. Regenerating this
+  /// orphans any ad already pointing at the offer, so it is written once.
+  key         String
+  label       String // "১টি নিন", "ফ্যামিলি প্যাক"
+  description String?
+  badge       String? // "সবচেয়ে জনপ্রিয়", "৪০% ছাড়"
+
+  kind        OfferKind        @default(FIXED)
+  pricingMode OfferPricingMode @default(AUTO)
+
+  /// Minor units. The offer total under FIXED, the money off under AMOUNT.
+  priceCents  Int @default(0)
+  /// Basis points off the regular total under PERCENT, matching how every
+  /// other rate on the platform is stored.
+  discountBps Int @default(0)
+
+  /// Strike-through price. 0 falls back to the computed regular total, which
+  /// is the honest comparison and the right default.
+  compareAtCents Int @default(0)
+
+  /// Piece-count bounds for COLLECTION and ALACARTE. 0 means unbounded; a
+  /// COLLECTION is additionally bounded by the rungs its ladder prices.
+  minQuantity Int @default(0)
+  maxQuantity Int @default(0)
+
+  /// The offer preselected on the page. Exactly one wins; the resolver takes
+  /// the first by position if a merchant marks several.
+  isDefault Boolean @default(true)
+  isActive  Boolean @default(true)
+  position  Int     @default(0)
+
+  imageMediaId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  page  Page        @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  image MediaAsset? @relation(fields: [imageMediaId], references: [id], onDelete: SetNull)
+  items OfferItem[]
+  tiers OfferTier[]
+
+  @@unique([pageId, key])
+  @@index([pageId, position])
+}
+
+model OfferItem {
+  id      String @id @default(cuid())
+  offerId String
+
+  productId String
+  /// Pin a variant, or leave null to let the buyer choose one on the page.
+  /// A single-variant product needs no choice and resolves automatically.
+  variantId String?
+
+  /// How many of this line the offer includes. FIXED offers only — in a
+  /// COLLECTION or ALACARTE the buyer decides, so this is ignored.
+  quantity Int @default(1)
+  position Int @default(0)
+
+  offer   Offer           @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  product Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+
+  @@index([offerId, position])
+  @@index([productId])
+}
+
+/// One rung of a COLLECTION offer's price ladder: "take this many, pay exactly
+/// this". Non-linear by design — three pieces cost what the merchant typed,
+/// not three times the price of one.
+model OfferTier {
+  id      String @id @default(cuid())
+  offerId String
+
+  quantity   Int
+  priceCents Int
+
+  offer Offer @relation(fields: [offerId], references: [id], onDelete: Cascade)
+
+  @@unique([offerId, quantity])
+  @@index([offerId, quantity])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Page-level checkout rules
+//
+// Delivery charges and promotions are set per landing page, not per store. A
+// campaign page runs its own economics: the price is already the negotiated
+// price, so the organisation's shipping zones and free-shipping thresholds are
+// the *default* rather than the law.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum PageShippingMode {
+  /// Fall back to the organisation's shipping zones.
+  INHERIT
+  /// No delivery charge at all.
+  FREE
+  /// One rate for everyone, wherever they are.
+  FLAT
+  /// The rates configured on this page, chosen by the buyer.
+  ZONES
+}
+
+model PageCheckout {
+  id     String @id @default(cuid())
+  pageId String @unique
+
+  shippingMode  PageShippingMode @default(INHERIT)
+  flatRateCents Int              @default(0)
+  /// Show the delivery-area picker. Off means everyone is charged the first
+  /// rate, which is what a merchant delivering to one city wants.
+  askZone       Boolean          @default(true)
+
+  /// Delivery becomes free once either threshold is met. 0 disables that
+  /// condition; both set means either one qualifies.
+  freeShippingEnabled          Boolean @default(false)
+  freeShippingMinSubtotalCents Int     @default(0)
+  freeShippingMinQuantity      Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  page          Page               @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  rates         PageShippingRate[]
+  discountRules PageDiscountRule[]
+}
+
+/// One delivery area on a page. Free-form rather than a fixed Dhaka/outside
+/// enum so a merchant can name their own areas — the defaults are Bangladeshi
+/// because the market is, not because the schema demands it.
+model PageShippingRate {
+  id         String @id @default(cuid())
+  checkoutId String
+
+  label      String // "ঢাকার ভিতরে"
+  priceCents Int    @default(0)
+  position   Int    @default(0)
+
+  checkout PageCheckout @relation(fields: [checkoutId], references: [id], onDelete: Cascade)
+
+  @@index([checkoutId, position])
+}
+
+enum PromotionBasis {
+  SUBTOTAL
+  QUANTITY
+}
+
+enum PromotionReward {
+  AMOUNT
+  PERCENT
+}
+
+/// A "spend or buy this much, get this off" rule covering the whole page. The
+/// single best-for-the-buyer matching rule applies — they do not stack, because
+/// stacking ladders is how a merchant accidentally sells at a loss.
+model PageDiscountRule {
+  id         String @id @default(cuid())
+  checkoutId String
+
+  basis             PromotionBasis @default(SUBTOTAL)
+  thresholdCents    Int            @default(0)
+  thresholdQuantity Int            @default(0)
+
+  reward           PromotionReward @default(AMOUNT)
+  valueCents       Int             @default(0)
+  valueBps         Int             @default(0)
+  /// Ceiling for a percentage reward. 0 is uncapped.
+  maxDiscountCents Int             @default(0)
+
+  label    String?
+  position Int     @default(0)
+
+  checkout PageCheckout @relation(fields: [checkoutId], references: [id], onDelete: Cascade)
+
+  @@index([checkoutId, position])
 }
 
 model PageSection {
@@ -275,6 +587,16 @@ model Template {
   status           TemplateStatus @default(DRAFT)
   thumbnailMediaId String?
   defaultTheme     Json
+  // A template is either composed from TemplateSection rows (built in the
+  // visual editor) or supplied as one Liquid document uploaded by a platform
+  // admin. `liquidSource` being non-null selects the second kind: applying it
+  // to a page creates a single Liquid section whose {% schema %} block drives
+  // the Inspector, so a pasted theme is still editable in the builder rather
+  // than being an opaque blob.
+  liquidSource     String?        @db.Text
+  // Gated by the plan's `premiumTemplates` entitlement. Applying one on a plan
+  // without that entitlement is refused in templateService, not just hidden.
+  isPremium        Boolean        @default(false)
   createdById      String?
   version          Int            @default(1)
   createdAt        DateTime       @default(now())
@@ -306,20 +628,45 @@ model TemplateSection {
   @@index([templateId, order])
 }
 
-// Mirrors modules/sections/registry.ts — `key` must match a registered section type.
+// A section type available in the builder.
+//
+// Two render modes share this table:
+//   REACT  — `key` must match an entry in modules/sections/registry.ts; the
+//            registry owns the schema, defaults, editor fields and renderer,
+//            and the row here is just catalog metadata for the palette.
+//   LIQUID — user-authored. `liquidSource` is the template and `schemaJson`
+//            is its {% schema %} block, which compiles to the same
+//            FieldConfig[] the React sections declare by hand. Nothing about
+//            these rows is trusted: the source is rendered in a sandbox.
+//
+// `ownerOrganizationId` scopes a custom section to the org that wrote it;
+// null means platform-global (all built-ins, plus anything an admin promotes
+// out of an org and into the shared catalog).
 model ComponentDefinition {
-  id               String  @id @default(cuid())
-  key              String  @unique
-  name             String
-  category         String
-  description      String?
-  thumbnailMediaId String?
-  defaultContent   Json
-  isActive         Boolean @default(true)
-  sortOrder        Int     @default(0)
+  id                  String            @id @default(cuid())
+  key                 String            @unique
+  name                String
+  category            String
+  description         String?
+  thumbnailMediaId    String?
+  defaultContent      Json
+  isActive            Boolean           @default(true)
+  sortOrder           Int               @default(0)
+  renderMode          SectionRenderMode @default(REACT)
+  liquidSource        String?
+  schemaJson          Json?
+  ownerOrganizationId String?
 
-  templateSections TemplateSection[]
-  pageSections     PageSection[]
+  templateSections  TemplateSection[]
+  pageSections      PageSection[]
+  ownerOrganization Organization?     @relation(fields: [ownerOrganizationId], references: [id], onDelete: Cascade)
+
+  @@index([ownerOrganizationId])
+}
+
+enum SectionRenderMode {
+  REACT
+  LIQUID
 }
 
 // ── Media ───────────────────────────────────────────────────────────────
@@ -327,7 +674,7 @@ model ComponentDefinition {
 model MediaAsset {
   id             String   @id @default(cuid())
   organizationId String
-  projectId      String?
+  storeId        String?
   uploadedById   String?
   fileName       String
   mimeType       String
@@ -339,10 +686,12 @@ model MediaAsset {
   altText        String?
   createdAt      DateTime @default(now())
 
-  organization        Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  project             Project?     @relation(fields: [projectId], references: [id], onDelete: SetNull)
-  uploadedBy          User?        @relation("UploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
+  organization        Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  store               Store?         @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  uploadedBy          User?          @relation("UploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
   pagesUsingAsOgImage Page[]
+  productImages       ProductImage[]
+  offers              Offer[]
 
   @@index([organizationId])
 }
@@ -352,17 +701,17 @@ model MediaAsset {
 model PageView {
   id          String   @id @default(cuid())
   pageId      String
-  projectId   String
+  storeId     String
   path        String
   referrer    String?
   deviceType  String?
   visitorHash String
   createdAt   DateTime @default(now())
 
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
 
   @@index([pageId, createdAt])
-  @@index([projectId, createdAt])
+  @@index([storeId, createdAt])
 }
 
 // ── Platform admin ────────────────────────────────────────────────────────
@@ -386,4 +735,1630 @@ model AuditLog {
 
   @@index([entityType, entityId])
   @@index([createdAt])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SAAS: PLANS, ENTITLEMENTS, PLATFORM BILLING
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// What NCOM sells to its own tenants. Do not confuse this with the COMMERCE
+// block below, which is what merchants sell to their shoppers. Two rules keep
+// them from bleeding into each other: nothing here is ever scoped to a Store,
+// and nothing there is ever priced in the platform's own currency.
+//
+// Everything is data, not code. A platform admin edits plans, quotas, feature
+// gates, add-ons and coupons from /admin and the change takes effect on the
+// next request, because entitlements are resolved from these rows rather than
+// from a constant in the bundle. Hard-coding the price table would have meant
+// a deploy for every pricing experiment.
+//
+// Money: minor units (paisa for BDT) as Int, and percentages as basis points —
+// the same convention as the COMMERCE block. See lib/money.ts.
+//
+// Quotas: `null` means unlimited and `0` means none allowed. That distinction
+// is load-bearing, not stylistic: Free permits 0 custom domains while
+// Enterprise permits unlimited, and the two would collapse into the same value
+// if absence were spelled 0.
+
+model Plan {
+  id       String  @id @default(cuid())
+  code     String  @unique // stable machine name: FREE, STARTER, BUSINESS, ENTERPRISE
+  name     String
+  tagline  String?
+  position Int     @default(0)
+
+  isActive           Boolean @default(true) // false hides it and blocks new subscriptions
+  isPublic           Boolean @default(true) // listed on the public pricing page
+  // Where new signups land. Exactly one plan carries this; planAdminService
+  // clears the flag on every other plan when it is set.
+  isDefault          Boolean @default(false)
+  // Priced per deal, so the UI shows "Contact sales" rather than a checkout
+  // button and the amount is agreed off-platform.
+  isContactSalesOnly Boolean @default(false)
+
+  currencyCode      String @default("BDT")
+  monthlyPriceCents Int    @default(0)
+  // null = monthly only. The seeded annual prices are 10x monthly (two months
+  // free) but nothing enforces that ratio — admins set both independently.
+  annualPriceCents  Int?
+  trialDays         Int    @default(0)
+
+  // ── Quotas: null = unlimited ──
+  maxPages         Int?
+  maxStores        Int?
+  maxCustomDomains Int? @default(0)
+  maxTeamMembers   Int? @default(1)
+  storageMb        Int?
+  monthlyTrafficMb Int?
+  // Advisory, not enforced by default — the price sheet calls this
+  // "recommended monthly visitors", and throttling a site for being popular
+  // when its bandwidth is still within budget would be a support incident.
+  // `enforceVisitorCap` opts a plan into treating it as a hard ceiling.
+  monthlyVisitors  Int?
+
+  // ── Feature gates ──
+  // Tri-state on purpose: the price sheet distinguishes "—" (not available),
+  // "Optional" (available by buying the add-on) and "Included". Collapsing
+  // that to a boolean would lose the only thing that makes an add-on sellable.
+  premiumTemplates          FeatureAvailability @default(UNAVAILABLE)
+  advancedSeo               FeatureAvailability @default(UNAVAILABLE)
+  googleAnalytics           FeatureAvailability @default(UNAVAILABLE)
+  metaPixel                 FeatureAvailability @default(UNAVAILABLE)
+  googleTagManager          FeatureAvailability @default(UNAVAILABLE)
+  aiContentAssistant        FeatureAvailability @default(UNAVAILABLE)
+  advancedAnalytics         FeatureAvailability @default(UNAVAILABLE)
+  whiteLabel                FeatureAvailability @default(UNAVAILABLE)
+  dedicatedAccountManager   FeatureAvailability @default(UNAVAILABLE)
+  dedicatedTechnicalSupport FeatureAvailability @default(UNAVAILABLE)
+
+  // Included on every tier today. Still modelled rather than assumed, so a
+  // future tier can drop one without a schema change.
+  ncomSubdomain    Boolean @default(true)
+  dragDropBuilder  Boolean @default(true)
+  responsiveEditor Boolean @default(true)
+  basicTemplates   Boolean @default(true)
+  basicSeo         Boolean @default(true)
+  sslCertificate   Boolean @default(true)
+
+  supportTier SupportTier @default(COMMUNITY)
+
+  // The asterisk on "Unlimited*". Rendered as a footnote beside an unlimited
+  // quota so the fair-use terms travel with the number they qualify.
+  fairUseNote String?
+
+  enforceTrafficCap Boolean @default(true)
+  enforceVisitorCap Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  subscriptions Subscription[]
+  planOrders    PlanOrder[]
+  coupons       PlanCouponPlan[]
+  addons        AddonPlan[]
+
+  @@index([isActive, position])
+}
+
+enum FeatureAvailability {
+  UNAVAILABLE
+  ADDON // "Optional" on the price sheet: usable only once the add-on is bought
+  LIMITED // available with caveats (Business's dedicated technical support)
+  INCLUDED
+}
+
+enum SupportTier {
+  COMMUNITY
+  STANDARD
+  PRIORITY
+  DEDICATED
+}
+
+// A quota bump or feature unlock bought on top of a plan.
+model Addon {
+  id          String  @id @default(cuid())
+  code        String  @unique
+  name        String
+  description String?
+  position    Int     @default(0)
+  isActive    Boolean @default(true)
+
+  currencyCode      String @default("BDT")
+  monthlyPriceCents Int    @default(0)
+  annualPriceCents  Int?
+
+  // What ONE unit grants, added on top of the plan's quota. An add-on that
+  // unlocks a capability instead of raising a number sets `grantsFeature`.
+  grantsCustomDomains Int           @default(0)
+  grantsStorageMb     Int           @default(0)
+  grantsTrafficMb     Int           @default(0)
+  grantsTeamMembers   Int           @default(0)
+  grantsFeature       AddonFeature?
+
+  // null = stackable without limit (extra storage); 1 = a switch (AI assistant)
+  maxQuantity Int?
+
+  availableOnAllPlans Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  plans              AddonPlan[]
+  subscriptionAddons SubscriptionAddon[]
+
+  @@index([isActive, position])
+}
+
+enum AddonFeature {
+  AI_CONTENT_ASSISTANT
+  ADVANCED_ANALYTICS
+  PREMIUM_TEMPLATES
+  WHITE_LABEL
+}
+
+model AddonPlan {
+  addonId String
+  planId  String
+
+  addon Addon @relation(fields: [addonId], references: [id], onDelete: Cascade)
+  plan  Plan  @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@id([addonId, planId])
+}
+
+model Subscription {
+  id             String @id @default(cuid())
+  // One live subscription per organisation. A plan change mutates this row and
+  // records a PlanOrder for the history, rather than accumulating rows that
+  // every entitlement read would then have to disambiguate.
+  organizationId String @unique
+  planId         String
+
+  interval SubscriptionInterval @default(MONTHLY)
+  status   SubscriptionStatus   @default(ACTIVE)
+
+  startedAt          DateTime  @default(now())
+  currentPeriodStart DateTime  @default(now())
+  currentPeriodEnd   DateTime? // null on a free plan that never renews
+  cancelAtPeriodEnd  Boolean   @default(false)
+  canceledAt         DateTime?
+  endedAt            DateTime?
+  trialEndsAt        DateTime?
+
+  // Snapshot of the price actually agreed, so raising a plan's price does not
+  // silently re-price everyone already on it.
+  currencyCode   String @default("BDT")
+  unitPriceCents Int    @default(0)
+  discountCents  Int    @default(0)
+
+  couponId               String?
+  couponAppliedAt        DateTime?
+  // Renewals left on a REPEATING coupon. Decremented per renewal; 0 means the
+  // discount has run out and the next period bills at list price.
+  couponPeriodsRemaining Int?
+
+  // Per-organisation quota overrides: an Enterprise deal, a migration, or
+  // support goodwill. null = inherit the plan. Applied on top of the plan and
+  // before add-ons.
+  overrideMaxPages         Int?
+  overrideMaxStores        Int?
+  overrideMaxCustomDomains Int?
+  overrideMaxTeamMembers   Int?
+  overrideStorageMb        Int?
+  overrideMonthlyTrafficMb Int?
+  // Escape hatch for a tenant who must not be blocked mid-incident or
+  // mid-migration. Bypasses quota checks only — feature gates still apply.
+  quotaEnforcementDisabled Boolean @default(false)
+
+  adminNote String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  plan         Plan                   @relation(fields: [planId], references: [id])
+  coupon       PlanCoupon?            @relation(fields: [couponId], references: [id], onDelete: SetNull)
+  addons       SubscriptionAddon[]
+  orders       PlanOrder[]
+  redemptions  PlanCouponRedemption[]
+
+  @@index([status])
+  @@index([planId])
+  @@index([currentPeriodEnd])
+}
+
+enum SubscriptionInterval {
+  MONTHLY
+  ANNUAL
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PENDING // checkout finished but access not granted yet (awaiting payment)
+  PAST_DUE // reserved for when a gateway exists and a charge fails
+  CANCELED
+  EXPIRED
+}
+
+model SubscriptionAddon {
+  id             String   @id @default(cuid())
+  subscriptionId String
+  addonId        String
+  quantity       Int      @default(1)
+  unitPriceCents Int      @default(0) // snapshot, same reason as Subscription
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  addon        Addon        @relation(fields: [addonId], references: [id], onDelete: Cascade)
+
+  @@unique([subscriptionId, addonId])
+}
+
+// One attempt to start or change a subscription.
+//
+// A full order record even though nothing is charged today: every tenant is
+// being onboarded with a 100%-off coupon, so checkout reaches ৳0 and activates
+// immediately. This row is what a payment gateway will later attach to —
+// `provider`, `providerReference` and `paidAt` are that seam, and the status
+// machine already separates "nothing to pay" (AUTO_ACTIVATED) from "waiting on
+// money" (AWAITING_PAYMENT). No gateway has been chosen, so deliberately no
+// provider-specific column exists yet.
+model PlanOrder {
+  id             String  @id @default(cuid())
+  organizationId String
+  subscriptionId String?
+  planId         String
+
+  interval SubscriptionInterval
+
+  currencyCode  String @default("BDT")
+  subtotalCents Int
+  discountCents Int    @default(0)
+  totalCents    Int
+
+  couponId   String?
+  // The code as typed, kept even if the coupon row is later deleted — an
+  // order must always be able to explain its own discount.
+  couponCode String?
+
+  status PlanOrderStatus @default(AWAITING_PAYMENT)
+
+  // Snapshot of what was bought: plan name and price plus one line per add-on.
+  lineItems Json
+
+  provider          String? // set once a gateway is wired
+  providerReference String?
+  paidAt            DateTime?
+  activatedAt       DateTime?
+  canceledAt        DateTime?
+  failureReason     String?   @db.Text
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  organization Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subscription Subscription?         @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  plan         Plan                  @relation(fields: [planId], references: [id])
+  coupon       PlanCoupon?           @relation(fields: [couponId], references: [id], onDelete: SetNull)
+  redemption   PlanCouponRedemption?
+
+  @@index([organizationId, createdAt])
+  @@index([status])
+}
+
+enum PlanOrderStatus {
+  AWAITING_PAYMENT // total > 0 and no gateway is available yet
+  AUTO_ACTIVATED // total was 0 (free plan or full-discount coupon) — access granted
+  PAID
+  ACTIVATED
+  CANCELED
+  FAILED
+}
+
+// Platform-level promo code. Separate from the storefront `Discount` model,
+// which is a merchant's own promotion on their own catalogue — these two must
+// never share a table, a code namespace, or a currency.
+model PlanCoupon {
+  id          String  @id @default(cuid())
+  code        String  @unique // stored upper-cased; lookups upper-case the input
+  name        String?
+  description String?
+  isActive    Boolean @default(true)
+
+  discountType  PlanDiscountType
+  // Read according to `discountType`; the rest stay null. Separate columns
+  // rather than one polymorphic `value` so a percentage can never be read as
+  // an amount in paisa.
+  percentageBps Int? // PERCENTAGE — 10000 = 100% off
+  amountCents   Int? // FIXED_AMOUNT / OVERRIDE_PRICE
+  freeTrialDays Int? // FREE_TRIAL_DAYS
+  currencyCode  String           @default("BDT")
+
+  // How long the discount survives renewals.
+  duration       CouponDuration @default(FOREVER)
+  durationMonths Int? // REPEATING only
+
+  // ── Eligibility rules. Every one is ANDed. ──
+  appliesToAllPlans     Boolean                @default(true)
+  appliesToAddons       Boolean                @default(false)
+  allowedIntervals      SubscriptionInterval[] @default([]) // empty = any
+  newOrganizationsOnly  Boolean                @default(false) // never had a subscription
+  firstPurchaseOnly     Boolean                @default(false) // no prior PlanOrder
+  existingCustomersOnly Boolean                @default(false) // signed up before the cutoff
+  existingBeforeAt      DateTime? // the cutoff for the rule above
+  minSubtotalCents      Int?
+  minTermMonths         Int?
+  requiresVerifiedEmail Boolean                @default(false)
+
+  restrictedToOrganizationIds String[] @default([])
+  restrictedToEmails          String[] @default([])
+  restrictedToEmailDomain     String?
+
+  // ── Redemption limits ──
+  maxRedemptions       Int? // across the whole platform
+  maxRedemptionsPerOrg Int? @default(1)
+  redeemedCount        Int  @default(0)
+
+  // ── Window ──
+  startsAt DateTime?
+  endsAt   DateTime?
+
+  // Whether it may combine with another coupon on the same order.
+  isStackable Boolean @default(false)
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  createdBy     User?                  @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  plans         PlanCouponPlan[]
+  redemptions   PlanCouponRedemption[]
+  subscriptions Subscription[]
+  planOrders    PlanOrder[]
+
+  @@index([isActive, endsAt])
+}
+
+enum PlanDiscountType {
+  PERCENTAGE
+  FIXED_AMOUNT
+  FREE // 100% off for the coupon's duration — the launch/onboarding case
+  OVERRIDE_PRICE // charge exactly `amountCents`, whatever the plan costs
+  FREE_TRIAL_DAYS // no discount; extends the trial instead
+}
+
+enum CouponDuration {
+  ONCE // the first period only
+  REPEATING // `durationMonths` periods
+  FOREVER // every renewal for the life of the subscription
+}
+
+model PlanCouponPlan {
+  couponId String
+  planId   String
+
+  coupon PlanCoupon @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  plan   Plan       @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@id([couponId, planId])
+}
+
+model PlanCouponRedemption {
+  id             String   @id @default(cuid())
+  couponId       String
+  organizationId String
+  subscriptionId String?
+  planOrderId    String?  @unique
+  discountCents  Int      @default(0)
+  redeemedAt     DateTime @default(now())
+
+  coupon       PlanCoupon    @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subscription Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  planOrder    PlanOrder?    @relation(fields: [planOrderId], references: [id], onDelete: SetNull)
+
+  @@index([couponId, organizationId])
+}
+
+// ── Usage metering ────────────────────────────────────────────────────────
+
+model UsageCounter {
+  id             String      @id @default(cuid())
+  organizationId String
+  metric         UsageMetric
+  // "2026-08" for metrics that reset monthly, "current" for stock metrics like
+  // bytes stored. One text column rather than a pair of nullable dates keeps
+  // the unique constraint that makes the increment a single atomic upsert.
+  period         String
+  // Bytes overflow a 32-bit Int at 2.1GB and the smallest paid tier already
+  // allows 100GB of traffic. Always mapped to Number at the service boundary —
+  // BigInt is not JSON-serialisable and would break any client component it
+  // reached.
+  value          BigInt      @default(0)
+  updatedAt      DateTime    @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, metric, period])
+  @@index([metric, period])
+}
+
+enum UsageMetric {
+  STORAGE_BYTES
+  TRAFFIC_BYTES
+  VISITORS
+  PAGE_VIEWS
+  AI_GENERATIONS
+}
+
+// ── Custom domains ────────────────────────────────────────────────────────
+
+// A hostname a tenant owns, pointed at one of their stores.
+//
+// Its own table rather than a column on Store because the quota is "N custom
+// domains per organisation" and a single site legitimately answers on more
+// than one name (apex plus www, or a campaign domain).
+model CustomDomain {
+  id             String @id @default(cuid())
+  organizationId String
+  storeId        String
+  hostname       String @unique // lower-cased, no scheme, no trailing dot
+
+  // The name canonical links and emails use, when several point at one store.
+  isPrimary  Boolean          @default(false)
+  status     DomainStatus     @default(PENDING)
+  // Apex domains cannot legally hold a CNAME, so the record the tenant is
+  // told to create differs by domain shape.
+  recordType DomainRecordType @default(CNAME)
+
+  // Proof of control, checked before we answer for the name: a TXT record at
+  // _ncom-challenge.<hostname> carrying this value. Random per domain, so one
+  // tenant cannot pre-verify a hostname they do not own and then have it
+  // handed to them when the real owner adds it.
+  verificationToken String
+
+  verifiedAt    DateTime?
+  lastCheckedAt DateTime?
+  lastError     String?   @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  store        Store        @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([storeId])
+  @@index([status])
+}
+
+enum DomainRecordType {
+  CNAME
+  A
+}
+
+// ── Outbound email ────────────────────────────────────────────────────────
+
+// SMTP credentials, one row per purpose.
+//
+// Per-purpose rather than one global server so a platform can send OTPs
+// through a transactional provider and newsletters through a bulk one without
+// either one's sending reputation touching the other. DEFAULT is the fallback
+// for any purpose with no row of its own.
+model EmailSmtpConfig {
+  id        String       @id @default(cuid())
+  purpose   EmailPurpose @unique
+  label     String?
+  // Off means "do not send this category at all" — the send is recorded as
+  // SKIPPED rather than failing the surrounding operation.
+  isEnabled Boolean      @default(true)
+
+  host              String
+  port              Int            @default(587)
+  encryption        SmtpEncryption @default(STARTTLS)
+  username          String
+  // AES-256-GCM via lib/crypto.ts. Never selected into anything that reaches
+  // the client: the admin UI shows a mask and only writes on change.
+  passwordEncrypted String?        @db.Text
+
+  fromName     String
+  fromEmail    String
+  replyToEmail String?
+
+  // Written by the admin "send test" button so a misconfigured server is
+  // visible in the UI instead of only in the logs.
+  lastTestAt    DateTime?
+  lastTestOk    Boolean?
+  lastTestError String?   @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum EmailPurpose {
+  DEFAULT
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
+  TEAM_INVITATION
+  BILLING
+  DOMAIN_ALERT
+  USAGE_ALERT
+  ORDER_RECEIPT
+  MARKETING
+  SYSTEM_ALERT
+}
+
+enum SmtpEncryption {
+  NONE
+  STARTTLS
+  SSL_TLS
+}
+
+model EmailLog {
+  id        String       @id @default(cuid())
+  purpose   EmailPurpose
+  toEmail   String
+  subject   String
+  status    EmailStatus
+  error     String?      @db.Text
+  smtpHost  String?
+  // Never the body, and never the OTP itself: this table is read by support,
+  // and a log that lets you read the code you were sent is a code you did not
+  // need email access to receive.
+  createdAt DateTime     @default(now())
+
+  @@index([createdAt])
+  @@index([toEmail])
+  @@index([purpose, status])
+}
+
+enum EmailStatus {
+  SENT
+  FAILED
+  SKIPPED // no SMTP configured, or the purpose is disabled
+}
+
+// A one-time code emailed to prove control of an address.
+model EmailVerificationCode {
+  id         String     @id @default(cuid())
+  userId     String?
+  email      String
+  purpose    OtpPurpose @default(EMAIL_VERIFICATION)
+  // Only the hash is stored, for the same reason OrgInvitation stores
+  // tokenHash: a leaked database must not let anyone complete a verification.
+  codeHash   String
+  // A code dies after a few wrong guesses, so a 6-digit secret cannot be
+  // brute-forced inside its lifetime — 10 minutes is otherwise plenty of time
+  // to walk the whole keyspace.
+  attempts   Int        @default(0)
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime   @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([email, purpose])
+  @@index([expiresAt])
+}
+
+enum OtpPurpose {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
+  LOGIN_CHALLENGE
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// COMMERCE
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Scoping: every commerce row hangs off a Store, never off an Organization
+// directly. An org can run several stores and a
+// product in one must never be reachable from another, so every tenant query
+// filters on storeId and every service call goes through requireOrgAccess
+// on the store's owning org first.
+//
+// Money: all amounts are Int in the currency's minor unit (cents, paisa) —
+// never Float, never Decimal-as-string. The currency code lives on the owning
+// aggregate (StoreSettings.currencyCode, Order.currencyCode) rather than
+// beside each amount, which makes it structurally impossible for one order to
+// mix currencies. Percentages are basis points (Int, 1/100th of a percent) for
+// the same reason. See lib/money.ts.
+//
+// Snapshots: Order and OrderLine copy the title, variant title, SKU, price and
+// tax that applied at purchase time. Editing or deleting a product later must
+// never change what an existing order says it sold. This is the same rule
+// PageVersion.snapshot follows on the CMS side, for the same reason — except
+// here it is also a legal/accounting requirement, so order rows are treated as
+// append-only: corrections create Refund/Transaction rows, they never UPDATE
+// the original amounts.
+
+// ── Store configuration ──────────────────────────────────────────────────
+
+model OrganizationSettings {
+  id             String @id @default(cuid())
+  organizationId String @unique
+
+  currencyCode String     @default("USD") // ISO 4217
+  weightUnit   WeightUnit @default(KILOGRAM)
+
+  // When true, catalog prices are treated as tax-inclusive: tax is backed out
+  // of the line total for display/reporting rather than added on top. This
+  // changes every price calculation in the store, so it is deliberately not
+  // editable once the store has orders.
+  pricesIncludeTax        Boolean @default(false)
+  taxesIncludedInShipping Boolean @default(false)
+
+  // Storefront behaviour.
+  customerAccountsEnabled   Boolean @default(true)
+  requiresCustomerAccount   Boolean @default(false)
+  allowOutOfStockPurchase   Boolean @default(false)
+  abandonedCartAfterMinutes Int     @default(60)
+
+  // Order identity. Orders are numbered per store, not globally, so a store's
+  // first order is #1001 and stays stable regardless of platform-wide volume.
+  orderNumberPrefix String @default("#")
+  orderNumberSuffix String @default("")
+  nextOrderNumber   Int    @default(1001)
+
+  // Contact / legal shown on the storefront and on receipts.
+  supportEmail    String?
+  supportPhone    String?
+  businessName    String?
+  businessAddress Json?
+
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+enum WeightUnit {
+  GRAM
+  KILOGRAM
+  OUNCE
+  POUND
+}
+
+// ── Catalog ──────────────────────────────────────────────────────────────
+
+model Product {
+  id             String @id @default(cuid())
+  organizationId String
+
+  title       String
+  handle      String // URL slug, unique per store
+  description String?       @db.Text
+  status      ProductStatus @default(DRAFT)
+  productType String?
+  vendor      String?
+  tags        String[]      @default([])
+
+  seoTitle       String?
+  seoDescription String?
+
+  publishedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  options      ProductOption[]
+  variants     ProductVariant[]
+  images       ProductImage[]
+  collections  CollectionProduct[]
+  orderLines   OrderLine[]
+  offerItems   OfferItem[]
+
+  @@unique([organizationId, handle])
+  @@index([organizationId, status])
+  @@index([organizationId, createdAt])
+}
+
+enum ProductStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+// A product's variant axes ("Size", "Color"). Capped at 3 by convention to
+// match variant.option1/2/3 below and Liquid's `product.options` contract.
+model ProductOption {
+  id        String   @id @default(cuid())
+  productId String
+  name      String
+  position  Int
+  values    String[] @default([])
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, position])
+}
+
+// option1/2/3 are denormalized rather than a variant↔optionValue join table.
+// It caps variants at 3 axes, but it makes the hot storefront query (find the
+// variant for a chosen combination) a single indexed lookup instead of a
+// relational intersection, and it is the shape Liquid templates already expect.
+model ProductVariant {
+  id        String @id @default(cuid())
+  productId String
+
+  title    String // "Small / Red", derived from the option values
+  sku      String?
+  barcode  String?
+  position Int     @default(1)
+
+  option1 String?
+  option2 String?
+  option3 String?
+
+  priceCents          Int
+  compareAtPriceCents Int? // shown struck through when higher than priceCents
+  costCents           Int? // for margin reporting; never exposed to the storefront
+
+  // Tax
+  isTaxable Boolean @default(true)
+  taxCode   String?
+
+  // Inventory. `inventoryTracked = false` means infinite stock (services,
+  // digital goods). When tracked, availability is the sum of InventoryLevel
+  // rows across locations, and `inventoryPolicy` decides what happens at zero.
+  inventoryTracked Boolean         @default(true)
+  inventoryPolicy  InventoryPolicy @default(DENY)
+
+  // Shipping
+  requiresShipping Boolean @default(true)
+  weightGrams      Int     @default(0)
+
+  imageId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  product         Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
+  image           ProductImage?    @relation(fields: [imageId], references: [id], onDelete: SetNull)
+  inventoryLevels InventoryLevel[]
+  cartLines       CartLine[]
+  orderLines      OrderLine[]
+  offerItems      OfferItem[]
+
+  @@unique([productId, option1, option2, option3])
+  @@index([productId, position])
+  @@index([sku])
+}
+
+enum InventoryPolicy {
+  DENY // stop selling at zero
+  CONTINUE // allow overselling / backorder
+}
+
+model ProductImage {
+  id        String  @id @default(cuid())
+  productId String
+  mediaId   String
+  altText   String?
+  position  Int     @default(0)
+
+  product  Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
+  media    MediaAsset       @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  variants ProductVariant[]
+
+  @@index([productId, position])
+}
+
+// ── Collections ──────────────────────────────────────────────────────────
+
+model Collection {
+  id             String @id @default(cuid())
+  organizationId String
+
+  title        String
+  handle       String
+  description  String? @db.Text
+  imageMediaId String?
+
+  // MANUAL collections are ordered by CollectionProduct.position; AUTOMATED
+  // ones are computed from `rules` at query time (and cached), so their
+  // CollectionProduct rows are not authoritative and are not written.
+  type       CollectionType @default(MANUAL)
+  rules      Json? // CollectionRule[] — see lib/validation/collection.ts
+  rulesMatch RuleMatch      @default(ALL)
+  sortOrder  CollectionSort @default(MANUAL)
+
+  seoTitle       String?
+  seoDescription String?
+
+  publishedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  products     CollectionProduct[]
+
+  @@unique([organizationId, handle])
+  @@index([organizationId])
+}
+
+enum CollectionType {
+  MANUAL
+  AUTOMATED
+}
+
+enum RuleMatch {
+  ALL
+  ANY
+}
+
+enum CollectionSort {
+  MANUAL
+  BEST_SELLING
+  TITLE_ASC
+  TITLE_DESC
+  PRICE_ASC
+  PRICE_DESC
+  CREATED_ASC
+  CREATED_DESC
+}
+
+model CollectionProduct {
+  collectionId String
+  productId    String
+  position     Int    @default(0)
+
+  collection Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  product    Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@id([collectionId, productId])
+  @@index([collectionId, position])
+}
+
+// ── Inventory ────────────────────────────────────────────────────────────
+
+model Location {
+  id             String @id @default(cuid())
+  organizationId String
+
+  name                 String
+  address              Json?
+  isActive             Boolean @default(true)
+  fulfillsOnlineOrders Boolean @default(true)
+
+  createdAt DateTime @default(now())
+
+  organization Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  levels       InventoryLevel[]
+  fulfillments Fulfillment[]
+
+  @@index([organizationId])
+}
+
+model InventoryLevel {
+  id         String @id @default(cuid())
+  locationId String
+  variantId  String
+
+  // `available` is what can still be sold. `committed` is reserved by orders
+  // that are placed but not yet fulfilled — it is tracked separately so the
+  // storefront never sells stock that is already promised to someone else.
+  available Int @default(0)
+  committed Int @default(0)
+
+  updatedAt DateTime @updatedAt
+
+  location Location       @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  variant  ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@unique([locationId, variantId])
+  @@index([variantId])
+}
+
+// Append-only ledger of every stock movement. Reconstructing how a variant
+// reached its current count is the first thing anyone asks during an inventory
+// dispute, and it cannot be recovered from InventoryLevel alone.
+model InventoryAdjustment {
+  id         String @id @default(cuid())
+  locationId String
+  variantId  String
+
+  delta       Int
+  reason      InventoryReason
+  referenceId String? // order id, fulfillment id, manual adjustment note id
+  note        String?
+  actorUserId String?
+  createdAt   DateTime        @default(now())
+
+  @@index([variantId, createdAt])
+  @@index([locationId, createdAt])
+}
+
+enum InventoryReason {
+  MANUAL
+  ORDER_PLACED
+  ORDER_CANCELLED
+  FULFILLED
+  RESTOCK
+  REFUND
+  RECEIVED
+  DAMAGED
+  CORRECTION
+}
+
+// ── Customers ────────────────────────────────────────────────────────────
+
+// Storefront customers are deliberately NOT platform Users. A person who buys
+// from a tenant's store has no account on NCOM itself, must never appear in an
+// org's member list, and their credentials live in a different trust domain.
+// The two tables must never be merged.
+model Customer {
+  id             String @id @default(cuid())
+  organizationId String
+
+  // Optional because a cash-on-delivery storefront identifies buyers by phone
+  // number, not email. Exactly one of email/phone is guaranteed present by the
+  // checkout layer, which is the only place customers are created.
+  email           String?
+  firstName       String?
+  lastName        String?
+  phone           String?
+  passwordHash    String? // null for guest checkouts that were never converted
+  emailVerifiedAt DateTime?
+
+  acceptsMarketing Boolean   @default(false)
+  marketingOptInAt DateTime?
+
+  note String?
+  tags String[] @default([])
+
+  // Denormalized lifetime stats, recomputed on order transitions. Kept on the
+  // row because "customers sorted by spend" is a hot admin query that would
+  // otherwise aggregate the whole order table per page load.
+  ordersCount     Int @default(0)
+  totalSpentCents Int @default(0)
+
+  lastOrderAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  addresses    CustomerAddress[]
+  carts        Cart[]
+  orders       Order[]
+  sessions     CustomerSession[]
+
+  @@unique([organizationId, email])
+  // Not unique: a household sharing one number is normal in COD markets, and a
+  // unique constraint there would reject the second person's order outright.
+  @@index([organizationId, phone])
+  @@index([organizationId, createdAt])
+}
+
+model CustomerAddress {
+  id         String @id @default(cuid())
+  customerId String
+
+  firstName    String?
+  lastName     String?
+  company      String?
+  address1     String
+  address2     String?
+  city         String
+  provinceCode String?
+  countryCode  String // ISO 3166-1 alpha-2
+  postalCode   String?
+  phone        String?
+  isDefault    Boolean @default(false)
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+}
+
+model CustomerSession {
+  id         String   @id @default(cuid())
+  customerId String
+  tokenHash  String   @unique
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+}
+
+// ── Cart ─────────────────────────────────────────────────────────────────
+
+model Cart {
+  id             String  @id @default(cuid())
+  organizationId String
+  /// Which storefront this cart was started on. Attribution only — nulled if
+  /// the store is deleted, because the cart and any order belong to the
+  /// organisation and must outlive the site that produced them.
+  storeId        String?
+
+  // Anonymous carts are addressed by an unguessable token held in a cookie on
+  // the storefront domain; `customerId` is attached on login and survives it.
+  token      String  @unique @default(cuid())
+  customerId String?
+
+  currencyCode String
+  note         String?
+  attributes   Json? // free-form line-item/cart properties set by the theme
+
+  discountCode String?
+
+  // Checkout progress. A cart becomes an Order exactly once; `completedAt`
+  // plus a unique constraint on Order.cartId is what makes a double-submitted
+  // checkout idempotent instead of charging twice.
+  email           String?
+  phone           String?
+  shippingAddress Json?
+  billingAddress  Json?
+  shippingRateId  String?
+
+  completedAt DateTime?
+  expiresAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  store        Store?       @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  customer     Customer?    @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  lines        CartLine[]
+  order        Order?
+
+  @@index([organizationId, updatedAt])
+  @@index([customerId])
+}
+
+model CartLine {
+  id     String @id @default(cuid())
+  cartId String
+
+  variantId String
+  quantity  Int
+
+  // Price is re-read from the variant on every cart render rather than trusted
+  // from here — this column only records what the shopper was last shown, so
+  // the storefront can tell them "the price changed" instead of silently
+  // charging a different amount.
+  unitPriceCents Int
+  properties     Json? // engraving text, gift note, etc.
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  cart    Cart           @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  variant ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@unique([cartId, variantId])
+  @@index([cartId])
+}
+
+// ── Orders ───────────────────────────────────────────────────────────────
+
+model Order {
+  id                String  @id @default(cuid())
+  organizationId    String
+  /// Which storefront the order came through. Attribution only — nulled if the
+  /// store is deleted, because an order is a financial record of the
+  /// organisation and must never disappear with a website.
+  storeId           String?
+  /// Which landing page, and which offer on it, produced this order. A store
+  /// may run a dozen campaign pages against one catalogue, and "which ad paid
+  /// for this" is the question a merchant asks of every order — so it is
+  /// recorded here rather than inferred from the cart later.
+  ///
+  /// The label and prices are copied rather than joined: an offer is edited
+  /// constantly while a campaign runs, and an order must keep reporting what it
+  /// was actually sold at, not what the offer says today. `pageId` nulls if the
+  /// page is deleted for the same reason `storeId` does.
+  pageId            String?
+  offerKey          String?
+  offerLabel        String?
+  /// What the offer charged for goods, and what those goods list for, both at
+  /// the moment of sale. The difference is the campaign discount.
+  offerPriceCents   Int?
+  offerRegularCents Int?
+
+  // Human-facing number ("#1001"), unique per organisation. `cartId` is unique so a
+  // cart can convert to at most one order — the idempotency key for checkout.
+  orderNumber String
+  cartId      String? @unique
+
+  customerId String?
+  // A cash-on-delivery order is placed with a phone number and an address; an
+  // email is frequently not collected at all. The checkout layer guarantees at
+  // least one contact method, so an order is never unreachable.
+  email      String?
+  phone      String?
+
+  currencyCode String
+
+  // Monetary breakdown, all in minor units. These are computed once at
+  // checkout from the line items and never recalculated — a later price or tax
+  // change must not retroactively alter a placed order.
+  subtotalCents      Int
+  discountTotalCents Int @default(0)
+  shippingTotalCents Int @default(0)
+  taxTotalCents      Int @default(0)
+  totalCents         Int
+  // Running totals maintained by Transaction/Refund rows.
+  paidTotalCents     Int @default(0)
+  refundedTotalCents Int @default(0)
+
+  financialStatus   FinancialStatus   @default(PENDING)
+  fulfillmentStatus FulfillmentStatus @default(UNFULFILLED)
+
+  shippingAddress     Json?
+  billingAddress      Json?
+  // Denormalized from shippingAddress purely so tax/shipping reporting can
+  // group by country without unpacking JSON on every row.
+  shippingCountryCode String?
+
+  shippingMethodTitle String?
+  discountCode        String?
+
+  note          String?
+  tags          String[] @default([])
+  // Marketing attribution captured at checkout.
+  landingSite   String?
+  referringSite String?
+
+  cancelledAt  DateTime?
+  cancelReason CancelReason?
+  closedAt     DateTime?
+  processedAt  DateTime      @default(now())
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  store        Store?        @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  page         Page?         @relation(fields: [pageId], references: [id], onDelete: SetNull)
+  customer     Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  cart         Cart?         @relation(fields: [cartId], references: [id], onDelete: SetNull)
+  lines        OrderLine[]
+  transactions Transaction[]
+  fulfillments Fulfillment[]
+  refunds      Refund[]
+  events       OrderEvent[]
+
+  @@unique([organizationId, orderNumber])
+  @@index([organizationId, createdAt])
+  @@index([organizationId, financialStatus])
+  @@index([organizationId, fulfillmentStatus])
+  @@index([customerId])
+  @@index([pageId])
+}
+
+enum FinancialStatus {
+  PENDING
+  AUTHORIZED
+  PARTIALLY_PAID
+  PAID
+  PARTIALLY_REFUNDED
+  REFUNDED
+  VOIDED
+}
+
+enum FulfillmentStatus {
+  UNFULFILLED
+  PARTIALLY_FULFILLED
+  FULFILLED
+  RESTOCKED
+}
+
+enum CancelReason {
+  CUSTOMER
+  FRAUD
+  INVENTORY
+  DECLINED
+  OTHER
+}
+
+// Every descriptive field here is a snapshot taken at checkout. productId and
+// variantId are nullable and SetNull on delete: the order must survive the
+// product being deleted, and it still reads correctly because the title, SKU
+// and price are stored inline rather than joined.
+model OrderLine {
+  id      String @id @default(cuid())
+  orderId String
+
+  productId String?
+  variantId String?
+
+  title        String
+  variantTitle String?
+  sku          String?
+  vendor       String?
+
+  quantity           Int
+  unitPriceCents     Int
+  totalDiscountCents Int   @default(0)
+  taxTotalCents      Int   @default(0)
+  taxLines           Json? // [{ title, rateBps, amountCents }]
+  totalCents         Int
+
+  requiresShipping Boolean @default(true)
+  weightGrams      Int     @default(0)
+  properties       Json?
+
+  // Drives partial fulfillment and partial refunds.
+  fulfilledQuantity Int @default(0)
+  refundedQuantity  Int @default(0)
+
+  order   Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product?        @relation(fields: [productId], references: [id], onDelete: SetNull)
+  variant ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+
+  fulfillmentLines FulfillmentLine[]
+  refundLines      RefundLine[]
+
+  @@index([orderId])
+}
+
+// ── Payments ─────────────────────────────────────────────────────────────
+
+model PaymentProviderConfig {
+  id             String @id @default(cuid())
+  organizationId String
+
+  provider    PaymentProvider
+  displayName String
+  isEnabled   Boolean         @default(false)
+  testMode    Boolean         @default(true)
+  position    Int             @default(0)
+
+  // Encrypted at rest by lib/crypto.ts — never select this column into
+  // anything that reaches the client or a Liquid drop.
+  credentials  Json?
+  // Shown to the shopper for offline methods (bank details, COD terms).
+  instructions String? @db.Text
+
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, provider])
+}
+
+enum PaymentProvider {
+  STRIPE
+  PAYPAL
+  RAZORPAY
+  SSLCOMMERZ
+  BKASH
+  MANUAL
+  CASH_ON_DELIVERY
+}
+
+// Append-only money ledger. An order's paid/refunded totals are the sum of
+// these rows; nothing else is allowed to move money.
+model Transaction {
+  id      String @id @default(cuid())
+  orderId String
+
+  kind         TransactionKind
+  status       TransactionStatus @default(PENDING)
+  provider     PaymentProvider
+  amountCents  Int
+  currencyCode String
+
+  gatewayReference String? // provider-side id, for reconciliation
+  errorCode        String?
+  errorMessage     String?
+  // Raw provider payload, kept for disputes. May contain PII.
+  gatewayResponse  Json?
+
+  processedAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([gatewayReference])
+}
+
+enum TransactionKind {
+  AUTHORIZATION
+  CAPTURE
+  SALE
+  REFUND
+  VOID
+}
+
+enum TransactionStatus {
+  PENDING
+  SUCCESS
+  FAILURE
+  ERROR
+}
+
+// ── Fulfillment & refunds ────────────────────────────────────────────────
+
+model Fulfillment {
+  id         String  @id @default(cuid())
+  orderId    String
+  locationId String?
+
+  status          FulfillmentState @default(PENDING)
+  trackingCompany String?
+  trackingNumber  String?
+  trackingUrl     String?
+  notifyCustomer  Boolean          @default(true)
+
+  shippedAt   DateTime?
+  deliveredAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  order    Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  location Location?         @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  lines    FulfillmentLine[]
+
+  @@index([orderId])
+}
+
+enum FulfillmentState {
+  PENDING
+  OPEN
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  FAILURE
+}
+
+model FulfillmentLine {
+  id            String @id @default(cuid())
+  fulfillmentId String
+  orderLineId   String
+  quantity      Int
+
+  fulfillment Fulfillment @relation(fields: [fulfillmentId], references: [id], onDelete: Cascade)
+  orderLine   OrderLine   @relation(fields: [orderLineId], references: [id], onDelete: Cascade)
+
+  @@index([fulfillmentId])
+}
+
+model Refund {
+  id      String @id @default(cuid())
+  orderId String
+
+  amountCents   Int
+  shippingCents Int     @default(0)
+  taxCents      Int     @default(0)
+  reason        String?
+  note          String?
+  restock       Boolean @default(true)
+  actorUserId   String?
+
+  createdAt DateTime @default(now())
+
+  order Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  lines RefundLine[]
+
+  @@index([orderId])
+}
+
+model RefundLine {
+  id          String @id @default(cuid())
+  refundId    String
+  orderLineId String
+  quantity    Int
+  amountCents Int
+
+  refund    Refund    @relation(fields: [refundId], references: [id], onDelete: Cascade)
+  orderLine OrderLine @relation(fields: [orderLineId], references: [id], onDelete: Cascade)
+
+  @@index([refundId])
+}
+
+// Human-readable order timeline ("payment captured", "note added"). Distinct
+// from AuditLog, which is platform-operator facing: these events are shown to
+// the merchant in the order detail view.
+model OrderEvent {
+  id      String @id @default(cuid())
+  orderId String
+
+  type        String
+  message     String
+  metadata    Json?
+  actorUserId String?
+  createdAt   DateTime @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId, createdAt])
+}
+
+// ── Discounts ────────────────────────────────────────────────────────────
+
+// One Discount (the rule) can have several DiscountCodes (the strings shoppers
+// type), which is how a single campaign runs per-influencer codes.
+model Discount {
+  id             String @id @default(cuid())
+  organizationId String
+
+  title  String
+  method DiscountMethod @default(CODE)
+  type   DiscountType
+
+  // PERCENTAGE reads valueBps (basis points); FIXED_AMOUNT and the BXGY
+  // reward read valueCents. FREE_SHIPPING reads neither.
+  valueBps   Int?
+  valueCents Int?
+
+  appliesTo           DiscountScope @default(ALL)
+  targetProductIds    String[]      @default([])
+  targetCollectionIds String[]      @default([])
+
+  // Entry conditions.
+  minimumSubtotalCents Int?
+  minimumQuantity      Int?
+
+  // Buy X Get Y.
+  buyQuantity Int?
+  getQuantity Int?
+
+  // Usage limits. `usageCount` is incremented inside the checkout transaction
+  // so a limited code cannot be redeemed past its cap by concurrent checkouts.
+  usageLimit        Int?
+  usageCount        Int     @default(0)
+  oncePerCustomer   Boolean @default(false)
+  combinesWithOther Boolean @default(false)
+
+  startsAt  DateTime  @default(now())
+  endsAt    DateTime?
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  codes        DiscountCode[]
+
+  @@index([organizationId, isActive])
+}
+
+enum DiscountMethod {
+  CODE
+  AUTOMATIC
+}
+
+enum DiscountType {
+  PERCENTAGE
+  FIXED_AMOUNT
+  FREE_SHIPPING
+  BUY_X_GET_Y
+}
+
+enum DiscountScope {
+  ALL
+  PRODUCTS
+  COLLECTIONS
+}
+
+model DiscountCode {
+  id         String @id @default(cuid())
+  discountId String
+  code       String
+  usageCount Int    @default(0)
+
+  discount Discount @relation(fields: [discountId], references: [id], onDelete: Cascade)
+
+  @@unique([discountId, code])
+  @@index([code])
+}
+
+// ── Shipping & tax ───────────────────────────────────────────────────────
+
+model ShippingZone {
+  id             String @id @default(cuid())
+  organizationId String
+
+  name         String
+  countryCodes String[] @default([]) // empty = rest of world
+  createdAt    DateTime @default(now())
+
+  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  rates        ShippingRate[]
+
+  @@index([organizationId])
+}
+
+// A rate applies when the cart falls inside BOTH its price band and its weight
+// band (null bound = open-ended). Rates are evaluated cheapest-first.
+model ShippingRate {
+  id     String @id @default(cuid())
+  zoneId String
+
+  name        String
+  priceCents  Int
+  description String?
+
+  minSubtotalCents Int?
+  maxSubtotalCents Int?
+  minWeightGrams   Int?
+  maxWeightGrams   Int?
+
+  position Int @default(0)
+
+  zone ShippingZone @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+
+  @@index([zoneId, position])
+}
+
+model TaxRate {
+  id             String @id @default(cuid())
+  organizationId String
+
+  name              String
+  countryCode       String
+  provinceCode      String?
+  rateBps           Int // basis points: 8.25% = 825
+  appliesToShipping Boolean @default(false)
+  // When set, only variants carrying this tax code use the rate.
+  taxCode           String?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, countryCode, provinceCode, taxCode])
+  @@index([organizationId])
+}
+
+// ── Liquid theme layer ───────────────────────────────────────────────────
+
+// The Liquid templates that render storefront routes which have no Page row of
+// their own (a product page is generated from data, not composed in the
+// builder). `source` is untrusted tenant input, rendered in the sandbox in
+// lib/liquid/engine.ts and compiled to HTML at publish time.
+model StorefrontTemplate {
+  id      String @id @default(cuid())
+  storeId String
+
+  type   StorefrontTemplateType
+  source String                 @db.Text
+
+  // Publish pipeline, mirroring Page/PageVersion: `source` is the draft,
+  // `compiledHtml` is what the public renderer serves.
+  publishedSource String?   @db.Text
+  publishedAt     DateTime?
+
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, type])
+}
+
+enum StorefrontTemplateType {
+  PRODUCT
+  COLLECTION
+  COLLECTION_LIST
+  CART
+  SEARCH
+  CUSTOMER_ACCOUNT
+  CUSTOMER_LOGIN
+  ORDER_STATUS
+  NOT_FOUND
+}
+
+// Reusable Liquid partials, addressed by `{% render 'name' %}`. The engine's
+// filesystem is restricted to this table scoped to the current store, which
+// is what stops a template from reading anything off disk or from another
+// tenant.
+model LiquidSnippet {
+  id      String @id @default(cuid())
+  storeId String
+
+  name   String
+  source String @db.Text
+
+  publishedSource String? @db.Text
+
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, name])
 }

@@ -2,6 +2,7 @@ import 'server-only'
 import { prisma } from '@/server/db/client'
 import { requirePlatformAdmin } from '@/server/auth/rbac'
 import { logAudit } from '@/server/services/auditService'
+import { ADMIN_BOOTSTRAP_KEY } from '@/server/services/authService'
 import type { PlatformRole } from '@/generated/prisma/enums'
 
 export async function getPlatformOverview() {
@@ -10,14 +11,14 @@ export async function getPlatformOverview() {
   const [
     userCount,
     organizationCount,
-    projectCount,
+    storeCount,
     publishedPageCount,
     templateCount,
     mediaAssetCount,
   ] = await Promise.all([
     prisma.user.count(),
     prisma.organization.count(),
-    prisma.project.count(),
+    prisma.store.count(),
     prisma.page.count({ where: { status: 'PUBLISHED' } }),
     prisma.template.count(),
     prisma.mediaAsset.count(),
@@ -26,7 +27,7 @@ export async function getPlatformOverview() {
   return {
     userCount,
     organizationCount,
-    projectCount,
+    storeCount,
     publishedPageCount,
     templateCount,
     mediaAssetCount,
@@ -95,7 +96,7 @@ export async function listOrganizations() {
 
   return prisma.organization.findMany({
     include: {
-      _count: { select: { memberships: true, projects: true } },
+      _count: { select: { memberships: true, stores: true } },
     },
     orderBy: { createdAt: 'desc' },
   })
@@ -108,7 +109,7 @@ export async function getOrganizationDetail(organizationId: string) {
     where: { id: organizationId },
     include: {
       memberships: { include: { user: true } },
-      projects: { include: { _count: { select: { pages: true } } } },
+      stores: { include: { _count: { select: { pages: true } } } },
     },
   })
   if (!organization) throw new Error('Organization not found')
@@ -116,12 +117,12 @@ export async function getOrganizationDetail(organizationId: string) {
   return organization
 }
 
-// ── Projects ────────────────────────────────────────────────────────────
+// ── Stores ────────────────────────────────────────────────────────────
 
-export async function listAllProjects() {
+export async function listAllStores() {
   await requirePlatformAdmin()
 
-  return prisma.project.findMany({
+  return prisma.store.findMany({
     include: {
       organization: true,
       _count: { select: { pages: true } },
@@ -131,15 +132,15 @@ export async function listAllProjects() {
   })
 }
 
-export async function forceUnpublishProject(projectId: string) {
+export async function forceUnpublishStore(storeId: string) {
   const session = await requirePlatformAdmin()
 
   const result = await prisma.page.updateMany({
-    where: { projectId, status: 'PUBLISHED' },
+    where: { storeId, status: 'PUBLISHED' },
     data: { status: 'UNPUBLISHED' },
   })
 
-  await logAudit(session.user.id, 'force-unpublish', 'Project', projectId, {
+  await logAudit(session.user.id, 'force-unpublish', 'Store', storeId, {
     pagesUnpublished: result.count,
   })
 
@@ -153,7 +154,7 @@ export async function listPublishedPagesForModeration() {
 
   return prisma.page.findMany({
     where: { status: 'PUBLISHED' },
-    include: { project: { include: { organization: true } } },
+    include: { store: { include: { organization: true } } },
     orderBy: { publishedAt: 'desc' },
     take: 200,
   })
@@ -233,8 +234,32 @@ export async function listPlatformSettings() {
   return prisma.platformSetting.findMany({ orderBy: { key: 'asc' } })
 }
 
+/**
+ * Keys the raw key/value editor may not touch.
+ *
+ * The admin-bootstrap latch is what stops "the first user to register becomes
+ * administrator" from re-arming. Deleting it would re-open that path on a live
+ * platform, and it is one mis-click away in a free-text editor whose other rows
+ * are all harmless feature flags.
+ *
+ * This is not a privilege boundary — anyone reaching this function is already a
+ * platform admin and could grant roles outright. It exists so that reopening the
+ * most sensitive path in the system cannot happen by accident, and has to be a
+ * deliberate act at the database.
+ */
+const PROTECTED_SETTING_KEYS = new Set<string>([ADMIN_BOOTSTRAP_KEY])
+
+function assertSettingIsEditable(key: string) {
+  if (PROTECTED_SETTING_KEYS.has(key)) {
+    throw new Error(
+      `"${key}" is managed by the platform and cannot be edited here. It records that the administrator seat has been claimed; removing it would let the next account to register become an administrator.`
+    )
+  }
+}
+
 export async function upsertPlatformSetting(key: string, value: unknown) {
   const session = await requirePlatformAdmin()
+  assertSettingIsEditable(key)
 
   const setting = await prisma.platformSetting.upsert({
     where: { key },
@@ -248,6 +273,8 @@ export async function upsertPlatformSetting(key: string, value: unknown) {
 
 export async function deletePlatformSetting(key: string) {
   const session = await requirePlatformAdmin()
+  assertSettingIsEditable(key)
+
   await prisma.platformSetting.delete({ where: { key } })
   await logAudit(session.user.id, 'delete', 'PlatformSetting', key)
 }

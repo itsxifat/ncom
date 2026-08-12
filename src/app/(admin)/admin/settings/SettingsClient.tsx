@@ -1,14 +1,18 @@
 'use client'
 
 import { useTransition, useActionState } from 'react'
+import { Plus, SlidersHorizontal, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Card, CardContent } from '@/components/ui/card'
 import {
   Field,
   FieldError,
   FieldGroup,
   FieldLabel,
 } from '@/components/ui/field'
+import { EmptyState } from '@/components/app/empty-state'
+import { ListPanel, ListRow, ListRowActions } from '@/components/app/list-panel'
 import {
   upsertPlatformSettingAction,
   deletePlatformSettingAction,
@@ -28,70 +32,76 @@ export function SettingsClient({ settings }: { settings: Setting[] }) {
   const [isPending, startTransition] = useTransition()
 
   return (
-    <div className="flex flex-col gap-6">
-      <form action={action}>
-        <FieldGroup>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_2fr_auto]">
-            <Field>
-              <FieldLabel htmlFor="key">Key</FieldLabel>
-              <Input id="key" name="key" placeholder="feature.betaBanner" />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="value">Value (JSON)</FieldLabel>
-              <Input
-                id="value"
-                name="value"
-                placeholder='"Hello" or true or {"a":1}'
-              />
-            </Field>
-            <Field>
-              <FieldLabel>&nbsp;</FieldLabel>
-              <Button type="submit" disabled={pending}>
-                {pending ? 'Saving…' : 'Save'}
-              </Button>
-            </Field>
-          </div>
-          {state?.error && <FieldError>{state.error}</FieldError>}
-        </FieldGroup>
-      </form>
+    <div className="flex max-w-5xl flex-col gap-6">
+      <Card>
+        <CardContent>
+          <form action={action}>
+            <FieldGroup>
+              <div className="grid grid-cols-1 items-end gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto]">
+                <Field>
+                  <FieldLabel htmlFor="key">Key</FieldLabel>
+                  <Input id="key" name="key" placeholder="feature.betaBanner" />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="value">Value (JSON)</FieldLabel>
+                  <Input
+                    id="value"
+                    name="value"
+                    placeholder='"Hello" or true or {"a":1}'
+                  />
+                </Field>
+                <Button type="submit" disabled={pending}>
+                  <Plus />
+                  {pending ? 'Saving…' : 'Save setting'}
+                </Button>
+              </div>
+              {state?.error && <FieldError>{state.error}</FieldError>}
+            </FieldGroup>
+          </form>
+        </CardContent>
+      </Card>
 
-      <div className="flex flex-col divide-y rounded-lg border">
-        {settings.length === 0 && (
-          <p className="text-muted-foreground p-4 text-sm">
-            No platform settings yet.
-          </p>
-        )}
-        {settings.map((setting) => (
-          <div
-            key={setting.key}
-            className="flex items-center justify-between gap-4 px-4 py-3"
-          >
-            <div className="min-w-0">
-              <p className="truncate font-mono text-sm font-medium">
-                {setting.key}
-              </p>
-              <p className="text-muted-foreground truncate text-sm">
-                {JSON.stringify(setting.value)}
-              </p>
-            </div>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="text-destructive shrink-0"
-              disabled={isPending}
-              onClick={() => {
-                if (!window.confirm(`Delete setting "${setting.key}"?`)) return
-                startTransition(() => {
-                  deletePlatformSettingAction(setting.key)
-                })
-              }}
-            >
-              Delete
-            </Button>
-          </div>
-        ))}
-      </div>
+      {settings.length === 0 ? (
+        <EmptyState
+          icon={SlidersHorizontal}
+          title="No platform settings"
+          description="Add a key above to store platform-wide configuration."
+        />
+      ) : (
+        <ListPanel>
+          {settings.map((setting) => (
+            <ListRow key={setting.key}>
+              <div className="min-w-0">
+                <p className="truncate font-mono text-sm font-medium">
+                  {setting.key}
+                </p>
+                <p className="text-muted-foreground mt-1 truncate font-mono text-xs">
+                  {JSON.stringify(setting.value)}
+                </p>
+              </div>
+              <ListRowActions>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="sm"
+                  disabled={isPending}
+                  onClick={() => {
+                    if (!window.confirm(`Delete setting "${setting.key}"?`)) {
+                      return
+                    }
+                    startTransition(() => {
+                      deletePlatformSettingAction(setting.key)
+                    })
+                  }}
+                >
+                  <Trash2 />
+                  Delete
+                </Button>
+              </ListRowActions>
+            </ListRow>
+          ))}
+        </ListPanel>
+      )}
     </div>
   )
 }

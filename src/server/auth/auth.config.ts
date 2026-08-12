@@ -37,7 +37,7 @@ export const authConfig = {
 
       const isProtected =
         nextUrl.pathname.startsWith('/dashboard') ||
-        nextUrl.pathname.startsWith('/projects') ||
+        nextUrl.pathname.startsWith('/stores') ||
         nextUrl.pathname.startsWith('/templates') ||
         nextUrl.pathname.startsWith('/account') ||
         nextUrl.pathname.startsWith('/preview-render') ||

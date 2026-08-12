@@ -7,7 +7,7 @@ import {
   deleteTemplateCategory,
 } from '@/server/services/templateService'
 import { createTemplateCategorySchema } from '@/lib/validation/template'
-import type { FormActionState } from '@/app/(dashboard)/projects/actions'
+import type { FormActionState } from '@/app/(dashboard)/stores/actions'
 
 export async function createTemplateCategoryAction(
   _prevState: FormActionState,

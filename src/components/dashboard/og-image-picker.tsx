@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ImagePlus, Loader2, UploadCloud } from 'lucide-react'
 import { uploadMediaFile, type MediaAssetDTO } from '@/lib/media-upload'
+import { useImageCrop } from '@/components/media/use-image-crop'
 import { listAvailableMediaAction } from '@/modules/builder/media-actions'
 import { Button } from '@/components/ui/button'
 import {
@@ -34,7 +35,7 @@ export function OgImagePicker({
       <input type="hidden" name={name} value={selected?.id ?? ''} />
       {selected ? (
         <div className="bg-muted relative size-14 shrink-0 overflow-hidden rounded-md border">
-          {/* eslint-disable-next-line @next/next/no-img-element -- arbitrary local-driver/S3 URLs */}
+          {/* eslint-disable-next-line @next/next/no-img-element -- arbitrary CDN-hosted URLs */}
           <img src={selected.url} alt="" className="size-full object-cover" />
         </div>
       ) : (
@@ -104,9 +105,12 @@ function UploadTab({ onSelect }: { onSelect: (asset: MediaAssetDTO) => void }) {
   const [isUploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isDragOver, setDragOver] = useState(false)
+  const { requestCrop, cropper } = useImageCrop()
 
-  async function handleFile(file: File | undefined) {
+  async function handleFile(picked: File | undefined) {
+    const file = await requestCrop(picked)
     if (!file) return
+
     setError(null)
     setUploading(true)
     try {
@@ -121,6 +125,7 @@ function UploadTab({ onSelect }: { onSelect: (asset: MediaAssetDTO) => void }) {
 
   return (
     <div className="flex flex-col gap-3 py-2">
+      {cropper}
       <div
         onDragOver={(e) => {
           e.preventDefault()
@@ -206,7 +211,7 @@ function LibraryTab({
           onClick={() => onSelect(asset)}
           className="bg-muted hover:ring-ring aspect-square overflow-hidden rounded-md border transition-shadow hover:ring-2"
         >
-          {/* eslint-disable-next-line @next/next/no-img-element -- arbitrary local-driver/S3 URLs */}
+          {/* eslint-disable-next-line @next/next/no-img-element -- arbitrary CDN-hosted URLs */}
           <img
             src={asset.url}
             alt={asset.altText ?? ''}

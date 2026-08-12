@@ -1,178 +1,39 @@
-import bcrypt from 'bcryptjs'
 import { prisma } from '../src/server/db/client'
 import { sectionRegistry } from '../src/modules/sections/registry'
-import { BCRYPT_COST } from '../src/lib/security'
 import { DEFAULT_THEME } from '../src/lib/default-theme'
+import { BUILTIN_LIQUID_SECTIONS } from '../src/lib/liquid/builtin-sections'
+import {
+  compileSchemaToFields,
+  defaultContentFromSchema,
+  extractSection,
+} from '../src/lib/liquid/schema'
+import { LANDING_TEMPLATES } from './landing-templates'
+import { ADDON_SEEDS, LAUNCH_COUPON, PLAN_SEEDS } from './plan-catalog'
 
-const SAAS_DEMO_SECTIONS: Array<{ key: string; content: object }> = [
-  {
-    key: 'navbar',
-    content: {
-      logoText: 'Acme',
-      links: [
-        { label: 'Product', href: '#' },
-        { label: 'Pricing', href: '#pricing' },
-        { label: 'FAQ', href: '#faq' },
-      ],
-      ctaLabel: 'Sign up',
-      ctaHref: '#',
-    },
-  },
-  {
-    key: 'hero',
-    content: {
-      eyebrow: 'Now in public beta',
-      headline: 'Ship a landing page your customers actually believe',
-      subheadline:
-        'Acme helps small teams launch a polished marketing site in an afternoon, not a sprint.',
-      primaryCtaLabel: 'Start free',
-      primaryCtaHref: '#',
-      secondaryCtaLabel: 'Watch demo',
-      secondaryCtaHref: '#',
-    },
-  },
-  {
-    key: 'features',
-    content: {
-      eyebrow: 'Why Acme',
-      heading: 'Everything a launch needs',
-      items: [
-        {
-          title: 'Fast setup',
-          description: 'Go from blank page to published in minutes.',
-        },
-        {
-          title: 'On-brand',
-          description: 'Every section respects your colors and type.',
-        },
-        {
-          title: 'No lock-in',
-          description: 'Export your content whenever you want.',
-        },
-      ],
-    },
-  },
-  {
-    key: 'testimonials',
-    content: {
-      heading: 'Loved by early customers',
-      items: [
-        {
-          quote:
-            'We replaced a $4,000 agency quote with an afternoon of clicking around.',
-          authorName: 'Sam Rivera',
-          authorRole: 'Founder, Northwind',
-        },
-      ],
-    },
-  },
-  {
-    key: 'pricing',
-    content: {
-      eyebrow: 'Pricing',
-      heading: 'Simple, transparent pricing',
-      plans: [
-        {
-          name: 'Starter',
-          price: '$0',
-          period: '/mo',
-          features: ['1 project', 'Basic sections', 'NCOM subdomain'],
-          ctaLabel: 'Get started',
-          ctaHref: '#',
-          highlighted: false,
-        },
-        {
-          name: 'Pro',
-          price: '$29',
-          period: '/mo',
-          features: ['Unlimited projects', 'All sections', 'Custom domain'],
-          ctaLabel: 'Get started',
-          ctaHref: '#',
-          highlighted: true,
-        },
-      ],
-    },
-  },
-  {
-    key: 'faq',
-    content: {
-      heading: 'Frequently asked questions',
-      items: [
-        {
-          question: 'Do I need to know how to code?',
-          answer: 'No — every section is edited visually.',
-        },
-        {
-          question: 'Can I bring my own domain?',
-          answer: 'Custom domains are supported on the Pro plan.',
-        },
-      ],
-    },
-  },
-  {
-    key: 'cta',
-    content: {
-      heading: 'Ready to launch?',
-      subheading: 'Join today — no credit card required.',
-      ctaLabel: 'Start free',
-      ctaHref: '#',
-    },
-  },
-  {
-    key: 'footer',
-    content: {
-      logoText: 'Acme',
-      columns: [
-        {
-          title: 'Product',
-          links: [
-            { label: 'Features', href: '#' },
-            { label: 'Pricing', href: '#' },
-          ],
-        },
-      ],
-      bottomText: `© ${new Date().getFullYear()} Acme, Inc.`,
-    },
-  },
-]
-
+/**
+ * Seeds platform assets only: template categories, section definitions, landing
+ * templates, plans, add-ons and the launch coupon.
+ *
+ * No users and no organisations. There is deliberately no seeded administrator:
+ * a default account with a known email and a `changeme123` password is a
+ * credential every copy of this repository shares, and the one that survives to
+ * production is how platforms get taken over. The first person to register
+ * claims the administrator role instead — see `claimFirstAdmin` in
+ * server/services/authService.ts.
+ */
 async function main() {
-  const adminEmail = process.env.SEED_ADMIN_EMAIL ?? 'admin@ncom.local'
-  const adminPassword = process.env.SEED_ADMIN_PASSWORD ?? 'changeme123'
-
-  const admin = await prisma.user.upsert({
-    where: { email: adminEmail },
-    update: {},
-    create: {
-      email: adminEmail,
-      name: 'NCOM Admin',
-      passwordHash: await bcrypt.hash(adminPassword, BCRYPT_COST),
-      platformRole: 'SUPER_ADMIN',
-    },
-  })
-  console.log(`Seeded SUPER_ADMIN: ${admin.email}`)
-
-  const demoOrg = await prisma.organization.upsert({
-    where: { slug: 'demo' },
-    update: {},
-    create: { name: 'Demo Workspace', slug: 'demo' },
-  })
-
-  await prisma.membership.upsert({
-    where: {
-      userId_organizationId: { userId: admin.id, organizationId: demoOrg.id },
-    },
-    update: {},
-    create: { userId: admin.id, organizationId: demoOrg.id, role: 'OWNER' },
-  })
-  console.log(`Seeded demo organization: ${demoOrg.slug}`)
-
+  // Every store on this platform sells something, so the catalogue is
+  // organised by what a merchant sells rather than by website genre. Portfolio
+  // and SaaS categories were removed with the landing-page product.
   const categories = [
-    { name: 'Business', slug: 'business', sortOrder: 1 },
-    { name: 'Portfolio', slug: 'portfolio', sortOrder: 2 },
-    { name: 'SaaS', slug: 'saas', sortOrder: 3 },
-    { name: 'Event', slug: 'event', sortOrder: 4 },
-    { name: 'Personal', slug: 'personal', sortOrder: 5 },
+    { name: 'Fashion & apparel', slug: 'fashion', sortOrder: 1 },
+    { name: 'Beauty & cosmetics', slug: 'beauty', sortOrder: 2 },
+    { name: 'Electronics', slug: 'electronics', sortOrder: 3 },
+    { name: 'Food & grocery', slug: 'food', sortOrder: 4 },
+    { name: 'Home & living', slug: 'home', sortOrder: 5 },
+    { name: 'Jewellery', slug: 'jewellery', sortOrder: 6 },
+    { name: 'Single product', slug: 'single-product', sortOrder: 7 },
+    { name: 'General store', slug: 'general', sortOrder: 8 },
   ]
 
   for (const category of categories) {
@@ -204,164 +65,275 @@ async function main() {
   }
   console.log(`Seeded ${sectionEntries.length} component definitions`)
 
-  await seedDemoPage(demoOrg.id)
-  await seedDemoTemplates(admin.id)
+  await seedBuiltinLiquidSections()
+  await seedLandingTemplates()
+  await retireRemovedSections()
+  await seedPlanCatalog()
+  await seedSubscriptionsForExistingOrganizations()
 }
 
 /**
- * A demo project with real, populated sections — lets Phase 4's renderers
- * be verified visually end-to-end before the visual builder (Phase 5)
- * exists to author pages interactively.
+ * Seeds the published price sheet, add-ons and the exploration coupon.
+ *
+ * Create-if-missing, never update. After the first run /admin/plans owns these
+ * rows, and a re-seed (which happens on every `db:seed`, including in CI and on
+ * a colleague's machine) must not silently revert a price or a quota someone
+ * changed there. Codes are the identity, so a renamed plan is still recognised.
  */
-async function seedDemoPage(organizationId: string) {
-  const componentDefinitions = await prisma.componentDefinition.findMany()
-  const byKey = new Map(componentDefinitions.map((c) => [c.key, c]))
-
-  const project = await prisma.project.upsert({
-    where: { subdomain: 'demo-showcase' },
-    update: {},
-    create: {
-      organizationId,
-      name: 'Demo Showcase',
-      subdomain: 'demo-showcase',
-      theme: {
-        create: {
-          primaryColor: '#0e6b4f',
-          secondaryColor: '#d3872a',
-          backgroundColor: '#ffffff',
-          textColor: '#17140f',
-          headingFont: 'Fraunces',
-          bodyFont: 'Inter',
-          buttonStyle: 'SOLID',
-          borderRadius: 'md',
-          spacingScale: 'comfortable',
-          containerWidth: '1200px',
-        },
-      },
-    },
-  })
-
-  const existingSections = await prisma.pageSection.count({
-    where: { page: { projectId: project.id } },
-  })
-  if (existingSections > 0) {
-    console.log('Demo page already has sections, skipping')
-    return
-  }
-
-  const page = await prisma.page.upsert({
-    where: { projectId_slug: { projectId: project.id, slug: 'home' } },
-    update: {},
-    create: {
-      projectId: project.id,
-      title: 'Home',
-      slug: 'home',
-      isHome: true,
-    },
-  })
-
-  for (const [order, entry] of SAAS_DEMO_SECTIONS.entries()) {
-    const componentDefinition = byKey.get(entry.key)
-    if (!componentDefinition) continue
-
-    await prisma.pageSection.create({
-      data: {
-        pageId: page.id,
-        componentDefinitionId: componentDefinition.id,
-        order,
-        content: entry.content,
-        config: {},
-      },
+async function seedPlanCatalog() {
+  let createdPlans = 0
+  for (const plan of PLAN_SEEDS) {
+    const existing = await prisma.plan.findUnique({
+      where: { code: plan.code },
     })
+    if (existing) continue
+    await prisma.plan.create({ data: plan })
+    createdPlans++
   }
+  console.log(
+    `Seeded ${createdPlans} plans (${PLAN_SEEDS.length} in catalogue)`
+  )
 
-  console.log(`Seeded demo page with ${SAAS_DEMO_SECTIONS.length} sections`)
+  let createdAddons = 0
+  for (const addon of ADDON_SEEDS) {
+    const existing = await prisma.addon.findUnique({
+      where: { code: addon.code },
+    })
+    if (existing) continue
+    await prisma.addon.create({ data: addon })
+    createdAddons++
+  }
+  console.log(
+    `Seeded ${createdAddons} add-ons (${ADDON_SEEDS.length} in catalogue)`
+  )
+
+  const existingCoupon = await prisma.planCoupon.findUnique({
+    where: { code: LAUNCH_COUPON.code },
+  })
+  if (!existingCoupon) {
+    await prisma.planCoupon.create({
+      // No creator: seeded before any account exists. `createdById` records
+      // which admin wrote a coupon, and nobody did.
+      data: LAUNCH_COUPON,
+    })
+    console.log(`Seeded launch coupon: ${LAUNCH_COUPON.code}`)
+  }
+}
+
+/**
+ * Puts every organisation that predates the subscription model onto the default
+ * plan.
+ *
+ * `ensureSubscription` would do this lazily on first request, but a tenant whose
+ * quotas only materialise when someone visits their dashboard is invisible in
+ * the admin subscription list until then — which is where support looks first.
+ */
+async function seedSubscriptionsForExistingOrganizations() {
+  const defaultPlan = await prisma.plan.findFirst({
+    where: { isDefault: true },
+  })
+  if (!defaultPlan) return
+
+  const orphaned = await prisma.organization.findMany({
+    where: { subscription: null },
+    select: { id: true },
+  })
+  if (orphaned.length === 0) return
+
+  await prisma.subscription.createMany({
+    data: orphaned.map((org) => ({
+      organizationId: org.id,
+      planId: defaultPlan.id,
+      status: 'ACTIVE' as const,
+      interval: 'MONTHLY' as const,
+      currencyCode: defaultPlan.currencyCode,
+      unitPriceCents: defaultPlan.monthlyPriceCents,
+    })),
+    skipDuplicates: true,
+  })
+  console.log(
+    `Subscribed ${orphaned.length} existing organizations to ${defaultPlan.name}`
+  )
+}
+
+/**
+ * Deletes component definitions that no longer exist in either library.
+ *
+ * The section library shrank when the platform narrowed to cash-on-delivery
+ * landing pages: the brochure-ware inherited from the website-builder era
+ * (navbar, hero, services, cards, statistics, contact, newsletter…) and the
+ * React sections since superseded by a Liquid commerce equivalent
+ * (testimonials → reviews, pricing → bundle-offer, gallery → gallery-strip)
+ * are gone from the registry, but a definition row already in the database
+ * would keep them in every merchant's Add-section palette forever.
+ *
+ * Pages still carrying a retired section are cleaned first. `PageSection`'s
+ * relation is `onDelete: Restrict`, so this is a deliberate two-step rather
+ * than a cascade — deleting a definition must never silently take live page
+ * content with it, and the count is logged so an unexpectedly large number is
+ * visible rather than quiet.
+ *
+ * Imported sections (a merchant's own pasted Liquid) are owned by an
+ * organisation and are never platform-managed, so they are left alone.
+ */
+async function retireRemovedSections() {
+  const live = new Set<string>([
+    ...Object.values(sectionRegistry).map((section) => section.key),
+    ...BUILTIN_LIQUID_SECTIONS.map((section) => section.key),
+  ])
+
+  const retired = await prisma.componentDefinition.findMany({
+    where: { key: { notIn: [...live] }, ownerOrganizationId: null },
+    select: { id: true, key: true, _count: { select: { pageSections: true } } },
+  })
+  if (retired.length === 0) return
+
+  const ids = retired.map((definition) => definition.id)
+  const orphanedSections = retired.reduce(
+    (total, definition) => total + definition._count.pageSections,
+    0
+  )
+
+  await prisma.pageSection.deleteMany({
+    where: { componentDefinitionId: { in: ids } },
+  })
+  await prisma.templateSection.deleteMany({
+    where: { componentDefinitionId: { in: ids } },
+  })
+  await prisma.componentDefinition.deleteMany({ where: { id: { in: ids } } })
+
+  console.log(
+    `Retired ${retired.length} removed section(s): ${retired
+      .map((definition) => definition.key)
+      .join(', ')}` +
+      (orphanedSections > 0
+        ? ` — and ${orphanedSections} page section(s) that used them`
+        : '')
+  )
 }
 
 /**
  * Two published templates so the gallery (Phase 6) isn't empty and the
- * "use template" flow can be exercised end to end: one reuses the full
- * demo-page section set, the other is a minimal starting point built
- * straight from each component's registry defaults.
+
+/**
+ * Registers the built-in Liquid commerce sections.
+ *
+ * These carry their editor UI in their own `{% schema %}` block, so the schema
+ * is compiled here and stored alongside the source — exactly the shape a
+ * merchant's own pasted Liquid produces. Storing the compiled fields rather
+ * than recompiling per request keeps the builder's palette a single query.
+ *
+ * Upserted by key so re-running the seed picks up edits to a section's markup
+ * without orphaning pages that already use it.
  */
-async function seedDemoTemplates(adminId: string) {
-  const componentDefinitions = await prisma.componentDefinition.findMany()
-  const byKey = new Map(componentDefinitions.map((c) => [c.key, c]))
+async function seedBuiltinLiquidSections() {
+  for (const [index, section] of BUILTIN_LIQUID_SECTIONS.entries()) {
+    const { template, schema, error } = extractSection(section.source)
+    if (error || !schema) {
+      throw new Error(
+        `Built-in section "${section.key}" has a broken schema: ${error}`
+      )
+    }
 
-  const saasCategory = await prisma.templateCategory.findUnique({
-    where: { slug: 'saas' },
+    const payload = {
+      name: schema.name || section.name,
+      category: schema.category ?? section.category,
+      renderMode: 'LIQUID' as const,
+      liquidSource: template,
+      schemaJson: {
+        schema,
+        editorFields: compileSchemaToFields(schema),
+      } as object,
+      defaultContent: defaultContentFromSchema(schema) as object,
+      isActive: true,
+      // After the React sections, so commerce blocks group together in the
+      // palette rather than interleaving with layout blocks.
+      sortOrder: 100 + index,
+    }
+
+    await prisma.componentDefinition.upsert({
+      where: { key: section.key },
+      update: payload,
+      create: { key: section.key, ...payload },
+    })
+  }
+
+  console.log(
+    `Seeded ${BUILTIN_LIQUID_SECTIONS.length} Liquid commerce sections`
+  )
+}
+
+/**
+ * Replaces the template catalogue with the ten landing pages.
+ *
+ * Deletes every existing template first, deliberately: the old catalogue was
+ * generic website starters from before this became an ecommerce-only platform,
+ * and leaving them alongside pages that actually sell would offer merchants a
+ * choice between a store and a brochure. Stores already created from an old
+ * template are unaffected — applying a template copies its sections onto the
+ * page, so nothing on a live store points back at the template row.
+ */
+async function seedLandingTemplates() {
+  const removed = await prisma.template.deleteMany({})
+  if (removed.count > 0) {
+    console.log(`Removed ${removed.count} old template(s)`)
+  }
+
+  const definitions = await prisma.componentDefinition.findMany({
+    select: { id: true, key: true, defaultContent: true },
   })
-  const portfolioCategory = await prisma.templateCategory.findUnique({
-    where: { slug: 'portfolio' },
+  const byKey = new Map(
+    definitions.map((definition) => [definition.key, definition])
+  )
+
+  const categories = await prisma.templateCategory.findMany({
+    select: { id: true, slug: true },
   })
+  const categoryBySlug = new Map(
+    categories.map((category) => [category.slug, category.id])
+  )
 
-  await upsertTemplate({
-    slug: 'saas-launch',
-    name: 'SaaS Launch',
-    description: 'A full landing page for launching a SaaS product.',
-    categoryId: saasCategory?.id,
-    createdById: adminId,
-    sections: SAAS_DEMO_SECTIONS,
-  })
-
-  await upsertTemplate({
-    slug: 'minimal-portfolio',
-    name: 'Minimal Portfolio',
-    description: 'A clean starting point with just the essentials.',
-    categoryId: portfolioCategory?.id,
-    createdById: adminId,
-    sections: (['navbar', 'hero', 'features', 'footer'] as const).map(
-      (key) => ({
-        key,
-        content: sectionRegistry[key].defaultContent as object,
-      })
-    ),
-  })
-
-  console.log('Seeded 2 demo templates')
-
-  async function upsertTemplate(input: {
-    slug: string
-    name: string
-    description: string
-    categoryId: string | undefined
-    createdById: string
-    sections: Array<{ key: string; content: object }>
-  }) {
-    const template = await prisma.template.upsert({
-      where: { slug: input.slug },
-      update: {},
-      create: {
-        slug: input.slug,
-        name: input.name,
-        description: input.description,
-        categoryId: input.categoryId,
+  for (const seed of LANDING_TEMPLATES) {
+    const template = await prisma.template.create({
+      data: {
+        slug: seed.slug,
+        name: seed.name,
+        description: seed.description,
+        categoryId: categoryBySlug.get(seed.categorySlug),
         status: 'PUBLISHED',
-        defaultTheme: DEFAULT_THEME as object,
-        createdById: input.createdById,
+        defaultTheme: { ...DEFAULT_THEME, ...seed.theme } as object,
+        createdById: null,
       },
+      select: { id: true },
     })
 
-    const existingSections = await prisma.templateSection.count({
-      where: { templateId: template.id },
-    })
-    if (existingSections > 0) return
+    let order = 0
+    for (const entry of seed.sections) {
+      const definition = byKey.get(entry.key)
+      if (!definition) {
+        throw new Error(
+          `Template "${seed.slug}" references unknown section "${entry.key}"`
+        )
+      }
 
-    for (const [order, entry] of input.sections.entries()) {
-      const componentDefinition = byKey.get(entry.key)
-      if (!componentDefinition) continue
+      // The section's own defaults underneath the template's overrides, so a
+      // template only has to state what it changes and a new setting added to
+      // a section later still arrives with a sane value.
+      const base = (definition.defaultContent ?? {}) as Record<string, unknown>
 
       await prisma.templateSection.create({
         data: {
           templateId: template.id,
-          componentDefinitionId: componentDefinition.id,
-          order,
-          defaultContent: entry.content,
+          componentDefinitionId: definition.id,
+          order: order++,
+          defaultContent: { ...base, ...(entry.content ?? {}) } as object,
           defaultConfig: {},
         },
       })
     }
   }
+
+  console.log(`Seeded ${LANDING_TEMPLATES.length} landing templates`)
 }
 
 main()

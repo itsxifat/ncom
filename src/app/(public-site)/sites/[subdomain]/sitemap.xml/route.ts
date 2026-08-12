@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import {
-  getProjectForSeoRoutes,
+  getStoreForSeoRoutes,
   listIndexablePages,
 } from '@/server/services/publishService'
 import { env } from '@/lib/env'
@@ -15,19 +15,19 @@ export async function GET(
   { params }: { params: Promise<{ subdomain: string }> }
 ) {
   const { subdomain } = await params
-  const project = await getProjectForSeoRoutes(subdomain)
-  if (!project) return new NextResponse('Not found', { status: 404 })
+  const store = await getStoreForSeoRoutes(subdomain)
+  if (!store) return new NextResponse('Not found', { status: 404 })
 
   const base = `http://${subdomain}.${env.ROOT_DOMAIN}`
 
-  if (!project.isSearchIndexable) {
+  if (!store.isSearchIndexable) {
     const empty = `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>`
     return new NextResponse(empty, {
       headers: { 'Content-Type': 'application/xml' },
     })
   }
 
-  const pages = await listIndexablePages(project.id)
+  const pages = await listIndexablePages(store.id)
 
   const urls = pages
     .map((page) => {

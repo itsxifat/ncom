@@ -1,8 +1,14 @@
-import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { getOrganizationDetail } from '@/server/services/adminService'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { env } from '@/lib/env'
 import { Badge } from '@/components/ui/badge'
+import { PageHeader } from '@/components/app/page-header'
+import {
+  ListPanel,
+  ListPanelHeader,
+  ListRow,
+  ListRowText,
+} from '@/components/app/list-panel'
 
 export default async function AdminOrganizationDetailPage({
   params,
@@ -19,75 +25,60 @@ export default async function AdminOrganizationDetailPage({
   }
 
   return (
-    <div className="flex flex-col gap-6">
-      <div>
-        <Link
-          href="/admin/organizations"
-          className="text-muted-foreground text-sm"
-        >
-          ← Back to organizations
-        </Link>
-        <h1 className="font-display mt-1 text-3xl font-semibold tracking-tight">
-          {organization.name}
-        </h1>
-        <p className="text-muted-foreground mt-1 text-sm">
-          {organization.slug}
-        </p>
-      </div>
+    <div className="flex flex-col gap-8">
+      <PageHeader
+        backHref="/admin/organizations"
+        backLabel="Organizations"
+        eyebrow={organization.slug}
+        title={organization.name}
+        description={`${organization.memberships.length} ${organization.memberships.length === 1 ? 'member' : 'members'} · ${organization.stores.length} ${organization.stores.length === 1 ? 'store' : 'stores'}.`}
+      />
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Members</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col divide-y p-0">
+      <div className="grid gap-4 xl:grid-cols-2">
+        <ListPanel>
+          <ListPanelHeader>
+            <h2 className="font-display text-base font-semibold tracking-tight">
+              Members
+            </h2>
+            <Badge variant="secondary">{organization.memberships.length}</Badge>
+          </ListPanelHeader>
           {organization.memberships.map((membership) => (
-            <div
-              key={membership.id}
-              className="flex items-center justify-between gap-4 px-6 py-3"
-            >
-              <div className="min-w-0">
-                <p className="truncate font-medium">
-                  {membership.user.name ?? membership.user.email}
-                </p>
-                <p className="text-muted-foreground truncate text-sm">
-                  {membership.user.email}
-                </p>
-              </div>
+            <ListRow key={membership.id}>
+              <ListRowText
+                title={membership.user.name ?? membership.user.email}
+                meta={membership.user.email}
+              />
               <Badge variant="outline">{membership.role}</Badge>
-            </div>
+            </ListRow>
           ))}
-        </CardContent>
-      </Card>
+        </ListPanel>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Projects</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col divide-y p-0">
-          {organization.projects.length === 0 && (
-            <p className="text-muted-foreground px-6 py-4 text-sm">
-              No projects.
+        <ListPanel>
+          <ListPanelHeader>
+            <h2 className="font-display text-base font-semibold tracking-tight">
+              Stores
+            </h2>
+            <Badge variant="secondary">{organization.stores.length}</Badge>
+          </ListPanelHeader>
+          {organization.stores.length === 0 && (
+            <p className="text-muted-foreground px-5 py-6 text-sm sm:px-6">
+              This organization hasn&apos;t created a store yet.
             </p>
           )}
-          {organization.projects.map((project) => (
-            <div
-              key={project.id}
-              className="flex items-center justify-between gap-4 px-6 py-3"
-            >
-              <div className="min-w-0">
-                <p className="truncate font-medium">{project.name}</p>
-                <p className="text-muted-foreground truncate text-sm">
-                  {project.subdomain}.ncom.app
-                </p>
-              </div>
+          {organization.stores.map((store) => (
+            <ListRow key={store.id}>
+              <ListRowText
+                title={store.name}
+                meta={`${store.subdomain}.${env.ROOT_DOMAIN}`}
+              />
               <p className="text-muted-foreground shrink-0 text-sm">
-                {project._count.pages}{' '}
-                {project._count.pages === 1 ? 'page' : 'pages'}
+                {store._count.pages}{' '}
+                {store._count.pages === 1 ? 'page' : 'pages'}
               </p>
-            </div>
+            </ListRow>
           ))}
-        </CardContent>
-      </Card>
+        </ListPanel>
+      </div>
     </div>
   )
 }

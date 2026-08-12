@@ -6,6 +6,7 @@ import {
   type RenderablePageSection,
 } from '@/modules/sections/PageRenderer'
 import type { PageTheme } from '@/modules/sections/types'
+import type { StorefrontCommerce } from '@/modules/sections/registry'
 
 export interface CanvasUpdateMessage {
   type: 'ncom:builder-update'
@@ -16,21 +17,34 @@ export interface CanvasUpdateMessage {
     content: unknown
     config: unknown
     isVisible: boolean
+    html?: string
   }[]
 }
 
 export function CanvasClient({
   initialTheme,
   initialSections,
+  commerce,
 }: {
   initialTheme: PageTheme
   initialSections: RenderablePageSection[]
+  /**
+   * What the page sells. Resolved on the server and passed through unchanged —
+   * the canvas is where a merchant checks their offers actually appear, so
+   * rendering the form with no offers here would misreport the live page.
+   *
+   * Absent for a template preview, which has no page and therefore nothing to
+   * sell.
+   */
+  commerce?: StorefrontCommerce
 }) {
   const [theme, setTheme] = useState(initialTheme)
   const [sections, setSections] = useState(initialSections)
 
   useEffect(() => {
     function handleMessage(event: MessageEvent<CanvasUpdateMessage>) {
+      // Only the builder shell, on this same origin, may drive the canvas.
+      if (event.origin !== window.location.origin) return
       if (event.data?.type !== 'ncom:builder-update') return
 
       setTheme(event.data.theme)
@@ -42,6 +56,7 @@ export function CanvasClient({
           config: s.config,
           isVisible: s.isVisible,
           componentDefinition: { key: s.sectionKey },
+          html: s.html,
         }))
       )
     }
@@ -55,5 +70,5 @@ export function CanvasClient({
     return () => window.removeEventListener('message', handleMessage)
   }, [])
 
-  return <PageRenderer theme={theme} sections={sections} />
+  return <PageRenderer theme={theme} sections={sections} commerce={commerce} />
 }

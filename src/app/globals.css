@@ -4,13 +4,32 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/*
+ * Ultra-wide is a first-class breakpoint here: the workspace is a control
+ * surface people keep open all day, often on a 27"+ display. `3xl`/`4xl`
+ * let grids keep adding columns past Tailwind's stock 1536px ceiling
+ * instead of stranding half the screen as empty gutter.
+ */
+@theme {
+  --breakpoint-3xl: 1800px;
+  --breakpoint-4xl: 2200px;
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-inter);
+  --font-sans: var(--font-manrope);
   --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-inter);
-  --font-display: var(--font-inter);
+  --font-heading: var(--font-space-grotesk);
+  --font-display: var(--font-space-grotesk);
+  --color-ink: var(--ink);
+  --color-ink-foreground: var(--ink-foreground);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-raised: var(--ink-raised);
+  --color-lime: var(--lime);
+  --color-lime-strong: var(--lime-strong);
+  --color-lime-foreground: var(--lime-foreground);
+  --color-canvas: var(--canvas);
   --color-vivid: var(--vivid);
   --color-vivid-foreground: var(--vivid-foreground);
   --color-sidebar-ring: var(--sidebar-ring);
@@ -42,98 +61,114 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
+  --radius-sm: calc(var(--radius) * 0.5);
+  --radius-md: calc(var(--radius) * 0.7);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) * 1.4);
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+  --shadow-puck: 0 1px 2px rgb(11 11 12 / 0.08);
+  --shadow-panel:
+    0 1px 2px rgb(11 11 12 / 0.04), 0 8px 24px -12px rgb(11 11 12 / 0.12);
+  --shadow-lift:
+    0 2px 4px rgb(11 11 12 / 0.05), 0 18px 40px -18px rgb(11 11 12 / 0.22);
 }
 
 /*
- * NCOM brand v2 — premium green + black + gray + white. A deep, accessible
- * emerald (--primary) carries every action/link/focus state; a brighter
- * "vivid" green (--vivid) is reserved for glows, emphasis words, and
- * highlight accents — the same deep/vivid split Apple's own product pages
- * use so one hue can read as both "confident" and "energetic" depending on
- * where it's used. True black (not a tinted near-black) is the other half
- * of the identity — full-bleed hero/CTA/footer bands on the marketing site
- * lean on it directly rather than through a token, since it's a layout
- * choice, not a semantic color.
+ * NCOM brand v3 — acid lime, true black, cool gray, white.
+ *
+ * Three surfaces, three jobs. The canvas is a cool light gray so white cards
+ * read as objects sitting *on* something rather than holes cut out of the
+ * page. True black (--ink) is the action color: nav rail, primary buttons,
+ * the pills that mark "you are here". Acid lime (--lime) is the signature and
+ * is rationed — it lands on exactly one thing per screen (the active nav item,
+ * the spotlight tile, a hovered arrow puck) so it never becomes wallpaper.
+ * Lime is a surface color only: at ~92% luminance it is unreadable as text on
+ * white, so every use pairs it with ink text on top.
  */
 :root {
-  --background: #ffffff;
-  --foreground: #0a0a0a;
+  --canvas: #eceef1;
+  --background: #eceef1;
+  --foreground: #0b0b0c;
   --card: #ffffff;
-  --card-foreground: #0a0a0a;
+  --card-foreground: #0b0b0c;
   --popover: #ffffff;
-  --popover-foreground: #0a0a0a;
-  --primary: #0a7d4b;
+  --popover-foreground: #0b0b0c;
+  --primary: #0b0b0c;
   --primary-foreground: #ffffff;
-  --secondary: #f4f4f5;
-  --secondary-foreground: #0a0a0a;
-  --muted: #f7f7f8;
-  --muted-foreground: #6b7280;
-  --accent: #eafbf3;
-  --accent-foreground: #05603a;
-  --destructive: #dc2626;
-  --border: #e5e7eb;
-  --input: #e5e7eb;
-  --ring: #0a7d4b;
-  --vivid: #22c55e;
-  --vivid-foreground: #ffffff;
-  --chart-1: #0a7d4b;
-  --chart-2: #0a0a0a;
-  --chart-3: #4a90d9;
-  --chart-4: #8a5a9e;
-  --chart-5: #dc2626;
-  --radius: 0.625rem;
-  --sidebar: #fafafa;
-  --sidebar-foreground: #0a0a0a;
-  --sidebar-primary: #0a7d4b;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #eafbf3;
-  --sidebar-accent-foreground: #05603a;
-  --sidebar-border: #e5e7eb;
-  --sidebar-ring: #0a7d4b;
+  --secondary: #ffffff;
+  --secondary-foreground: #0b0b0c;
+  --muted: #f3f4f6;
+  --muted-foreground: #71727a;
+  --accent: #f1f2f5;
+  --accent-foreground: #0b0b0c;
+  --destructive: #d92d20;
+  --border: #e3e4e9;
+  --input: #dfe0e6;
+  --ring: #0b0b0c;
+  --ink: #0b0b0c;
+  --ink-foreground: #f7f7f8;
+  --ink-muted: #8b8c93;
+  --ink-raised: #17171a;
+  --lime: #d8f84e;
+  --lime-strong: #c6e92f;
+  --lime-foreground: #0b0b0c;
+  --vivid: #d8f84e;
+  --vivid-foreground: #0b0b0c;
+  --chart-1: #d8f84e;
+  --chart-2: #0b0b0c;
+  --chart-3: #71727a;
+  --chart-4: #a7f3d0;
+  --chart-5: #d92d20;
+  --radius: 1.125rem;
+  --sidebar: #0b0b0c;
+  --sidebar-foreground: #f7f7f8;
+  --sidebar-primary: #d8f84e;
+  --sidebar-primary-foreground: #0b0b0c;
+  --sidebar-accent: #17171a;
+  --sidebar-accent-foreground: #f7f7f8;
+  --sidebar-border: color-mix(in oklab, white 10%, transparent);
+  --sidebar-ring: #d8f84e;
 }
 
 .dark {
-  --background: #0a0a0a;
-  --foreground: #f5f5f5;
-  --card: #141414;
-  --card-foreground: #f5f5f5;
-  --popover: #141414;
-  --popover-foreground: #f5f5f5;
-  --primary: #22c55e;
-  --primary-foreground: #0a0a0a;
-  --secondary: #1f1f1f;
-  --secondary-foreground: #f5f5f5;
-  --muted: #1a1a1a;
-  --muted-foreground: #a1a1aa;
-  --accent: #16301f;
-  --accent-foreground: #6ee7a8;
-  --destructive: #ef4444;
+  --canvas: #0b0b0c;
+  --background: #0b0b0c;
+  --foreground: #f7f7f8;
+  --card: #141416;
+  --card-foreground: #f7f7f8;
+  --popover: #141416;
+  --popover-foreground: #f7f7f8;
+  --primary: #d8f84e;
+  --primary-foreground: #0b0b0c;
+  --secondary: #1d1d20;
+  --secondary-foreground: #f7f7f8;
+  --muted: #18181b;
+  --muted-foreground: #9a9ba3;
+  --accent: #1d1d20;
+  --accent-foreground: #f7f7f8;
+  --destructive: #f04438;
   --border: color-mix(in oklab, white 12%, transparent);
   --input: color-mix(in oklab, white 16%, transparent);
-  --ring: #22c55e;
-  --vivid: #34d673;
-  --vivid-foreground: #0a0a0a;
-  --chart-1: #22c55e;
-  --chart-2: #f5f5f5;
-  --chart-3: #6ba6df;
-  --chart-4: #b590c9;
-  --chart-5: #ef4444;
-  --sidebar: #111111;
-  --sidebar-foreground: #f5f5f5;
-  --sidebar-primary: #22c55e;
-  --sidebar-primary-foreground: #0a0a0a;
-  --sidebar-accent: #16301f;
-  --sidebar-accent-foreground: #6ee7a8;
-  --sidebar-border: color-mix(in oklab, white 10%, transparent);
-  --sidebar-ring: #22c55e;
+  --ring: #d8f84e;
+  --ink: #141416;
+  --ink-foreground: #f7f7f8;
+  --ink-muted: #8b8c93;
+  --ink-raised: #1d1d20;
+  --sidebar: #141416;
+  --sidebar-foreground: #f7f7f8;
+  --sidebar-primary: #d8f84e;
+  --sidebar-primary-foreground: #0b0b0c;
+  --sidebar-accent: #24242a;
+  --sidebar-accent-foreground: #f7f7f8;
 }
+
+/*
+ * The marketing site still runs the v2 emerald system. It's pinned here
+ * rather than left on :root so the workspace can own the defaults — and so
+ * the eventual marketing redesign is a matter of deleting this block.
+ */
 
 @layer base {
   * {
@@ -145,4 +180,26 @@
   html {
     @apply font-sans;
   }
+  /* Tabular figures everywhere a count or a size is rendered — columns of
+     numbers that don't shimmy when they update. */
+  [data-slot='stat-value'],
+  [data-slot='metric'] {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* The rail's scrollbar sits on black; the default light one cuts a bright
+   stripe down the panel edge. */
+@utility scrollbar-rail {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, white 18%, transparent) transparent;
+}
+
+/* Uppercase micro-label used for the one-word category above a heading. */
+@utility eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  line-height: 1;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
 }

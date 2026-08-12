@@ -1,5 +1,6 @@
 import { getActiveOrganization } from '@/server/services/organizationService'
 import { signOutAction } from '@/app/(dashboard)/actions'
+import { requireVerifiedEmail } from '@/server/auth/emailGate'
 import { DashboardShell } from '@/components/dashboard/dashboard-shell'
 
 export default async function DashboardLayout({
@@ -8,6 +9,10 @@ export default async function DashboardLayout({
   children: React.ReactNode
 }) {
   const { session, organization, memberships } = await getActiveOrganization()
+
+  // Every dashboard route renders through this layout, so gating here covers
+  // all of them — including ones added later, which is the point.
+  await requireVerifiedEmail(session.user.id)
 
   const initials =
     session.user.name

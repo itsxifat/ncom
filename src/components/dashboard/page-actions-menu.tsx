@@ -8,7 +8,7 @@ import {
   deletePageAction,
   publishPageAction,
   unpublishPageAction,
-} from '@/app/(dashboard)/projects/actions'
+} from '@/app/(dashboard)/stores/actions'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -19,12 +19,12 @@ import {
 } from '@/components/ui/dropdown-menu'
 
 export function PageActionsMenu({
-  projectId,
+  storeId,
   pageId,
   status,
   previewToken,
 }: {
-  projectId: string
+  storeId: string
   pageId: string
   status: 'DRAFT' | 'PUBLISHED' | 'UNPUBLISHED'
   previewToken: string
@@ -47,16 +47,14 @@ export function PageActionsMenu({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuItem
-          render={
-            <Link href={`/projects/${projectId}/pages/${pageId}/settings`} />
-          }
+          render={<Link href={`/stores/${storeId}/pages/${pageId}/settings`} />}
         >
           Page settings
         </DropdownMenuItem>
         <DropdownMenuItem
           onClick={() => {
             startTransition(() => {
-              publishPageAction(projectId, pageId)
+              publishPageAction(storeId, pageId)
             })
           }}
         >
@@ -66,7 +64,7 @@ export function PageActionsMenu({
           <DropdownMenuItem
             onClick={() => {
               startTransition(() => {
-                unpublishPageAction(projectId, pageId)
+                unpublishPageAction(storeId, pageId)
               })
             }}
           >
@@ -91,7 +89,7 @@ export function PageActionsMenu({
               return
             }
             startTransition(() => {
-              deletePageAction(projectId, pageId)
+              deletePageAction(storeId, pageId)
             })
           }}
         >

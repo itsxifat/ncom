@@ -24,7 +24,7 @@ test('register, create from template, edit, publish, view live', async ({
   await test.step('start a project from the seeded template', async () => {
     await page.goto('/templates')
     const templateCard = page
-      .locator('[data-slot="card"]')
+      .locator('[data-slot="template-tile"]')
       .filter({ hasText: 'SaaS Launch' })
     await expect(templateCard).toBeVisible()
 

@@ -15,6 +15,20 @@ export const updateThemeSchema = z.object({
   borderRadius: z.enum(['none', 'sm', 'md', 'lg', 'full']),
   spacingScale: z.enum(['compact', 'comfortable', 'spacious']),
   containerWidth: z.string().trim().min(1).max(20),
+
+  // Brand and layout controls surfaced in the Design tab.
+  logoUrl: z.string().max(2000).optional().nullable(),
+  logoWidth: z.number().int().min(40).max(480).optional().nullable(),
+  faviconUrl: z.string().max(2000).optional().nullable(),
+  headingWeight: z.enum(['400', '500', '600', '700', '800']).default('600'),
+  bodyScale: z.enum(['0.9', '1', '1.1', '1.2']).default('1'),
+  sectionSpacing: z
+    .enum(['compact', 'comfortable', 'spacious'])
+    .default('comfortable'),
+  showStickyHeader: z.boolean().default(true),
+  // Escape hatch for anything the controls above do not cover. Scoped to the
+  // rendered page by PageThemeProvider, not injected globally.
+  customCss: z.string().max(20000).optional(),
 })
 
 export type UpdateThemeInput = z.infer<typeof updateThemeSchema>

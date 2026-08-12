@@ -1,0 +1,39 @@
+# Postgres and Redis for the production box.
+#
+# The difference that matters versus the repo-root docker-compose.yml: every port
+# is published to 127.0.0.1 only. The dev file binds 0.0.0.0 with the password
+# `ncom`, which on a public VPS is an open database — do not use it here.
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ncom
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ncom
+    ports:
+      - '127.0.0.1:5432:5432'
+    volumes:
+      - ncom_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ncom']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:6379:6379'
+    volumes:
+      - ncom_redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  ncom_postgres_data:
+  ncom_redis_data:

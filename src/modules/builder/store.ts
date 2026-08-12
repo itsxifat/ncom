@@ -30,6 +30,7 @@ interface BuilderState {
   duplicateSection: (id: string) => void
   reorderSections: (activeId: string, overId: string) => void
   updateSectionContent: (id: string, content: Record<string, unknown>) => void
+  updateSectionConfig: (id: string, config: SectionConfig) => void
   toggleSectionVisibility: (id: string) => void
   setBreakpoint: (breakpoint: Breakpoint) => void
   markClean: () => void
@@ -110,6 +111,14 @@ export const useBuilderStore = create<BuilderState>()(
         set((state) => ({
           sections: state.sections.map((s) =>
             s.id === id ? { ...s, content } : s
+          ),
+          isDirty: true,
+        })),
+
+      updateSectionConfig: (id, config) =>
+        set((state) => ({
+          sections: state.sections.map((s) =>
+            s.id === id ? { ...s, config } : s
           ),
           isDirty: true,
         })),

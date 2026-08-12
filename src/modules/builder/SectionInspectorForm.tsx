@@ -13,11 +13,80 @@ import { Plus, Trash2, GripVertical } from 'lucide-react'
 import type { FieldConfig } from '../sections/editorFields'
 import type { SectionDefinition } from '../sections/registry'
 import { ImagePicker } from './ImagePicker'
+import { useProductCatalog } from './ProductCatalogContext'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import { Button } from '@/components/ui/button'
 import { Field, FieldLabel } from '@/components/ui/field'
+
+/**
+ * The blank value a newly appended array item starts with, per field type.
+ * Types must seed with their own empty value rather than `''` — a number field
+ * seeded with a string produces NaN the first time Liquid does arithmetic on
+ * it, and a boolean seeded with `''` renders as unchecked but serialises as a
+ * string.
+ */
+function emptyValueForField(field: FieldConfig): unknown {
+  switch (field.type) {
+    case 'array':
+    case 'stringArray':
+      return []
+    case 'boolean':
+      return false
+    case 'number':
+      return field.min ?? 0
+    case 'select':
+      return field.options[0] ?? ''
+    default:
+      return ''
+  }
+}
+
+/**
+ * Picks the variant a selling section will actually sell.
+ *
+ * Stores the variant id, not a name: the order endpoint prices and reserves
+ * stock from this id, so a section pointing at a product that was renamed or
+ * deleted fails loudly at order time instead of silently selling nothing. When
+ * the store has no products yet the control says so rather than rendering an
+ * empty dropdown the merchant would poke at.
+ */
+function ProductField({
+  name,
+  label,
+  register,
+}: {
+  name: string
+  label: string
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  register: UseFormRegister<any>
+}) {
+  const variants = useProductCatalog()
+
+  return (
+    <Field>
+      <FieldLabel>{label}</FieldLabel>
+      {variants.length === 0 ? (
+        <p className="text-muted-foreground text-sm">
+          No products yet — add one under Products, then choose it here.
+        </p>
+      ) : (
+        <select
+          {...register(name)}
+          className="border-input bg-card h-10 rounded-[0.875rem] border px-3 text-sm"
+        >
+          <option value="">Choose a product…</option>
+          {variants.map((variant) => (
+            <option key={variant.variantId} value={variant.variantId}>
+              {variant.label}
+            </option>
+          ))}
+        </select>
+      )}
+    </Field>
+  )
+}
 
 function FieldRenderer({
   field,
@@ -70,13 +139,49 @@ function FieldRenderer({
     )
   }
 
+  if (field.type === 'color') {
+    return (
+      <Field>
+        <FieldLabel>{field.label}</FieldLabel>
+        <div className="flex items-center gap-2">
+          <Input type="color" {...register(name)} className="h-9 w-14 p-1" />
+          {/* The text input is the accessible path to the value: a bare
+              <input type="color"> can't be typed into or pasted a hex code. */}
+          <Input {...register(name)} placeholder="#000000" />
+        </div>
+      </Field>
+    )
+  }
+
+  if (field.type === 'number') {
+    return (
+      <Field>
+        <FieldLabel>{field.label}</FieldLabel>
+        <Input
+          type="number"
+          min={field.min}
+          max={field.max}
+          step={field.step}
+          // valueAsNumber keeps the stored content numeric; without it a
+          // number input round-trips as a string and breaks Liquid's
+          // arithmetic filters on the value.
+          {...register(name, { valueAsNumber: true })}
+        />
+      </Field>
+    )
+  }
+
+  if (field.type === 'product') {
+    return <ProductField name={name} label={field.label} register={register} />
+  }
+
   if (field.type === 'select') {
     return (
       <Field>
         <FieldLabel>{field.label}</FieldLabel>
         <select
           {...register(name)}
-          className="border-input h-8 rounded-lg border bg-transparent px-2.5 text-sm"
+          className="border-input bg-card h-10 rounded-[0.875rem] border px-3 text-sm"
         >
           {field.options.map((option) => (
             <option key={option} value={option}>
@@ -146,10 +251,7 @@ function ArrayField({
   const { fields, append, remove } = useFieldArray({ control, name })
 
   const emptyItem = Object.fromEntries(
-    itemFields.map((f) => [
-      f.name,
-      f.type === 'array' || f.type === 'stringArray' ? [] : '',
-    ])
+    itemFields.map((f) => [f.name, emptyValueForField(f)])
   )
 
   return (
@@ -279,26 +381,54 @@ export function SectionInspectorForm<T extends Record<string, unknown>>({
 
   return (
     <form className="flex flex-col gap-4">
-      {definition.editorFields.map((field) => (
-        <FieldRenderer
-          key={field.name}
-          field={field}
-          namePrefix=""
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          control={control as Control<any>}
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          register={register as UseFormRegister<any>}
-        />
-      ))}
+      <FieldsRenderer
+        fields={definition.editorFields}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        control={control as Control<any>}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        register={register as UseFormRegister<any>}
+      />
     </form>
   )
 }
 
+/**
+ * Renders a list of FieldConfig into inputs.
+ *
+ * Shared by the registry-driven inspector above and the Liquid one, so a
+ * section authored in Liquid gets exactly the same controls as a built-in.
+ */
+export function FieldsRenderer({
+  fields,
+  control,
+  register,
+}: {
+  fields: FieldConfig[]
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  control: Control<any>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  register: UseFormRegister<any>
+}) {
+  return (
+    <>
+      {fields.map((field) => (
+        <FieldRenderer
+          key={field.name}
+          field={field}
+          namePrefix=""
+          control={control}
+          register={register}
+        />
+      ))}
+    </>
+  )
+}
+
 /** stringArray fields are stored as string[] but edited as {value: string}[] (useFieldArray needs objects). */
-function toFormValues(
+export function toFormValues(
   fields: FieldConfig[],
   value: Record<string, unknown>
-): unknown {
+): Record<string, unknown> {
   const result: Record<string, unknown> = { ...value }
   for (const field of fields) {
     if (field.type === 'stringArray') {
@@ -315,10 +445,10 @@ function toFormValues(
   return result
 }
 
-function fromFormValues(
+export function fromFormValues(
   fields: FieldConfig[],
   value: Record<string, unknown>
-): unknown {
+): Record<string, unknown> {
   const result: Record<string, unknown> = { ...value }
   for (const field of fields) {
     if (field.type === 'stringArray') {

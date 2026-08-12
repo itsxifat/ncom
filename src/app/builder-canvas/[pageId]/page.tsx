@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation'
 import { getPageForRawPreview } from '@/server/services/pageService'
 import { CanvasClient } from '@/modules/builder/CanvasFrame'
+import { getStorefrontCommerce } from '@/server/services/offerService'
 
 export default async function BuilderCanvasPage({
   params,
@@ -16,14 +17,21 @@ export default async function BuilderCanvasPage({
     notFound()
   }
 
-  if (!page.project.theme) {
+  if (!page.store.theme) {
     notFound()
   }
 
+  const commerce = await getStorefrontCommerce(
+    page.id,
+    page.storeId,
+    page.store.organizationId
+  )
+
   return (
     <CanvasClient
-      initialTheme={page.project.theme}
+      initialTheme={page.store.theme}
       initialSections={page.sections}
+      commerce={commerce}
     />
   )
 }

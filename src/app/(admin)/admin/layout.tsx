@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation'
 import { auth } from '@/server/auth/auth'
+import { requireVerifiedEmail } from '@/server/auth/emailGate'
 import { AdminShell } from '@/components/admin/admin-shell'
 
 export default async function AdminLayout({
@@ -14,6 +15,8 @@ export default async function AdminLayout({
   // immediately instead of waiting for the JWT to expire.
   if (!session?.user) redirect('/login')
   if (session.user.platformRole !== 'SUPER_ADMIN') redirect('/dashboard')
+
+  await requireVerifiedEmail(session.user.id)
 
   return <AdminShell>{children}</AdminShell>
 }

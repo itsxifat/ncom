@@ -4,9 +4,19 @@ import { headers } from 'next/headers'
 import type { Metadata } from 'next'
 import { getPublishedPageForRender } from '@/server/services/publishService'
 import { recordPageView } from '@/server/services/analyticsService'
+import { getStorefrontCommerce } from '@/server/services/offerService'
+import { isOverTrafficAllowance } from '@/server/services/entitlementService'
+import {
+  estimateHtmlBytes,
+  monthlyVisitorHash,
+  recordTraffic,
+  recordVisit,
+} from '@/server/services/usageService'
+import { getPlatformFlag } from '@/server/services/platformFlagService'
 import { env } from '@/lib/env'
 import { PageRenderer } from '@/modules/sections/PageRenderer'
 import { IntegrationScripts } from '@/components/analytics/integration-scripts'
+import { AllowanceReachedPage } from '@/components/public/allowance-reached'
 
 interface RouteParams {
   subdomain: string
@@ -30,6 +40,11 @@ export async function generateMetadata({
     description: snapshot.seoDescription ?? undefined,
     alternates: { canonical: url },
     robots: snapshot.robotsIndex ? undefined : { index: false, follow: false },
+    // The favicon travels in the page snapshot's theme, so it is already
+    // available here without a second query.
+    icons: snapshot.theme.faviconUrl
+      ? { icon: snapshot.theme.faviconUrl }
+      : undefined,
     openGraph: {
       title: snapshot.seoTitle || snapshot.title,
       description: snapshot.seoDescription ?? undefined,
@@ -54,7 +69,18 @@ export default async function PublicSitePage({
   const result = await getPublishedPageForRender(subdomain, path ?? [])
   if (!result) notFound()
 
-  const { project, page, snapshot, integration } = result
+  const { store, page, snapshot, integration } = result
+
+  // A tenant past their monthly allowance gets a holding page instead of their
+  // site. Two switches have to agree before that happens — the platform flag and
+  // the plan's own `enforceTrafficCap` — because taking a paying customer's site
+  // offline is the most damaging thing this codebase can do automatically.
+  if (await getPlatformFlag('quota.enforcePublicTrafficCap')) {
+    const allowance = await isOverTrafficAllowance(store.organizationId)
+    if (allowance.over) {
+      return <AllowanceReachedPage reason={allowance.reason ?? 'traffic'} />
+    }
+  }
 
   // `after()` callbacks can't call `headers()`/`cookies()` themselves —
   // everything they need must be resolved beforehand and captured in the
@@ -67,15 +93,32 @@ export default async function PublicSitePage({
   const referrer = headerList.get('referer')
   const userAgent = headerList.get('user-agent') ?? ''
 
+  // What this page sells, resolved once and handed to every section so the
+  // order form, the bundle cards and the sticky bar all quote the same prices.
+  const commerce = await getStorefrontCommerce(
+    page.id,
+    store.id,
+    store.organizationId
+  )
+
   after(async () => {
     await recordPageView({
       pageId: page.id,
-      projectId: project.id,
+      storeId: store.id,
       path: `/${(path ?? []).join('/')}`,
       referrer,
       userAgent,
       ip,
     })
+
+    // Plan metering, separate from the per-page analytics above: this is
+    // organisation-scoped and feeds the quota checks, so it stays correct even
+    // if a tenant deletes the page the view belonged to.
+    await recordTraffic(
+      store.organizationId,
+      estimateHtmlBytes(snapshot.sections)
+    )
+    await recordVisit(store.organizationId, monthlyVisitorHash(ip, userAgent))
   })
 
   return (
@@ -88,7 +131,12 @@ export default async function PublicSitePage({
           customHeadScript={integration.customHeadScript}
         />
       )}
-      <PageRenderer theme={snapshot.theme} sections={snapshot.sections} />
+      <PageRenderer
+        theme={snapshot.theme}
+        sections={snapshot.sections}
+        storeId={store.id}
+        commerce={commerce}
+      />
     </>
   )
 }

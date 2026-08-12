@@ -5,9 +5,13 @@ import { redirect } from 'next/navigation'
 import {
   createTemplate,
   deleteTemplate,
+  importTemplateLiquid,
 } from '@/server/services/templateService'
 import { createTemplateSchema } from '@/lib/validation/template'
-import type { FormActionState } from '@/app/(dashboard)/projects/actions'
+import type { FormActionState } from '@/app/(dashboard)/stores/actions'
+
+export type TemplateUploadState =
+  { error?: string; success?: string } | undefined
 
 export async function createTemplateAction(
   _prevState: FormActionState,
@@ -38,4 +42,32 @@ export async function createTemplateAction(
 export async function deleteTemplateAction(templateId: string) {
   await deleteTemplate(templateId)
   revalidatePath('/admin/templates')
+}
+
+/**
+ * Uploads a full-page Liquid design onto a template.
+ *
+ * Validation lives in the service and its message (with a line number) is
+ * surfaced verbatim — an admin pasting a theme needs to know which line broke,
+ * not that "something went wrong".
+ */
+export async function importTemplateLiquidAction(
+  templateId: string,
+  _prev: TemplateUploadState,
+  formData: FormData
+): Promise<TemplateUploadState> {
+  const source = String(formData.get('source') ?? '').trim()
+  if (!source) return { error: 'Paste the Liquid for this design' }
+
+  try {
+    await importTemplateLiquid(templateId, source)
+  } catch (cause) {
+    return {
+      error:
+        cause instanceof Error ? cause.message : 'Could not save the design',
+    }
+  }
+
+  revalidatePath(`/admin/templates/${templateId}/settings`)
+  return { success: 'Design uploaded and available to merchants.' }
 }

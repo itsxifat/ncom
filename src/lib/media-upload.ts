@@ -17,77 +17,42 @@ async function readJsonError(response: Response): Promise<string> {
   }
 }
 
-async function presign(
+/**
+ * The file is posted to our own server, which re-encodes it and forwards
+ * it to the CDN — the CDN's credentials are server-side only, so there is
+ * no browser-direct upload step to presign.
+ */
+async function postFile(
+  url: string,
   file: File,
-  projectId?: string
-): Promise<{
-  url: string
-  method: string
-  headers?: Record<string, string>
-  key: string
-}> {
-  const response = await fetch('/api/media/presign', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      fileName: file.name,
-      mimeType: file.type,
-      sizeBytes: file.size,
-      projectId,
-    }),
-  })
+  fields?: Record<string, string | undefined>
+): Promise<MediaAssetDTO> {
+  const form = new FormData()
+  form.append('file', file)
+  for (const [key, value] of Object.entries(fields ?? {})) {
+    if (value !== undefined) form.append(key, value)
+  }
+
+  const response = await fetch(url, { method: 'POST', body: form })
   if (!response.ok) throw new Error(await readJsonError(response))
   return response.json()
 }
 
-async function putFile(
-  upload: { url: string; method: string; headers?: Record<string, string> },
-  file: File
-) {
-  const response = await fetch(upload.url, {
-    method: upload.method,
-    headers: upload.headers,
-    body: file,
-  })
-  if (!response.ok) throw new Error('Upload failed')
-}
-
-/** Presigns, uploads, and confirms a new media asset. */
+/** Uploads a new media asset and returns the created record. */
 export async function uploadMediaFile(
   file: File,
-  opts?: { projectId?: string; altText?: string }
+  opts?: { storeId?: string; altText?: string }
 ): Promise<MediaAssetDTO> {
-  const upload = await presign(file, opts?.projectId)
-  await putFile(upload, file)
-
-  const response = await fetch('/api/media/confirm', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      key: upload.key,
-      fileName: file.name,
-      mimeType: file.type,
-      projectId: opts?.projectId,
-      altText: opts?.altText,
-    }),
+  return postFile('/api/media/upload', file, {
+    storeId: opts?.storeId,
+    altText: opts?.altText,
   })
-  if (!response.ok) throw new Error(await readJsonError(response))
-  return response.json()
 }
 
-/** Re-processes a fresh file into an existing asset's storage key/URL. */
+/** Swaps the file behind an existing asset, repointing anything using it. */
 export async function replaceMediaFile(
   mediaId: string,
   file: File
 ): Promise<MediaAssetDTO> {
-  const upload = await presign(file)
-  await putFile(upload, file)
-
-  const response = await fetch(`/api/media/${mediaId}/replace`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ key: upload.key, mimeType: file.type }),
-  })
-  if (!response.ok) throw new Error(await readJsonError(response))
-  return response.json()
+  return postFile(`/api/media/${mediaId}/replace`, file)
 }

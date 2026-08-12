@@ -5,7 +5,8 @@ import {
   type NextFetchEvent,
 } from 'next/server'
 import { authConfig } from '@/server/auth/auth.config'
-import { RESERVED_SUBDOMAINS } from '@/lib/reserved-subdomains'
+import { tenantSubdomain } from '@/lib/tenant-host'
+import { encodeDomainHandle, isCandidateCustomDomain } from '@/lib/site-handle'
 
 // Next.js 16 renamed `middleware.ts` -> `proxy.ts` (always Node.js runtime).
 const { auth } = NextAuth(authConfig)
@@ -20,21 +21,11 @@ const authMiddleware = auth as unknown as (
   event: NextFetchEvent
 ) => Promise<Response>
 
-const ROOT_HOSTNAME = (process.env.ROOT_DOMAIN ?? 'localhost:3000').split(
-  ':'
-)[0]
+const ROOT_DOMAIN = process.env.ROOT_DOMAIN ?? 'localhost:3000'
 
 /** `{sub}.${ROOT_DOMAIN}` -> `sub`, or null if this host isn't a tenant subdomain. */
 function extractTenantSubdomain(host: string): string | null {
-  const hostname = host.split(':')[0]
-  if (!hostname || hostname === ROOT_HOSTNAME) return null
-  if (!hostname.endsWith(`.${ROOT_HOSTNAME}`)) return null
-
-  const subdomain = hostname.slice(0, -(ROOT_HOSTNAME.length + 1))
-  if (!subdomain || subdomain.includes('.')) return null
-  if (RESERVED_SUBDOMAINS.has(subdomain)) return null
-
-  return subdomain
+  return tenantSubdomain(host, ROOT_DOMAIN)
 }
 
 /**
@@ -50,7 +41,32 @@ export default function proxy(request: NextRequest, event: NextFetchEvent) {
   const host = request.headers.get('host') ?? ''
   const subdomain = extractTenantSubdomain(host)
 
-  if (subdomain) {
+  // A host that is neither ours nor a tenant subdomain is a tenant's own custom
+  // domain. The hostname is passed through in the same route slot rather than
+  // resolved here: this function runs on every request and must not read the
+  // database (see the note above), so `resolveSiteHandle` does the lookup inside
+  // the route, where it can be cached.
+  if (
+    !subdomain &&
+    isCandidateCustomDomain(host) &&
+    !request.nextUrl.pathname.startsWith('/api/')
+  ) {
+    const url = request.nextUrl.clone()
+    url.pathname = `/sites/${encodeDomainHandle(host.split(':')[0]!)}${request.nextUrl.pathname}`
+    return NextResponse.rewrite(url)
+  }
+
+  // API routes are global: they live at /api/* for every host and identify the
+  // tenant from their own payload, not from the URL. Rewriting them under
+  // /sites/{subdomain} pointed them at routes that do not exist, so a
+  // storefront's own fetch to /api/storefront/orders came back as a 404 HTML
+  // page — the client then failed parsing it as JSON and reported "Could not
+  // reach the store", which looked like the backend was disconnected.
+  //
+  // Server actions are unaffected either way: they post to the current path
+  // and are dispatched by action id, so the rewritten /sites/* route handles
+  // them correctly. Only real /api/* routes need to escape the rewrite.
+  if (subdomain && !request.nextUrl.pathname.startsWith('/api/')) {
     const url = request.nextUrl.clone()
     url.pathname = `/sites/${subdomain}${request.nextUrl.pathname}`
     return NextResponse.rewrite(url)

@@ -1,60 +1,25 @@
 import 'server-only'
 import sharp from 'sharp'
+import type { Prisma } from '@/generated/prisma/client'
 import { prisma } from '@/server/db/client'
 import { requireOrgAccess } from '@/server/auth/rbac'
-import { storage } from '@/server/storage'
+import { requireQuota } from '@/server/services/entitlementService'
+import { uploadToCdn, deleteFromCdn } from '@/server/storage'
 import { slugify } from '@/lib/slug'
-import { MAX_MEDIA_UPLOAD_BYTES } from '@/lib/validation/media'
-import type {
-  PresignUploadInput,
-  ConfirmUploadInput,
-  ReplaceUploadInput,
-} from '@/lib/validation/media'
+import type { UploadMetadataInput } from '@/lib/validation/media'
 
 const MAX_DIMENSION = 2400
 const WEBP_QUALITY = 82
 
 export async function listMediaAssets(
   organizationId: string,
-  projectId?: string
+  storeId?: string
 ) {
   await requireOrgAccess(organizationId, 'VIEWER')
   return prisma.mediaAsset.findMany({
-    where: { organizationId, ...(projectId ? { projectId } : {}) },
+    where: { organizationId, ...(storeId ? { storeId } : {}) },
     orderBy: { createdAt: 'desc' },
   })
-}
-
-export async function presignMediaUpload(
-  organizationId: string,
-  input: PresignUploadInput
-) {
-  await requireOrgAccess(organizationId, 'EDITOR')
-
-  const baseName = slugify(input.fileName.replace(/\.[^./]+$/, '')) || 'file'
-  const key = `org/${organizationId}/${crypto.randomUUID()}-${baseName}`
-
-  const upload = await storage.getSignedUploadUrl(key, input.mimeType)
-  return { ...upload, key }
-}
-
-function assertOwnedKey(organizationId: string, key: string) {
-  if (!key.startsWith(`org/${organizationId}/`)) {
-    throw new Error('Invalid upload key')
-  }
-}
-
-async function verifyAndFetchUpload(organizationId: string, key: string) {
-  assertOwnedKey(organizationId, key)
-
-  const head = await storage.headObject(key)
-  if (!head.exists) throw new Error('Upload not found — try again')
-  if ((head.size ?? 0) > MAX_MEDIA_UPLOAD_BYTES) {
-    await storage.deleteObject(key)
-    throw new Error('File is too large (max 10MB)')
-  }
-
-  return storage.getObject(key)
 }
 
 /** Every upload is re-encoded so stored assets have a consistent, safe format. */
@@ -71,29 +36,44 @@ async function optimize(original: Buffer) {
     .toBuffer({ resolveWithObject: true })
 }
 
-export async function confirmMediaUpload(
+/** The name EnCDN records as `originalName`, for legibility in its admin UI. */
+function cdnFileName(organizationId: string, fileName: string) {
+  const base = slugify(fileName.replace(/\.[^./]+$/, '')) || 'file'
+  return `${organizationId}-${base}.webp`
+}
+
+export async function uploadMediaAsset(
   organizationId: string,
-  input: ConfirmUploadInput
+  data: Buffer,
+  fileName: string,
+  input: UploadMetadataInput
 ) {
   const { session } = await requireOrgAccess(organizationId, 'EDITOR')
 
-  const original = await verifyAndFetchUpload(organizationId, input.key)
-  const optimized = await optimize(original)
+  const optimized = await optimize(data)
 
-  const finalKey = `${input.key}.webp`
-  await storage.putObject(finalKey, optimized.data, 'image/webp')
-  await storage.deleteObject(input.key)
+  // Checked after re-encoding and before the CDN write: the stored WebP is what
+  // counts against the quota (often a fraction of the upload), and refusing
+  // before the upload means a rejected file never reaches the CDN to be
+  // orphaned there.
+  await requireQuota(organizationId, 'STORAGE_BYTES', optimized.info.size)
+
+  const uploaded = await uploadToCdn(
+    optimized.data,
+    cdnFileName(organizationId, fileName),
+    'image/webp'
+  )
 
   return prisma.mediaAsset.create({
     data: {
       organizationId,
-      projectId: input.projectId,
+      storeId: input.storeId,
       uploadedById: session.user.id,
-      fileName: input.fileName,
+      fileName,
       mimeType: 'image/webp',
       sizeBytes: optimized.info.size,
-      storageKey: finalKey,
-      url: storage.getPublicUrl(finalKey),
+      storageKey: uploaded.filename,
+      url: uploaded.url,
       width: optimized.info.width,
       height: optimized.info.height,
       altText: input.altText,
@@ -102,15 +82,76 @@ export async function confirmMediaUpload(
 }
 
 /**
- * Re-processes a fresh upload into an *existing* MediaAsset's storage key,
- * so its public URL never changes — every section that references the URL
- * (sections store raw URLs, not asset ids) picks up the new image without
- * any edits.
+ * Rewrites every reference to `fromUrl` in the organization's *draft*
+ * content so a replaced image shows up on the pages already using it.
+ *
+ * EnCDN assigns a fresh UUID filename to every upload and offers no way to
+ * write back to an existing one, so a replacement always lands on a new
+ * URL and the references have to move with it.
+ *
+ * Sections store image URLs as bare strings under per-component field
+ * names (`imageUrl`, `avatarUrl`, `posterUrl`, …), so this is a text-level
+ * substitution over the JSONB. That is safe here because both URLs consist
+ * only of URL characters, none of which carry meaning inside a JSON string
+ * literal.
+ *
+ * Published `PageVersion` snapshots are deliberately left alone: they are
+ * immutable records of what was published, and the old file is kept on the
+ * CDN so they keep rendering until the page is republished.
+ */
+async function rewriteContentReferences(
+  tx: Prisma.TransactionClient,
+  organizationId: string,
+  fromUrl: string,
+  toUrl: string
+) {
+  await tx.$executeRaw`
+    UPDATE "PageSection" AS ps
+    SET content = REPLACE(ps.content::text, ${fromUrl}, ${toUrl})::jsonb
+    FROM "Page" AS p
+    JOIN "Store" AS pr ON pr.id = p."storeId"
+    WHERE ps."pageId" = p.id
+      AND pr."organizationId" = ${organizationId}
+      AND ps.content::text LIKE ${'%' + fromUrl + '%'}
+  `
+
+  // Templates are global rather than org-scoped, but the template builder
+  // uploads through the active organization's media library, so a template
+  // section can hold a URL owned by this org.
+  await tx.$executeRaw`
+    UPDATE "TemplateSection"
+    SET "defaultContent" = REPLACE("defaultContent"::text, ${fromUrl}, ${toUrl})::jsonb
+    WHERE "defaultContent"::text LIKE ${'%' + fromUrl + '%'}
+  `
+}
+
+/**
+ * Whether any currently-published page still renders `url`. Published
+ * snapshots are immutable, so if one references the old file it has to
+ * stay on the CDN or the live site would 404 on it until republished.
+ */
+async function isUrlPublished(organizationId: string, url: string) {
+  const rows = await prisma.$queryRaw<{ one: number }[]>`
+    SELECT 1 AS one
+    FROM "PageVersion" AS pv
+    JOIN "Page" AS p ON p."publishedVersionId" = pv.id
+    JOIN "Store" AS pr ON pr.id = p."storeId"
+    WHERE pr."organizationId" = ${organizationId}
+      AND pv.snapshot::text LIKE ${'%' + url + '%'}
+    LIMIT 1
+  `
+  return rows.length > 0
+}
+
+/**
+ * Swaps the file behind an existing MediaAsset: uploads the replacement,
+ * repoints the asset and everything referencing its URL, then drops the
+ * old file from the CDN unless a published snapshot still needs it.
  */
 export async function replaceMediaAsset(
   organizationId: string,
   mediaId: string,
-  input: ReplaceUploadInput
+  data: Buffer
 ) {
   await requireOrgAccess(organizationId, 'EDITOR')
 
@@ -119,20 +160,42 @@ export async function replaceMediaAsset(
   })
   if (!asset) throw new Error('Media not found')
 
-  const original = await verifyAndFetchUpload(organizationId, input.key)
-  const optimized = await optimize(original)
+  const optimized = await optimize(data)
+  const uploaded = await uploadToCdn(
+    optimized.data,
+    cdnFileName(organizationId, asset.fileName),
+    'image/webp'
+  )
 
-  await storage.putObject(asset.storageKey, optimized.data, 'image/webp')
-  await storage.deleteObject(input.key)
-
-  return prisma.mediaAsset.update({
-    where: { id: mediaId },
-    data: {
-      sizeBytes: optimized.info.size,
-      width: optimized.info.width,
-      height: optimized.info.height,
-    },
+  // Repoint everything before deleting the old file, so a failure here
+  // leaves the asset pointing at something that still exists. The asset
+  // row and the references to it move together or not at all.
+  const updated = await prisma.$transaction(async (tx) => {
+    const next = await tx.mediaAsset.update({
+      where: { id: mediaId },
+      data: {
+        storageKey: uploaded.filename,
+        url: uploaded.url,
+        sizeBytes: optimized.info.size,
+        width: optimized.info.width,
+        height: optimized.info.height,
+      },
+    })
+    await rewriteContentReferences(tx, organizationId, asset.url, uploaded.url)
+    return next
   })
+
+  // Best-effort: an orphaned file on the CDN is a smaller problem than a
+  // replace that reports failure after it has already succeeded.
+  try {
+    if (!(await isUrlPublished(organizationId, asset.url))) {
+      await deleteFromCdn(asset.storageKey)
+    }
+  } catch (error) {
+    console.error('Failed to delete replaced CDN file:', error)
+  }
+
+  return updated
 }
 
 export async function updateMediaAssetAltText(
@@ -162,6 +225,6 @@ export async function deleteMediaAsset(
   })
   if (!asset) throw new Error('Media not found')
 
-  await storage.deleteObject(asset.storageKey)
+  await deleteFromCdn(asset.storageKey)
   await prisma.mediaAsset.delete({ where: { id: mediaId } })
 }

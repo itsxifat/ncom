@@ -1,25 +1,26 @@
 import 'server-only'
 import { prisma } from '@/server/db/client'
 import { requireOrgAccess } from '@/server/auth/rbac'
+import {
+  requireFeature,
+  requireQuota,
+} from '@/server/services/entitlementService'
 import { slugify, withRandomSuffix } from '@/lib/slug'
 import type { CreatePageInput, UpdatePageSeoInput } from '@/lib/validation/page'
 
-async function assertProjectInOrg(organizationId: string, projectId: string) {
-  const project = await prisma.project.findFirst({
-    where: { id: projectId, organizationId },
+async function assertStoreInOrg(organizationId: string, storeId: string) {
+  const store = await prisma.store.findFirst({
+    where: { id: storeId, organizationId },
     select: { id: true },
   })
-  if (!project) throw new Error('Project not found')
+  if (!store) throw new Error('Store not found')
 }
 
-async function uniquePageSlug(
-  projectId: string,
-  base: string
-): Promise<string> {
+async function uniquePageSlug(storeId: string, base: string): Promise<string> {
   const baseSlug = slugify(base) || 'page'
 
   const existing = await prisma.page.findUnique({
-    where: { projectId_slug: { projectId, slug: baseSlug } },
+    where: { storeId_slug: { storeId, slug: baseSlug } },
     select: { id: true },
   })
   if (!existing) return baseSlug
@@ -27,7 +28,7 @@ async function uniquePageSlug(
   for (let attempt = 0; attempt < 5; attempt++) {
     const candidate = withRandomSuffix(baseSlug)
     const collision = await prisma.page.findUnique({
-      where: { projectId_slug: { projectId, slug: candidate } },
+      where: { storeId_slug: { storeId, slug: candidate } },
       select: { id: true },
     })
     if (!collision) return candidate
@@ -36,40 +37,45 @@ async function uniquePageSlug(
   throw new Error('Could not generate a unique page slug')
 }
 
-export async function listPages(organizationId: string, projectId: string) {
+export async function listPages(organizationId: string, storeId: string) {
   await requireOrgAccess(organizationId, 'VIEWER')
-  await assertProjectInOrg(organizationId, projectId)
+  await assertStoreInOrg(organizationId, storeId)
 
   return prisma.page.findMany({
-    where: { projectId },
+    where: { storeId },
     orderBy: [{ isHome: 'desc' }, { createdAt: 'asc' }],
   })
 }
 
 export async function createPage(
   organizationId: string,
-  projectId: string,
+  storeId: string,
   input: CreatePageInput
 ) {
   await requireOrgAccess(organizationId, 'EDITOR')
-  await assertProjectInOrg(organizationId, projectId)
+  await assertStoreInOrg(organizationId, storeId)
+
+  // Inside the service, not the action: the builder, the template picker and the
+  // "new page" form all land here, and a check in one action would leave the
+  // other two paths able to exceed the plan.
+  await requireQuota(organizationId, 'PAGES')
 
   const slug = input.slug
     ? input.slug
-    : await uniquePageSlug(projectId, input.title)
+    : await uniquePageSlug(storeId, input.title)
 
   if (input.slug) {
     const collision = await prisma.page.findUnique({
-      where: { projectId_slug: { projectId, slug: input.slug } },
+      where: { storeId_slug: { storeId, slug: input.slug } },
     })
-    if (collision) throw new Error('This slug is already used on this project')
+    if (collision) throw new Error('This slug is already used on this store')
   }
 
-  const isFirstPage = (await prisma.page.count({ where: { projectId } })) === 0
+  const isFirstPage = (await prisma.page.count({ where: { storeId } })) === 0
 
   return prisma.page.create({
     data: {
-      projectId,
+      storeId,
       title: input.title,
       slug,
       isHome: isFirstPage,
@@ -79,24 +85,32 @@ export async function createPage(
 
 export async function updatePageSeo(
   organizationId: string,
-  projectId: string,
+  storeId: string,
   pageId: string,
   input: UpdatePageSeoInput
 ) {
   await requireOrgAccess(organizationId, 'EDITOR')
-  await assertProjectInOrg(organizationId, projectId)
+  await assertStoreInOrg(organizationId, storeId)
 
   const page = await prisma.page.findFirst({
-    where: { id: pageId, projectId },
+    where: { id: pageId, storeId },
     select: { id: true },
   })
   if (!page) throw new Error('Page not found')
 
   const collision = await prisma.page.findFirst({
-    where: { projectId, slug: input.slug, NOT: { id: pageId } },
+    where: { storeId, slug: input.slug, NOT: { id: pageId } },
     select: { id: true },
   })
-  if (collision) throw new Error('This slug is already used on this project')
+  if (collision) throw new Error('This slug is already used on this store')
+
+  // Title and description are "Basic SEO" and included everywhere. The social
+  // preview image and the indexing switch are what the price sheet sells as
+  // Advanced SEO, so they are gated — and only when being set, so a downgraded
+  // tenant can still clear them.
+  if (input.ogImageMediaId || input.robotsIndex === false) {
+    await requireFeature(organizationId, 'ADVANCED_SEO')
+  }
 
   if (input.ogImageMediaId) {
     const asset = await prisma.mediaAsset.findFirst({
@@ -121,14 +135,14 @@ export async function updatePageSeo(
 
 export async function getPageForSeoSettings(
   organizationId: string,
-  projectId: string,
+  storeId: string,
   pageId: string
 ) {
   await requireOrgAccess(organizationId, 'VIEWER')
-  await assertProjectInOrg(organizationId, projectId)
+  await assertStoreInOrg(organizationId, storeId)
 
   const page = await prisma.page.findFirst({
-    where: { id: pageId, projectId },
+    where: { id: pageId, storeId },
     include: { ogImage: true },
   })
   if (!page) throw new Error('Page not found')
@@ -138,20 +152,20 @@ export async function getPageForSeoSettings(
 
 export async function getPageWithSections(
   organizationId: string,
-  projectId: string,
+  storeId: string,
   pageId: string
 ) {
   await requireOrgAccess(organizationId, 'VIEWER')
-  await assertProjectInOrg(organizationId, projectId)
+  await assertStoreInOrg(organizationId, storeId)
 
   const page = await prisma.page.findFirst({
-    where: { id: pageId, projectId },
+    where: { id: pageId, storeId },
     include: {
       sections: {
         orderBy: { order: 'asc' },
         include: { componentDefinition: true },
       },
-      project: { include: { theme: true } },
+      store: { include: { theme: true } },
     },
   })
   if (!page) throw new Error('Page not found')
@@ -160,7 +174,7 @@ export async function getPageWithSections(
 }
 
 /**
- * Resolves a page's tenant from the page id alone (no org/project in the
+ * Resolves a page's tenant from the page id alone (no org/store in the
  * URL) and authorizes against it — used by the chrome-free render route
  * embedded in an iframe by both the authenticated preview and, later, the
  * visual builder's canvas.
@@ -168,15 +182,11 @@ export async function getPageWithSections(
 export async function getPageForRawPreview(pageId: string) {
   const page = await prisma.page.findUnique({
     where: { id: pageId },
-    select: { projectId: true, project: { select: { organizationId: true } } },
+    select: { storeId: true, store: { select: { organizationId: true } } },
   })
   if (!page) throw new Error('Page not found')
 
-  return getPageWithSections(
-    page.project.organizationId,
-    page.projectId,
-    pageId
-  )
+  return getPageWithSections(page.store.organizationId, page.storeId, pageId)
 }
 
 /**
@@ -194,7 +204,7 @@ export async function getPageByPreviewToken(token: string) {
         orderBy: { order: 'asc' },
         include: { componentDefinition: true },
       },
-      project: { include: { theme: true } },
+      store: { include: { theme: true } },
     },
   })
   if (!page) throw new Error('Page not found')
@@ -220,15 +230,15 @@ export interface SectionSaveInput {
  */
 export async function savePageSections(
   organizationId: string,
-  projectId: string,
+  storeId: string,
   pageId: string,
   sections: SectionSaveInput[]
 ): Promise<Record<string, string>> {
   await requireOrgAccess(organizationId, 'EDITOR')
-  await assertProjectInOrg(organizationId, projectId)
+  await assertStoreInOrg(organizationId, storeId)
 
   const page = await prisma.page.findFirst({
-    where: { id: pageId, projectId },
+    where: { id: pageId, storeId },
     select: { id: true },
   })
   if (!page) throw new Error('Page not found')
@@ -289,14 +299,14 @@ export async function savePageSections(
 
 export async function deletePage(
   organizationId: string,
-  projectId: string,
+  storeId: string,
   pageId: string
 ) {
   await requireOrgAccess(organizationId, 'EDITOR')
-  await assertProjectInOrg(organizationId, projectId)
+  await assertStoreInOrg(organizationId, storeId)
 
   const page = await prisma.page.findFirst({
-    where: { id: pageId, projectId },
+    where: { id: pageId, storeId },
     select: { id: true },
   })
   if (!page) throw new Error('Page not found')

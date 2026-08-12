@@ -43,9 +43,6 @@ next-env.d.ts
 
 /src/generated/prisma
 
-# local-driver media storage (dev-only; production uses S3-compatible storage)
-/public/media-uploads
-
 # playwright
 /test-results
 /playwright-report

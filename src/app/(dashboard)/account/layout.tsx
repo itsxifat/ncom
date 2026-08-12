@@ -1,4 +1,5 @@
-import Link from 'next/link'
+import { PageHeader } from '@/components/app/page-header'
+import { PillTabs } from '@/components/app/pill-tabs'
 
 export default function AccountLayout({
   children,
@@ -6,21 +7,18 @@ export default function AccountLayout({
   children: React.ReactNode
 }) {
   return (
-    <div className="flex flex-col gap-6">
-      <div className="mx-auto flex w-full max-w-lg gap-4 border-b pb-2 text-sm">
-        <Link
-          href="/account/profile"
-          className="hover:text-foreground text-muted-foreground"
-        >
-          Profile
-        </Link>
-        <Link
-          href="/account/security"
-          className="hover:text-foreground text-muted-foreground"
-        >
-          Security
-        </Link>
-      </div>
+    <div className="flex flex-col gap-8">
+      <PageHeader
+        eyebrow="You"
+        title="Account"
+        description="Your details and how you sign in."
+      />
+      <PillTabs
+        items={[
+          { href: '/account/profile', label: 'Profile' },
+          { href: '/account/security', label: 'Security' },
+        ]}
+      />
       {children}
     </div>
   )

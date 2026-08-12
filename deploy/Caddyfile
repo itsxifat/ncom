@@ -1,0 +1,36 @@
+{
+	email {$ACME_EMAIL}
+
+	# Asked during the TLS handshake for any hostname Caddy holds no certificate
+	# for. A 2xx starts an ACME order, so the endpoint fails closed — see
+	# src/app/api/internal/tls-check/route.ts.
+	on_demand_tls {
+		ask http://127.0.0.1:3000/api/internal/tls-check?key={$TLS_CHECK_SECRET}
+	}
+}
+
+# One catch-all site. The dashboard, every tenant subdomain and every tenant
+# custom domain are the same Next.js process, told apart by Host.
+#
+# Deliberately NOT a `*.enfinito.cloud` wildcard block. A wildcard certificate
+# can only be issued over DNS-01, which would mean keeping a registrar API token
+# with write access to the whole zone on this box. On-demand issuance gets a
+# per-hostname certificate over HTTP-01 instead — and it is the only mechanism
+# that can also cover a tenant's own domain, which is not in our zone at all and
+# no wildcard could ever match.
+https:// {
+	tls {
+		on_demand
+	}
+
+	encode zstd gzip
+
+	reverse_proxy 127.0.0.1:3000 {
+		header_up X-Forwarded-Host {host}
+	}
+}
+
+# ACME HTTP-01 challenges are answered by Caddy before this redirect runs.
+http:// {
+	redir https://{host}{uri} permanent
+}

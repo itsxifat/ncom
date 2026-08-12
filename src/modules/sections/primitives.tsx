@@ -4,15 +4,21 @@ import type { SectionConfig } from './types'
 export function SectionContainer({
   className,
   children,
+  config,
 }: {
   className?: string
   children: React.ReactNode
+  /** Optional: lets one section be wider or narrower than the theme default. */
+  config?: SectionConfig
 }) {
+  const maxWidth = config?.fullWidth
+    ? '100%'
+    : config?.maxWidth !== undefined
+      ? `${config.maxWidth}px`
+      : 'var(--page-container-width)'
+
   return (
-    <div
-      style={{ maxWidth: 'var(--page-container-width)' }}
-      className={cn('mx-auto px-6', className)}
-    >
+    <div style={{ maxWidth }} className={cn('mx-auto px-6', className)}>
       {children}
     </div>
   )
@@ -25,8 +31,21 @@ const BG_VARIANTS: Record<
   default: '',
   muted: 'bg-[color-mix(in_oklab,var(--page-text)_5%,var(--page-background))]',
   primary: 'bg-[var(--page-primary)] text-[var(--page-background)]',
+  dark: 'bg-[var(--page-text)] text-[var(--page-background)]',
+  // 'custom' paints from config.backgroundColor instead of a class.
+  custom: '',
 }
 
+/**
+ * The outer element of every section, and the single place per-section design
+ * overrides are applied.
+ *
+ * Every override falls back to the page theme when unset, so a section that
+ * configures nothing is indistinguishable from one rendered before these
+ * options existed. Values that end up in `style` are numbers or colour strings
+ * from a closed set of controls — never raw CSS text — so a section's design
+ * cannot smuggle arbitrary declarations into the page.
+ */
 export function SectionWrapper({
   config,
   className,
@@ -36,19 +55,77 @@ export function SectionWrapper({
   className?: string
   children: React.ReactNode
 }) {
+  const hasBackgroundImage = Boolean(config?.backgroundImageUrl)
+  const overlay = config?.backgroundOverlay ?? 0
+
+  const style: React.CSSProperties = {
+    // Padding falls back to the theme's spacing unit when not overridden.
+    paddingTop:
+      config?.paddingTop !== undefined
+        ? `${config.paddingTop}rem`
+        : 'calc(var(--page-space-unit) * 4rem)',
+    paddingBottom:
+      config?.paddingBottom !== undefined
+        ? `${config.paddingBottom}rem`
+        : 'calc(var(--page-space-unit) * 4rem)',
+  }
+
+  if (config?.backgroundVariant === 'custom' && config.backgroundColor) {
+    style.backgroundColor = config.backgroundColor
+  }
+
+  if (config?.textColor) style.color = config.textColor
+  if (config?.borderRadius !== undefined) {
+    style.borderRadius = `${config.borderRadius}px`
+    // A radius with no clipping does nothing visible on a section that has a
+    // background image.
+    style.overflow = 'hidden'
+  }
+
+  if (hasBackgroundImage) {
+    style.backgroundImage = `url(${JSON.stringify(config!.backgroundImageUrl)})`
+    style.backgroundSize = config?.backgroundSize ?? 'cover'
+    style.backgroundPosition = config?.backgroundPosition ?? 'center'
+    style.backgroundRepeat = 'no-repeat'
+  }
+
+  const alignmentClass =
+    config?.alignment === 'center'
+      ? 'text-center'
+      : config?.alignment === 'right'
+        ? 'text-right'
+        : undefined
+
   return (
     <section
-      style={{
-        paddingTop: 'calc(var(--page-space-unit) * 4rem)',
-        paddingBottom: 'calc(var(--page-space-unit) * 4rem)',
-      }}
+      id={config?.anchorId || undefined}
+      style={style}
       className={cn(
+        'relative',
         BG_VARIANTS[config?.backgroundVariant ?? 'default'],
-        config?.alignment === 'center' && 'text-center',
-        className
+        alignmentClass,
+        config?.borderTop &&
+          'border-t border-[color-mix(in_oklab,currentColor_15%,transparent)]',
+        config?.borderBottom &&
+          'border-b border-[color-mix(in_oklab,currentColor_15%,transparent)]',
+        // Tailwind cannot express "hide below sm" and "hide from sm up" from a
+        // single toggle, so both are explicit.
+        config?.hideOnMobile && 'hidden sm:block',
+        config?.hideOnDesktop && 'sm:hidden',
+        className,
+        config?.customClassName
       )}
     >
-      {children}
+      {/* Overlay sits between the background image and the content, so text
+          stays readable over a busy photo. */}
+      {hasBackgroundImage && overlay > 0 && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0"
+          style={{ backgroundColor: `rgb(0 0 0 / ${overlay}%)` }}
+        />
+      )}
+      <div className="relative">{children}</div>
     </section>
   )
 }

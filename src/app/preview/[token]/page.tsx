@@ -2,6 +2,8 @@ import { notFound } from 'next/navigation'
 import type { Metadata } from 'next'
 import { getPageByPreviewToken } from '@/server/services/pageService'
 import { PageRenderer } from '@/modules/sections/PageRenderer'
+import { compilePageSections } from '@/server/services/sectionCompiler'
+import { getStorefrontCommerce } from '@/server/services/offerService'
 
 export const metadata: Metadata = {
   title: 'Preview',
@@ -22,7 +24,20 @@ export default async function TokenPreviewPage({
     notFound()
   }
 
-  if (!page.project.theme) notFound()
+  if (!page.store.theme) notFound()
+
+  // Same compilation the publish pipeline runs; without it the shared draft
+  // preview drops every Liquid section on the page.
+  const sections = await compilePageSections(page.storeId, page.sections, {
+    includeErrors: true,
+    pageId: page.id,
+  })
+
+  const commerce = await getStorefrontCommerce(
+    page.id,
+    page.storeId,
+    page.store.organizationId
+  )
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -30,7 +45,12 @@ export default async function TokenPreviewPage({
         Draft preview — not published, not indexed by search engines.
       </div>
       <div className="flex-1">
-        <PageRenderer theme={page.project.theme} sections={page.sections} />
+        <PageRenderer
+          theme={page.store.theme}
+          sections={sections}
+          storeId={page.storeId}
+          commerce={commerce}
+        />
       </div>
     </div>
   )

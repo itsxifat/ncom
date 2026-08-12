@@ -17,7 +17,7 @@ function hashVisitor(ip: string, userAgent: string): string {
 
 export async function recordPageView(input: {
   pageId: string
-  projectId: string
+  storeId: string
   path: string
   referrer: string | null
   userAgent: string
@@ -27,7 +27,7 @@ export async function recordPageView(input: {
     await prisma.pageView.create({
       data: {
         pageId: input.pageId,
-        projectId: input.projectId,
+        storeId: input.storeId,
         path: input.path,
         referrer: input.referrer,
         visitorHash: hashVisitor(input.ip, input.userAgent),

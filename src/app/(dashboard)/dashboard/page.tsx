@@ -1,78 +1,111 @@
 import Link from 'next/link'
+import { FolderKanban, LayoutTemplate, Plus } from 'lucide-react'
 import { getActiveOrganization } from '@/server/services/organizationService'
-import { listProjects } from '@/server/services/projectService'
+import { listStores } from '@/server/services/storeService'
+import { env } from '@/lib/env'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { PageHeader } from '@/components/app/page-header'
+import { StatCard } from '@/components/app/stat-card'
+import { ArrowPuck } from '@/components/app/arrow-puck'
+import { EmptyState } from '@/components/app/empty-state'
+import { StoreTile } from '@/components/dashboard/store-tile'
 
 export default async function DashboardPage() {
   const { session, organization } = await getActiveOrganization()
-  const projects = await listProjects(organization.id)
+  const stores = await listStores(organization.id)
+  const pageCount = stores.reduce((sum, p) => sum + p._count.pages, 0)
 
   return (
-    <div className="flex flex-col gap-8">
-      <div>
-        <h1 className="font-display text-3xl font-semibold tracking-tight">
-          Welcome back, {session.user.name?.split(' ')[0] ?? 'there'}
-        </h1>
-        <p className="text-muted-foreground mt-1">
-          {organization.name} · {projects.length}{' '}
-          {projects.length === 1 ? 'project' : 'projects'}
-        </p>
+    <div className="flex flex-col gap-8 2xl:gap-10">
+      <PageHeader
+        eyebrow={organization.name}
+        title={`Welcome back, ${session.user.name?.split(' ')[0] ?? 'there'}`}
+        description="Everything you've built in this workspace, and the fastest way to add the next thing."
+        actions={
+          <Button render={<Link href="/stores/new" />} nativeButton={false}>
+            <Plus />
+            New store
+          </Button>
+        }
+      />
+
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard
+          tone="lime"
+          label="Stores"
+          value={stores.length}
+          hint={`in ${organization.name}`}
+          icon={<FolderKanban />}
+        />
+        <StatCard
+          label="Pages"
+          value={pageCount}
+          hint="across every store"
+          icon={<LayoutTemplate />}
+        />
+        <Link
+          href="/templates"
+          className="group/tile bg-ink text-ink-foreground shadow-puck hover:shadow-lift relative flex min-h-32 flex-col justify-between gap-6 overflow-hidden rounded-xl p-5 transition-shadow xl:col-span-2 2xl:min-h-36 2xl:p-6"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <span className="eyebrow opacity-60">Templates</span>
+            <ArrowPuck className="bg-white/10 text-white ring-white/15" />
+          </div>
+          <div>
+            <p className="font-display max-w-sm text-2xl leading-tight font-semibold tracking-tight text-balance 2xl:text-3xl">
+              Start from a template instead of a blank page
+            </p>
+            <p className="mt-2 text-sm opacity-60">
+              Pick a layout, swap the copy, publish.
+            </p>
+          </div>
+        </Link>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Projects</CardTitle>
-          </CardHeader>
-          <CardContent className="text-3xl font-semibold">
-            {projects.length}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Pages</CardTitle>
-          </CardHeader>
-          <CardContent className="text-3xl font-semibold">
-            {projects.reduce((sum, p) => sum + p._count.pages, 0)}
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-medium">Recent projects</h2>
-        <Button render={<Link href="/projects/new" />} nativeButton={false}>
-          New project
-        </Button>
-      </div>
-
-      {projects.length === 0 ? (
-        <Card>
-          <CardContent className="text-muted-foreground py-10 text-center">
-            You don&apos;t have any projects yet.{' '}
-            <Link href="/projects/new" className="text-foreground underline">
-              Create your first one
-            </Link>
-            .
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {projects.slice(0, 6).map((project) => (
-            <Link key={project.id} href={`/projects/${project.id}`}>
-              <Card className="hover:border-foreground/30 transition-colors">
-                <CardHeader>
-                  <CardTitle className="text-base">{project.name}</CardTitle>
-                </CardHeader>
-                <CardContent className="text-muted-foreground text-sm">
-                  {project.subdomain}.ncom.app · {project._count.pages}{' '}
-                  {project._count.pages === 1 ? 'page' : 'pages'}
-                </CardContent>
-              </Card>
-            </Link>
-          ))}
+      <section className="flex flex-col gap-4">
+        <div className="flex items-center justify-between gap-4">
+          <h2 className="font-display text-xl font-semibold tracking-tight">
+            Recent stores
+          </h2>
+          {stores.length > 6 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              render={<Link href="/stores" />}
+              nativeButton={false}
+            >
+              View all {stores.length}
+            </Button>
+          )}
         </div>
-      )}
+
+        {stores.length === 0 ? (
+          <EmptyState
+            icon={FolderKanban}
+            title="No stores yet"
+            description="A store holds your pages, media, and theme. Create one to get started."
+            action={
+              <Button render={<Link href="/stores/new" />} nativeButton={false}>
+                <Plus />
+                New store
+              </Button>
+            }
+          />
+        ) : (
+          <div className="3xl:grid-cols-5 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+            {stores.slice(0, 6).map((store) => (
+              <StoreTile
+                key={store.id}
+                href={`/stores/${store.id}`}
+                name={store.name}
+                subdomain={store.subdomain}
+                rootDomain={env.ROOT_DOMAIN}
+                pageCount={store._count.pages}
+              />
+            ))}
+          </div>
+        )}
+      </section>
     </div>
   )
 }

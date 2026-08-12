@@ -2,6 +2,7 @@
 
 import { useTransition } from 'react'
 import { useActionState } from 'react'
+import { Plus, Tags } from 'lucide-react'
 import {
   createTemplateCategoryAction,
   toggleTemplateCategoryActiveAction,
@@ -10,7 +11,15 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Card, CardContent } from '@/components/ui/card'
 import { Field, FieldError, FieldGroup } from '@/components/ui/field'
+import { EmptyState } from '@/components/app/empty-state'
+import {
+  ListPanel,
+  ListRow,
+  ListRowActions,
+  ListRowText,
+} from '@/components/app/list-panel'
 
 interface Category {
   id: string
@@ -27,81 +36,84 @@ export function CategoryList({ categories }: { categories: Category[] }) {
   const [isPending, startTransition] = useTransition()
 
   return (
-    <div className="flex flex-col gap-6">
-      <form action={action} className="flex items-start gap-2">
-        <FieldGroup className="flex-1">
-          <Field>
-            <div className="flex gap-2">
-              <Input name="name" placeholder="New category name" required />
-              <Button type="submit" disabled={pending}>
-                {pending ? 'Adding…' : 'Add category'}
-              </Button>
-            </div>
-            {state?.error && <FieldError>{state.error}</FieldError>}
-          </Field>
-        </FieldGroup>
-      </form>
+    <div className="flex max-w-3xl flex-col gap-6">
+      <Card>
+        <CardContent>
+          <form action={action}>
+            <FieldGroup>
+              <Field>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Input name="name" placeholder="New category name" required />
+                  <Button type="submit" disabled={pending}>
+                    <Plus />
+                    {pending ? 'Adding…' : 'Add category'}
+                  </Button>
+                </div>
+                {state?.error && <FieldError>{state.error}</FieldError>}
+              </Field>
+            </FieldGroup>
+          </form>
+        </CardContent>
+      </Card>
 
-      <div className="divide-border divide-y rounded-lg border">
-        {categories.length === 0 && (
-          <p className="text-muted-foreground p-4 text-sm">
-            No categories yet.
-          </p>
-        )}
-        {categories.map((category) => (
-          <div
-            key={category.id}
-            className="flex items-center justify-between gap-4 px-4 py-3"
-          >
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium">{category.name}</span>
-              <Badge variant={category.isActive ? 'default' : 'secondary'}>
-                {category.isActive ? 'Active' : 'Hidden'}
-              </Badge>
-              <span className="text-muted-foreground text-xs">
-                {category._count.templates}{' '}
-                {category._count.templates === 1 ? 'template' : 'templates'}
-              </span>
-            </div>
-            <div className="flex items-center gap-3">
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                disabled={isPending}
-                onClick={() =>
-                  startTransition(() =>
-                    toggleTemplateCategoryActiveAction(category.id)
-                  )
+      {categories.length === 0 ? (
+        <EmptyState
+          icon={Tags}
+          title="No categories yet"
+          description="Add one above to start grouping the template gallery."
+        />
+      ) : (
+        <ListPanel>
+          {categories.map((category) => (
+            <ListRow key={category.id}>
+              <ListRowText
+                title={category.name}
+                meta={`${category._count.templates} ${category._count.templates === 1 ? 'template' : 'templates'}`}
+                badges={
+                  <Badge variant={category.isActive ? 'lime' : 'secondary'}>
+                    {category.isActive ? 'Active' : 'Hidden'}
+                  </Badge>
                 }
-              >
-                {category.isActive ? 'Hide' : 'Unhide'}
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="text-destructive"
-                disabled={isPending}
-                onClick={() => {
-                  if (
-                    !window.confirm(
-                      `Delete "${category.name}"? Templates in it become uncategorized.`
+              />
+              <ListRowActions>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={isPending}
+                  onClick={() =>
+                    startTransition(() =>
+                      toggleTemplateCategoryActiveAction(category.id)
                     )
-                  ) {
-                    return
                   }
-                  startTransition(() =>
-                    deleteTemplateCategoryAction(category.id)
-                  )
-                }}
-              >
-                Delete
-              </Button>
-            </div>
-          </div>
-        ))}
-      </div>
+                >
+                  {category.isActive ? 'Hide' : 'Unhide'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="sm"
+                  disabled={isPending}
+                  onClick={() => {
+                    if (
+                      !window.confirm(
+                        `Delete "${category.name}"? Templates in it become uncategorized.`
+                      )
+                    ) {
+                      return
+                    }
+                    startTransition(() =>
+                      deleteTemplateCategoryAction(category.id)
+                    )
+                  }}
+                >
+                  Delete
+                </Button>
+              </ListRowActions>
+            </ListRow>
+          ))}
+        </ListPanel>
+      )}
     </div>
   )
 }

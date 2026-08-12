@@ -1,6 +1,5 @@
 'use client'
 
-import { useTheme } from 'next-themes'
 import { Toaster as Sonner, type ToasterProps } from 'sonner'
 import {
   CircleCheckIcon,
@@ -11,11 +10,14 @@ import {
 } from 'lucide-react'
 
 const Toaster = ({ ...props }: ToasterProps) => {
-  const { theme = 'system' } = useTheme()
-
   return (
     <Sonner
-      theme={theme as ToasterProps['theme']}
+      // Fixed rather than read from a theme provider. This previously called
+      // next-themes' `useTheme()`, but no ThemeProvider is mounted anywhere in the
+      // app, so it silently resolved to "system" and toasts followed the operating
+      // system while the rest of the product did not. The app is dark; so are its
+      // toasts. The colours below still come from the same tokens either way.
+      theme="dark"
       className="toaster group"
       icons={{
         success: <CircleCheckIcon className="size-4" />,

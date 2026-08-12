@@ -1,18 +1,12 @@
 'use client'
 
-import { useState } from 'react'
-import { usePathname } from 'next/navigation'
-import { Menu } from 'lucide-react'
+import { LogOut } from 'lucide-react'
+import { AppFrame } from '@/components/app/app-frame'
+import { BrandMark } from '@/components/app/brand-mark'
 import { OrgSwitcher } from '@/components/dashboard/org-switcher'
 import { SidebarNav } from '@/components/dashboard/sidebar-nav'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet'
 
 interface DashboardShellProps {
   organizationId: string
@@ -25,7 +19,7 @@ interface DashboardShellProps {
   children: React.ReactNode
 }
 
-function SidebarBody({
+export function DashboardShell({
   organizationId,
   organizations,
   isPlatformAdmin,
@@ -33,100 +27,48 @@ function SidebarBody({
   userEmail,
   initials,
   signOutAction,
-}: Omit<DashboardShellProps, 'children'>) {
+  children,
+}: DashboardShellProps) {
   return (
-    <div className="flex h-full flex-col gap-6">
-      <div className="flex items-center gap-2 px-1">
-        <span className="bg-primary flex size-6 items-center justify-center rounded-md text-xs font-bold text-white">
-          N
-        </span>
-        <span className="font-display text-lg font-semibold tracking-tight">
-          NCOM
-        </span>
-      </div>
-
-      <OrgSwitcher activeOrgId={organizationId} organizations={organizations} />
-
-      <SidebarNav isPlatformAdmin={isPlatformAdmin} />
-
-      <div className="mt-auto flex items-center justify-between gap-2 border-t pt-4">
-        <div className="flex min-w-0 items-center gap-2">
+    <AppFrame
+      brand={<BrandMark />}
+      brandOnLight={<BrandMark tone="onLight" />}
+      nav={<SidebarNav isPlatformAdmin={isPlatformAdmin} />}
+      railFooter={
+        <div className="bg-sidebar-accent flex items-center gap-2.5 rounded-2xl p-2.5">
           <Avatar className="size-8">
-            <AvatarFallback>{initials}</AvatarFallback>
+            <AvatarFallback className="bg-lime text-lime-foreground text-xs font-semibold">
+              {initials}
+            </AvatarFallback>
           </Avatar>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium">
               {userName ?? userEmail}
             </p>
-            <p className="text-muted-foreground truncate text-xs">
-              {userEmail}
-            </p>
+            <p className="text-ink-muted truncate text-xs">{userEmail}</p>
           </div>
+          <form action={signOutAction}>
+            <Button
+              type="submit"
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Sign out"
+              className="text-ink-muted hover:bg-white/10 hover:text-white"
+            >
+              <LogOut className="size-4" />
+            </Button>
+          </form>
         </div>
-        <form action={signOutAction}>
-          <Button type="submit" variant="ghost" size="sm">
-            Sign out
-          </Button>
-        </form>
-      </div>
-    </div>
-  )
-}
-
-export function DashboardShell({
-  children,
-  ...sidebarProps
-}: DashboardShellProps) {
-  const [mobileOpen, setMobileOpen] = useState(false)
-  const pathname = usePathname()
-  const [lastPathname, setLastPathname] = useState(pathname)
-
-  // Closes the drawer on navigation. Adjusting state during render (rather
-  // than in an effect) is React's own recommended pattern for "reset state
-  // when a prop changes" — it avoids an extra committed render with the
-  // drawer still open.
-  if (pathname !== lastPathname) {
-    setLastPathname(pathname)
-    setMobileOpen(false)
-  }
-
-  return (
-    <div className="flex flex-1 flex-col md:grid md:grid-cols-[16rem_1fr]">
-      <div className="border-border bg-background sticky top-0 z-30 flex items-center justify-between border-b px-4 py-3 md:hidden">
-        <div className="flex items-center gap-2">
-          <span className="bg-primary flex size-6 items-center justify-center rounded-md text-xs font-bold text-white">
-            N
-          </span>
-          <span className="font-display text-lg font-semibold tracking-tight">
-            NCOM
-          </span>
-        </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Open menu"
-          onClick={() => setMobileOpen(true)}
-        >
-          <Menu className="size-5" />
-        </Button>
-      </div>
-
-      <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-        <SheetContent side="left" className="bg-sidebar p-4">
-          <SheetHeader className="sr-only p-0">
-            <SheetTitle>Navigation</SheetTitle>
-          </SheetHeader>
-          <SidebarBody {...sidebarProps} />
-        </SheetContent>
-      </Sheet>
-
-      <aside className="bg-sidebar text-sidebar-foreground hidden border-r px-4 py-6 md:flex">
-        <SidebarBody {...sidebarProps} />
-      </aside>
-
-      <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
-        {children}
-      </main>
-    </div>
+      }
+      railHeader={
+        <OrgSwitcher
+          activeOrgId={organizationId}
+          organizations={organizations}
+          className="bg-sidebar-accent text-sidebar-foreground h-12 w-full rounded-2xl px-2.5 hover:bg-white/10 hover:text-white"
+        />
+      }
+    >
+      {children}
+    </AppFrame>
   )
 }

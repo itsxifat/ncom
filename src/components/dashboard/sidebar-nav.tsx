@@ -4,49 +4,124 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard,
-  FolderKanban,
+  Store,
   LayoutTemplate,
   Settings,
   ShieldCheck,
+  Users,
+  Package,
+  ShoppingCart,
+  Layers,
+  Warehouse,
+  UserRound,
+  Tag,
+  Image as ImageIcon,
+  CreditCard,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-const NAV_ITEMS = [
-  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/projects', label: 'Projects', icon: FolderKanban },
-  { href: '/templates', label: 'Templates', icon: LayoutTemplate },
-  { href: '/account/profile', label: 'Account Settings', icon: Settings },
+/**
+ * Workspace navigation.
+ *
+ * Grouped to match how the platform is actually shaped: commerce belongs to the
+ * workspace (one catalogue, one inventory, one order book, shared by every
+ * site), while a store is just a website — a subdomain, its pages and its
+ * domain settings. Selling comes first because it is what merchants open the
+ * dashboard to do; sites and setup sit below it.
+ */
+const NAV_GROUPS: Array<{ label: string | null; items: NavItem[] }> = [
+  {
+    label: null,
+    items: [{ href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard }],
+  },
+  {
+    label: 'Sell',
+    items: [
+      { href: '/orders', label: 'Orders', icon: ShoppingCart },
+      { href: '/products', label: 'Products', icon: Package },
+      { href: '/collections', label: 'Collections', icon: Layers },
+      { href: '/inventory', label: 'Inventory', icon: Warehouse },
+      { href: '/customers', label: 'Customers', icon: UserRound },
+      { href: '/discounts', label: 'Discounts', icon: Tag },
+    ],
+  },
+  {
+    label: 'Sites',
+    items: [
+      { href: '/stores', label: 'Stores', icon: Store },
+      { href: '/templates', label: 'Templates', icon: LayoutTemplate },
+      { href: '/media', label: 'Media', icon: ImageIcon },
+    ],
+  },
+  {
+    label: 'Setup',
+    items: [
+      { href: '/settings/payments', label: 'Payments', icon: Settings },
+      { href: '/settings/shipping', label: 'Shipping', icon: Settings },
+      { href: '/settings/taxes', label: 'Taxes', icon: Settings },
+      { href: '/settings/locations', label: 'Locations', icon: Settings },
+      { href: '/organization', label: 'Workspace', icon: Users },
+      { href: '/billing', label: 'Plan & billing', icon: CreditCard },
+      { href: '/account/profile', label: 'Account', icon: Settings },
+    ],
+  },
 ]
+
+interface NavItem {
+  href: string
+  label: string
+  icon: typeof LayoutDashboard
+}
 
 export function SidebarNav({ isPlatformAdmin }: { isPlatformAdmin: boolean }) {
   const pathname = usePathname()
-  const items = isPlatformAdmin
-    ? [...NAV_ITEMS, { href: '/admin', label: 'Admin', icon: ShieldCheck }]
-    : NAV_ITEMS
+
+  const groups = isPlatformAdmin
+    ? [
+        ...NAV_GROUPS,
+        {
+          label: 'Platform',
+          items: [{ href: '/admin', label: 'Admin', icon: ShieldCheck }],
+        },
+      ]
+    : NAV_GROUPS
 
   return (
-    <nav className="flex flex-col gap-1">
-      {items.map((item) => {
-        const isActive =
-          pathname === item.href || pathname.startsWith(`${item.href}/`)
-        const Icon = item.icon
+    <nav className="flex flex-col gap-5">
+      {groups.map((group, index) => (
+        <div key={group.label ?? index} className="flex flex-col gap-1">
+          {group.label && (
+            <p className="text-ink-muted px-3.5 pb-1 text-[11px] font-semibold tracking-wider uppercase">
+              {group.label}
+            </p>
+          )}
+          {group.items.map((item) => {
+            // Exact match for the group roots, prefix match for detail pages,
+            // so /orders/123 still highlights Orders without /settings/taxes
+            // also lighting up /settings/shipping.
+            const isActive =
+              pathname === item.href || pathname.startsWith(`${item.href}/`)
+            const Icon = item.icon
 
-        return (
-          <Link
-            key={item.href}
-            href={item.href}
-            className={cn(
-              'flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors',
-              isActive
-                ? 'bg-accent text-accent-foreground'
-                : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
-            )}
-          >
-            <Icon className="size-4" />
-            {item.label}
-          </Link>
-        )
-      })}
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                aria-current={isActive ? 'page' : undefined}
+                className={cn(
+                  'flex items-center gap-3 rounded-full px-3.5 py-2.5 text-sm font-medium transition-colors',
+                  isActive
+                    ? 'bg-sidebar-primary text-sidebar-primary-foreground'
+                    : 'text-ink-muted hover:bg-sidebar-accent hover:text-sidebar-foreground'
+                )}
+              >
+                <Icon className="size-4.5 shrink-0" />
+                {item.label}
+              </Link>
+            )
+          })}
+        </div>
+      ))}
     </nav>
   )
 }

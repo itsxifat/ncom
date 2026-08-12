@@ -31,10 +31,10 @@ export function NewTemplateForm({
   )
 
   return (
-    <div className="mx-auto max-w-lg">
-      <Card>
+    <div className="mx-auto w-full max-w-lg py-4 sm:py-10">
+      <Card className="[--card-spacing:--spacing(6)]">
         <CardHeader>
-          <CardTitle className="font-display text-2xl font-semibold">
+          <CardTitle className="font-display text-2xl font-semibold tracking-tight">
             New template
           </CardTitle>
           <CardDescription>
@@ -60,7 +60,7 @@ export function NewTemplateForm({
                   id="categoryId"
                   name="categoryId"
                   defaultValue=""
-                  className="border-input h-8 rounded-lg border bg-transparent px-2.5 text-sm"
+                  className="border-input bg-card h-10 rounded-[0.875rem] border px-3 text-sm"
                 >
                   <option value="">Uncategorized</option>
                   {categories.map((category) => (

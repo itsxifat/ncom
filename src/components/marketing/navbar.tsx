@@ -4,6 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { Menu, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { BrandMark } from '@/components/app/brand-mark'
 import { cn } from '@/lib/utils'
 
 const NAV_LINKS = [
@@ -18,13 +19,8 @@ export function Navbar({ isSignedIn }: { isSignedIn: boolean }) {
   return (
     <header className="border-border/60 bg-background/80 sticky top-0 z-50 border-b backdrop-blur-md">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6 sm:px-10">
-        <Link href="/" className="flex items-center gap-2">
-          <span className="bg-primary flex size-7 items-center justify-center rounded-lg text-sm font-bold text-white">
-            N
-          </span>
-          <span className="font-display text-lg font-semibold tracking-tight">
-            NCOM
-          </span>
+        <Link href="/" aria-label="NCOM home">
+          <BrandMark tone="onLight" size="lg" />
         </Link>
 
         <nav className="hidden items-center gap-8 md:flex">

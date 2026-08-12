@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getActiveOrganization } from '@/server/services/organizationService'
 import { replaceMediaAsset } from '@/server/services/mediaService'
-import { replaceUploadSchema } from '@/lib/validation/media'
+import { parseUploadFile } from '@/lib/validation/media'
 import { isTrustedOrigin } from '@/lib/security'
 import { checkRateLimit } from '@/lib/rate-limit'
 
@@ -20,7 +20,7 @@ export async function POST(
   const { organization } = await getActiveOrganization()
 
   const rateLimit = await checkRateLimit(
-    `media-confirm:${organization.id}`,
+    `media-upload:${organization.id}`,
     30,
     60
   )
@@ -34,14 +34,18 @@ export async function POST(
     )
   }
 
-  const body = await request.json().catch(() => null)
-  const parsed = replaceUploadSchema.safeParse(body)
-  if (!parsed.success) {
+  const form = await request.formData().catch(() => null)
+  if (!form) {
     return NextResponse.json({ error: 'Invalid input' }, { status: 400 })
   }
 
+  const file = await parseUploadFile(form)
+  if ('error' in file) {
+    return NextResponse.json({ error: file.error }, { status: 400 })
+  }
+
   try {
-    const asset = await replaceMediaAsset(organization.id, mediaId, parsed.data)
+    const asset = await replaceMediaAsset(organization.id, mediaId, file.data)
     return NextResponse.json(asset)
   } catch (error) {
     return NextResponse.json(

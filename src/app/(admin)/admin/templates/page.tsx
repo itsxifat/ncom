@@ -1,13 +1,16 @@
 import Link from 'next/link'
+import { LayoutTemplate, Plus, Tags } from 'lucide-react'
 import { listAllTemplatesForAdmin } from '@/server/services/templateService'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { PageHeader } from '@/components/app/page-header'
+import { EmptyState } from '@/components/app/empty-state'
+import { ArrowPuck } from '@/components/app/arrow-puck'
 import { TemplateActionsMenu } from '@/components/admin/template-actions-menu'
 
 const STATUS_VARIANT = {
   DRAFT: 'secondary',
-  PUBLISHED: 'default',
+  PUBLISHED: 'lime',
   ARCHIVED: 'outline',
 } as const
 
@@ -15,91 +18,89 @@ export default async function AdminTemplatesPage() {
   const templates = await listAllTemplatesForAdmin()
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="font-display text-3xl font-semibold tracking-tight">
-            Templates
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            Curate the templates tenants can start a project from.
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            render={<Link href="/admin/templates/categories" />}
-            nativeButton={false}
-          >
-            Categories
-          </Button>
-          <Button
-            render={<Link href="/admin/templates/new" />}
-            nativeButton={false}
-          >
-            New template
-          </Button>
-        </div>
-      </div>
+    <div className="flex flex-col gap-8">
+      <PageHeader
+        eyebrow="Content"
+        title="Templates"
+        description="Curate the templates tenants can start a store from. Only published templates are visible to them."
+        actions={
+          <>
+            <Button
+              variant="outline"
+              render={<Link href="/admin/templates/categories" />}
+              nativeButton={false}
+            >
+              <Tags />
+              Categories
+            </Button>
+            <Button
+              render={<Link href="/admin/templates/new" />}
+              nativeButton={false}
+            >
+              <Plus />
+              New template
+            </Button>
+          </>
+        }
+      />
 
       {templates.length === 0 ? (
-        <Card>
-          <CardContent className="text-muted-foreground py-10 text-center">
-            No templates yet.{' '}
-            <Link
-              href="/admin/templates/new"
-              className="text-foreground underline"
+        <EmptyState
+          icon={LayoutTemplate}
+          title="No templates yet"
+          description="Create a template, build its sections, then publish it for tenants."
+          action={
+            <Button
+              render={<Link href="/admin/templates/new" />}
+              nativeButton={false}
             >
-              Create the first one
-            </Link>
-            .
-          </CardContent>
-        </Card>
+              <Plus />
+              New template
+            </Button>
+          }
+        />
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="3xl:grid-cols-5 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
           {templates.map((template) => (
-            <Card
+            <div
               key={template.id}
-              className="hover:border-foreground/30 transition-colors"
+              className="group/tile bg-card ring-foreground/6 shadow-puck hover:shadow-lift relative flex flex-col justify-between gap-8 rounded-xl p-5 ring-1 transition-shadow"
             >
-              <CardHeader className="flex flex-row items-start justify-between gap-2">
-                <Link
-                  href={`/admin/templates/${template.id}/edit`}
-                  className="min-w-0 flex-1"
-                >
-                  <CardTitle className="truncate text-base">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <Link
+                    href={`/admin/templates/${template.id}/edit`}
+                    className="font-display block truncate text-lg font-semibold tracking-tight outline-none after:absolute after:inset-0 after:rounded-xl"
+                  >
                     {template.name}
-                  </CardTitle>
-                </Link>
-                <TemplateActionsMenu templateId={template.id} />
-              </CardHeader>
-              <CardContent className="flex flex-col gap-3">
-                <div className="text-muted-foreground text-sm">
-                  {template.category?.name ?? 'Uncategorized'} ·{' '}
-                  {template._count.sections}{' '}
-                  {template._count.sections === 1 ? 'section' : 'sections'}
+                  </Link>
+                  <p className="text-muted-foreground mt-1 truncate text-sm">
+                    {template.category?.name ?? 'Uncategorized'} ·{' '}
+                    {template._count.sections}{' '}
+                    {template._count.sections === 1 ? 'section' : 'sections'}
+                  </p>
                 </div>
-                <div className="flex items-center justify-between">
-                  <Badge variant={STATUS_VARIANT[template.status]}>
-                    {template.status}
-                  </Badge>
-                  <div className="flex gap-3 text-sm">
-                    <Link
-                      href={`/admin/templates/${template.id}/edit`}
-                      className="hover:underline"
-                    >
-                      Edit
-                    </Link>
-                    <Link
-                      href={`/admin/templates/${template.id}/settings`}
-                      className="hover:underline"
-                    >
-                      Settings
-                    </Link>
-                  </div>
+                <ArrowPuck />
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <Badge variant={STATUS_VARIANT[template.status]}>
+                  {template.status}
+                </Badge>
+                <div className="relative z-10 flex items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    render={
+                      <Link href={`/admin/templates/${template.id}/settings`} />
+                    }
+                    nativeButton={false}
+                  >
+                    Settings
+                  </Button>
+                  <TemplateActionsMenu templateId={template.id} />
                 </div>
-              </CardContent>
-            </Card>
+              </div>
+            </div>
           ))}
         </div>
       )}

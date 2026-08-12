@@ -3,6 +3,8 @@ import { prisma } from '@/server/db/client'
 import { requireOrgAccess } from '@/server/auth/rbac'
 import { redis } from '@/server/redis/client'
 import type { PageTheme } from '@/modules/sections/types'
+import { compilePageSections } from './sectionCompiler'
+import { resolveSiteHandle } from './siteHandleService'
 
 const PROJECT_CACHE_TTL_SECONDS = 300
 // Versions are immutable (publish always creates a new one), so their
@@ -16,6 +18,18 @@ interface PageSnapshotSection {
   config: unknown
   isVisible: boolean
   componentDefinition: { key: string }
+  /**
+   * Pre-rendered HTML for Liquid sections, compiled here at publish time.
+   *
+   * Compiling on publish rather than on request means the public render path
+   * never executes an untrusted template: a request to a live storefront reads
+   * a finished string out of the snapshot. That removes template execution
+   * from the hot path entirely — no per-request sandbox cost, no way for a
+   * pathological template to slow down or take down page delivery, and the
+   * existing snapshot cache keeps working unchanged because the snapshot is
+   * still plain JSON.
+   */
+  html?: string | null
 }
 
 export interface PageSnapshot {
@@ -30,24 +44,32 @@ export interface PageSnapshot {
 
 export async function publishPage(
   organizationId: string,
-  projectId: string,
+  storeId: string,
   pageId: string
 ) {
   const { session } = await requireOrgAccess(organizationId, 'EDITOR')
 
   const page = await prisma.page.findFirst({
-    where: { id: pageId, projectId, project: { organizationId } },
+    where: { id: pageId, storeId, store: { organizationId } },
     include: {
       sections: {
         orderBy: { order: 'asc' },
         include: { componentDefinition: true },
       },
-      project: { include: { theme: true } },
+      store: { include: { theme: true } },
       ogImage: true,
     },
   })
   if (!page) throw new Error('Page not found')
-  if (!page.project.theme) throw new Error('Project theme not found')
+  if (!page.store.theme) throw new Error('Store theme not found')
+
+  // One shared compiler for publish and preview, so what a merchant previews
+  // is what visitors get. `includeErrors: false` — a live storefront renders a
+  // broken section as nothing rather than showing a shopper a template error.
+  const sections = await compilePageSections(storeId, page.sections, {
+    includeErrors: false,
+    pageId: page.id,
+  })
 
   const snapshot: PageSnapshot = {
     title: page.title,
@@ -55,15 +77,8 @@ export async function publishPage(
     seoDescription: page.seoDescription,
     ogImageUrl: page.ogImage?.url ?? null,
     robotsIndex: page.robotsIndex,
-    theme: page.project.theme,
-    sections: page.sections.map((section) => ({
-      id: section.id,
-      order: section.order,
-      content: section.content,
-      config: section.config,
-      isVisible: section.isVisible,
-      componentDefinition: { key: section.componentDefinition.key },
-    })),
+    theme: page.store.theme,
+    sections,
   }
 
   const version = await prisma.pageVersion.create({
@@ -89,13 +104,13 @@ export async function publishPage(
 
 export async function unpublishPage(
   organizationId: string,
-  projectId: string,
+  storeId: string,
   pageId: string
 ) {
   await requireOrgAccess(organizationId, 'EDITOR')
 
   const page = await prisma.page.findFirst({
-    where: { id: pageId, projectId, project: { organizationId } },
+    where: { id: pageId, storeId, store: { organizationId } },
     select: { id: true },
   })
   if (!page) throw new Error('Page not found')
@@ -106,34 +121,41 @@ export async function unpublishPage(
   })
 }
 
-interface CachedProject {
+interface CachedStore {
   id: string
   organizationId: string
   isSearchIndexable: boolean
 }
 
-async function resolveProjectBySubdomain(
-  subdomain: string
-): Promise<CachedProject | null> {
-  const cacheKey = `project-by-subdomain:${subdomain}`
+/**
+ * Takes the route's site handle — a subdomain, or a custom hostname tagged by
+ * the proxy — and resolves it to the store behind it.
+ */
+async function resolveStoreByHandle(
+  handle: string
+): Promise<CachedStore | null> {
+  const subdomain = await resolveSiteHandle(handle)
+  if (!subdomain) return null
+
+  const cacheKey = `store-by-subdomain:${subdomain}`
 
   try {
     const cached = await redis.get(cacheKey)
-    if (cached) return JSON.parse(cached) as CachedProject
+    if (cached) return JSON.parse(cached) as CachedStore
   } catch {
     // cache is best-effort
   }
 
-  const project = await prisma.project.findUnique({
+  const store = await prisma.store.findUnique({
     where: { subdomain },
     select: { id: true, organizationId: true, isSearchIndexable: true },
   })
 
-  if (project) {
+  if (store) {
     try {
       await redis.set(
         cacheKey,
-        JSON.stringify(project),
+        JSON.stringify(store),
         'EX',
         PROJECT_CACHE_TTL_SECONDS
       )
@@ -142,7 +164,7 @@ async function resolveProjectBySubdomain(
     }
   }
 
-  return project
+  return store
 }
 
 async function getSnapshot(versionId: string): Promise<PageSnapshot | null> {
@@ -184,18 +206,18 @@ async function getSnapshot(versionId: string): Promise<PageSnapshot | null> {
  * takes effect immediately; only the immutable snapshot blob is cached.
  */
 export async function getPublishedPageForRender(
-  subdomain: string,
+  handle: string,
   path: string[]
 ) {
-  const project = await resolveProjectBySubdomain(subdomain)
-  if (!project) return null
+  const store = await resolveStoreByHandle(handle)
+  if (!store) return null
 
   const slug = path.join('/')
 
   const page = await prisma.page.findFirst({
     where: slug
-      ? { projectId: project.id, slug, status: 'PUBLISHED' }
-      : { projectId: project.id, isHome: true, status: 'PUBLISHED' },
+      ? { storeId: store.id, slug, status: 'PUBLISHED' }
+      : { storeId: store.id, isHome: true, status: 'PUBLISHED' },
     select: { id: true, publishedVersionId: true },
   })
   if (!page?.publishedVersionId) return null
@@ -205,22 +227,22 @@ export async function getPublishedPageForRender(
 
   // Not cached: analytics IDs should take effect on the next request, not
   // wait for a republish, and this is one cheap indexed lookup per render.
-  const integration = await prisma.projectIntegrationConfig.findUnique({
-    where: { projectId: project.id },
+  const integration = await prisma.storeIntegrationConfig.findUnique({
+    where: { storeId: store.id },
   })
 
-  return { project, page, snapshot, integration }
+  return { store, page, snapshot, integration }
 }
 
 /** For the per-tenant sitemap.xml/robots.txt routes. */
-export async function getProjectForSeoRoutes(subdomain: string) {
-  return resolveProjectBySubdomain(subdomain)
+export async function getStoreForSeoRoutes(handle: string) {
+  return resolveStoreByHandle(handle)
 }
 
-export async function listIndexablePages(projectId: string) {
+export async function listIndexablePages(storeId: string) {
   return prisma.page.findMany({
     where: {
-      projectId,
+      storeId,
       status: 'PUBLISHED',
       robotsIndex: true,
     },

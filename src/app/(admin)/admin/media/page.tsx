@@ -1,8 +1,12 @@
+import { Image as ImageIcon } from 'lucide-react'
 import {
   listAllMediaAssets,
   getStorageUsage,
 } from '@/server/services/adminService'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
+import { PageHeader } from '@/components/app/page-header'
+import { EmptyState } from '@/components/app/empty-state'
+import { StatCard } from '@/components/app/stat-card'
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -17,46 +21,51 @@ export default async function AdminMediaPage() {
   ])
 
   return (
-    <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="font-display text-3xl font-semibold tracking-tight">
-          Media
-        </h1>
-        <p className="text-muted-foreground mt-1">
-          {usage.assetCount} assets · {formatBytes(usage.totalBytes)} total
-          across every tenant.
-        </p>
+    <div className="flex flex-col gap-8">
+      <PageHeader
+        eyebrow="Content"
+        title="Media"
+        description="Every image uploaded by every tenant."
+      />
+
+      <div className="grid gap-4 sm:grid-cols-2 xl:max-w-2xl">
+        <StatCard label="Assets" value={usage.assetCount} />
+        <StatCard
+          tone="ink"
+          label="Storage used"
+          value={formatBytes(usage.totalBytes)}
+        />
       </div>
 
       {assets.length === 0 ? (
-        <Card>
-          <CardContent className="text-muted-foreground py-10 text-center">
-            No media uploaded yet.
-          </CardContent>
-        </Card>
+        <EmptyState
+          icon={ImageIcon}
+          title="No media uploaded yet"
+          description="Images tenants upload to their libraries show up here."
+        />
       ) : (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        <div className="3xl:grid-cols-9 4xl:grid-cols-11 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5 2xl:grid-cols-7">
           {assets.map((asset) => (
-            <Card key={asset.id} className="overflow-hidden">
-              <div className="bg-muted aspect-square">
-                {/* eslint-disable-next-line @next/next/no-img-element -- arbitrary local-driver/S3 URLs */}
+            <Card key={asset.id} size="sm" className="gap-2.5 pt-0">
+              <div className="bg-muted aspect-square overflow-hidden">
+                {/* eslint-disable-next-line @next/next/no-img-element -- arbitrary CDN-hosted URLs */}
                 <img
                   src={asset.url}
                   alt={asset.altText ?? ''}
                   className="size-full object-cover"
                 />
               </div>
-              <CardHeader className="p-2">
-                <CardTitle
+              <CardContent>
+                <p
                   className="truncate text-xs font-medium"
                   title={asset.fileName}
                 >
                   {asset.fileName}
-                </CardTitle>
-                <p className="text-muted-foreground truncate text-xs">
+                </p>
+                <p className="text-muted-foreground mt-0.5 truncate text-xs">
                   {asset.organization.name} · {formatBytes(asset.sizeBytes)}
                 </p>
-              </CardHeader>
+              </CardContent>
             </Card>
           ))}
         </div>

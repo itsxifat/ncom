@@ -9,7 +9,7 @@ import {
 } from '@/server/services/templateService'
 import { updateTemplateMetaSchema } from '@/lib/validation/template'
 import { updateThemeSchema, type ThemeFormState } from '@/lib/validation/theme'
-import type { FormActionState } from '@/app/(dashboard)/projects/actions'
+import type { FormActionState } from '@/app/(dashboard)/stores/actions'
 
 export async function updateTemplateMetaAction(
   templateId: string,
@@ -21,6 +21,7 @@ export async function updateTemplateMetaAction(
     categoryId: formData.get('categoryId') || undefined,
     description: formData.get('description') || undefined,
     status: formData.get('status'),
+    isPremium: formData.get('isPremium') ?? undefined,
   })
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? 'Invalid input' }

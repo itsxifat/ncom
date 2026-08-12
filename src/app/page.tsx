@@ -57,7 +57,7 @@ const FEATURES = [
     icon: Globe2,
     title: 'Your own subdomain',
     description:
-      'Every project ships on its own subdomain automatically, with sitemap and robots handled for you.',
+      'Every store ships on its own subdomain automatically, with sitemap and robots handled for you.',
   },
   {
     icon: Gauge,
@@ -163,7 +163,7 @@ export default async function Home() {
         </div>
 
         {/* Black stat band */}
-        <div className="bg-[#0a0a0a] px-6 py-20 text-white sm:px-10 sm:py-28">
+        <div className="bg-ink-raised px-6 py-20 text-white sm:px-10 sm:py-28">
           <div className="mx-auto grid w-full max-w-6xl grid-cols-1 gap-10 text-center sm:grid-cols-3">
             <div>
               <p className="text-vivid font-display text-4xl font-semibold sm:text-5xl">
@@ -217,7 +217,7 @@ export default async function Home() {
         {/* Pricing / final CTA */}
         <div
           id="pricing"
-          className="bg-[#0a0a0a] px-6 py-20 text-white sm:px-10 sm:py-28"
+          className="bg-ink-raised px-6 py-20 text-white sm:px-10 sm:py-28"
         >
           <div className="mx-auto flex w-full max-w-3xl flex-col items-center gap-6 text-center">
             <h2 className="font-display text-3xl font-semibold tracking-tight text-balance sm:text-4xl">

@@ -1,7 +1,13 @@
 'use client'
 
 import { useTransition } from 'react'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  ListRow,
+  ListRowActions,
+  ListRowText,
+} from '@/components/app/list-panel'
 import { forceUnpublishPageAction } from './actions'
 
 export function PublishedPageRow({
@@ -20,30 +26,32 @@ export function PublishedPageRow({
   const [isPending, startTransition] = useTransition()
 
   return (
-    <div className="flex items-center justify-between gap-4 px-4 py-3">
-      <div className="min-w-0">
-        <p className="truncate font-medium">{title}</p>
-        <p className="text-muted-foreground truncate text-sm">
-          {url} · {organizationName}
-          {publishedAt &&
-            ` · published ${new Date(publishedAt).toLocaleDateString()}`}
-        </p>
-      </div>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        className="text-destructive shrink-0"
-        disabled={isPending}
-        onClick={() => {
-          if (!window.confirm(`Force-unpublish "${title}"?`)) return
-          startTransition(() => {
-            forceUnpublishPageAction(pageId)
-          })
-        }}
-      >
-        Force unpublish
-      </Button>
-    </div>
+    <ListRow>
+      <ListRowText
+        title={title}
+        meta={`${url} · ${organizationName}${
+          publishedAt
+            ? ` · published ${new Date(publishedAt).toLocaleDateString()}`
+            : ''
+        }`}
+        badges={<Badge variant="lime">Live</Badge>}
+      />
+      <ListRowActions>
+        <Button
+          type="button"
+          variant="destructive"
+          size="sm"
+          disabled={isPending}
+          onClick={() => {
+            if (!window.confirm(`Force-unpublish "${title}"?`)) return
+            startTransition(() => {
+              forceUnpublishPageAction(pageId)
+            })
+          }}
+        >
+          Force unpublish
+        </Button>
+      </ListRowActions>
+    </ListRow>
   )
 }

@@ -1,30 +1,29 @@
+import { Blocks } from 'lucide-react'
 import { listComponentDefinitions } from '@/server/services/adminService'
-import { Card, CardContent } from '@/components/ui/card'
+import { PageHeader } from '@/components/app/page-header'
+import { EmptyState } from '@/components/app/empty-state'
+import { ListPanel } from '@/components/app/list-panel'
 import { ComponentRow } from './ComponentRow'
 
 export default async function AdminComponentsPage() {
   const components = await listComponentDefinitions()
 
   return (
-    <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="font-display text-3xl font-semibold tracking-tight">
-          Components
-        </h1>
-        <p className="text-muted-foreground mt-1">
-          Curate which section types are available in the builder palette. New
-          types are added by developers in code, not here.
-        </p>
-      </div>
+    <div className="flex flex-col gap-8">
+      <PageHeader
+        eyebrow="Content"
+        title="Components"
+        description="Choose which section types appear in the builder palette. New types are added in code, not here."
+      />
 
       {components.length === 0 ? (
-        <Card>
-          <CardContent className="text-muted-foreground py-10 text-center">
-            No component definitions seeded yet.
-          </CardContent>
-        </Card>
+        <EmptyState
+          icon={Blocks}
+          title="No component definitions"
+          description="Run the seed to populate the builder palette."
+        />
       ) : (
-        <div className="flex flex-col divide-y rounded-lg border">
+        <ListPanel>
           {components.map((component) => (
             <ComponentRow
               key={component.id}
@@ -35,7 +34,7 @@ export default async function AdminComponentsPage() {
               isActive={component.isActive}
             />
           ))}
-        </div>
+        </ListPanel>
       )}
     </div>
   )

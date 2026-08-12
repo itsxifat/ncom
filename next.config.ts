@@ -17,13 +17,24 @@ const ANALYTICS_SCRIPT_SRC =
 const ANALYTICS_CONNECT_SRC =
   'https://www.google-analytics.com https://www.googletagmanager.com https://connect.facebook.net https://www.facebook.com'
 
+// Stripe Elements loads js.stripe.com and renders card fields inside an iframe
+// hosted there — that iframe boundary is what keeps raw card numbers out of
+// this origin entirely, so it is a security feature rather than an
+// inconvenience to work around. Allowlisted narrowly (three exact hosts) for
+// the same reason the analytics entries are: a tenant's custom head script
+// runs under this same policy.
+const STRIPE_SCRIPT_SRC = 'https://js.stripe.com'
+const STRIPE_CONNECT_SRC = 'https://api.stripe.com https://maps.googleapis.com'
+const STRIPE_FRAME_SRC = 'https://js.stripe.com https://hooks.stripe.com'
+
 const cspHeader = `
   default-src 'self';
-  script-src 'self' 'unsafe-inline' ${ANALYTICS_SCRIPT_SRC}${isDev ? " 'unsafe-eval'" : ''};
+  script-src 'self' 'unsafe-inline' ${ANALYTICS_SCRIPT_SRC} ${STRIPE_SCRIPT_SRC}${isDev ? " 'unsafe-eval'" : ''};
   style-src 'self' 'unsafe-inline';
   img-src 'self' blob: data: https:;
   font-src 'self' data:;
-  connect-src 'self' ${ANALYTICS_CONNECT_SRC}${isDev ? ' ws://localhost:* http://localhost:*' : ''};
+  connect-src 'self' ${ANALYTICS_CONNECT_SRC} ${STRIPE_CONNECT_SRC}${isDev ? ' ws://localhost:* http://localhost:*' : ''};
+  frame-src 'self' ${STRIPE_FRAME_SRC};
   object-src 'none';
   base-uri 'self';
   form-action 'self';
@@ -53,6 +64,16 @@ const securityHeaders = [
 ]
 
 const nextConfig: NextConfig = {
+  experimental: {
+    // Media uploads are proxied through /api/media/*, and `src/proxy.ts`
+    // makes Next buffer every request body — silently truncating anything
+    // past this limit rather than erroring. At the 10MB default an upload
+    // at the 10MB media cap (`MAX_MEDIA_UPLOAD_BYTES`) plus its multipart
+    // framing gets cut off, so `formData()` fails to parse and the user
+    // sees a generic parse error instead of "File is too large". Keeping
+    // the buffer above the cap lets the app's own size check answer first.
+    proxyClientMaxBodySize: '12mb',
+  },
   async headers() {
     return [
       {

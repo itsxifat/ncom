@@ -14,3 +14,19 @@ export type FieldConfig =
   | { type: 'select'; name: string; label: string; options: string[] }
   | { type: 'stringArray'; name: string; label: string }
   | { type: 'array'; name: string; label: string; itemFields: FieldConfig[] }
+  // `color` and `number` exist for Liquid sections, whose {% schema %} blocks
+  // carry Shopify's `color`/`range`/`number` setting types (see
+  // lib/liquid/schema.ts). Built-in React sections are free to use them too.
+  | { type: 'color'; name: string; label: string }
+  // Picks a real sellable variant from the store's catalogue and stores its id.
+  // A section that takes orders has to reference actual inventory — a typed-in
+  // product name cannot be sold, priced or decremented from stock.
+  | { type: 'product'; name: string; label: string }
+  | {
+      type: 'number'
+      name: string
+      label: string
+      min?: number
+      max?: number
+      step?: number
+    }

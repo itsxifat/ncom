@@ -1,85 +1,55 @@
-import Link from 'next/link'
+import { LayoutTemplate } from 'lucide-react'
 import { listPublishedTemplates } from '@/server/services/templateService'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
+import { PageHeader } from '@/components/app/page-header'
+import { EmptyState } from '@/components/app/empty-state'
+import { TemplateTile } from '@/components/dashboard/template-tile'
 
 export default async function TemplatesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ forProject?: string }>
+  searchParams: Promise<{ forStore?: string }>
 }) {
-  const { forProject } = await searchParams
+  const { forStore } = await searchParams
   const templates = await listPublishedTemplates()
 
   const templateUseHref = (templateId: string) =>
-    forProject
-      ? `/projects/${forProject}/pages/new?template=${templateId}`
-      : `/projects/new?template=${templateId}`
+    forStore
+      ? `/stores/${forStore}/pages/new?template=${templateId}`
+      : `/stores/new?template=${templateId}`
 
   const templatePreviewHref = (templateId: string) =>
-    `/templates/${templateId}/preview${forProject ? `?forProject=${forProject}` : ''}`
+    `/templates/${templateId}/preview${forStore ? `?forStore=${forStore}` : ''}`
 
   return (
-    <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="font-display text-3xl font-semibold tracking-tight">
-          Templates
-        </h1>
-        <p className="text-muted-foreground mt-1">
-          {forProject
+    <div className="flex flex-col gap-8">
+      <PageHeader
+        eyebrow="Gallery"
+        title="Templates"
+        description={
+          forStore
             ? 'Pick a template to seed a new page.'
-            : 'Pick a template to start a new project.'}
-        </p>
-      </div>
+            : 'Pick a template to start a new store.'
+        }
+      />
 
       {templates.length === 0 ? (
-        <Card>
-          <CardContent className="text-muted-foreground py-10 text-center">
-            No templates are published yet.
-          </CardContent>
-        </Card>
+        <EmptyState
+          icon={LayoutTemplate}
+          title="No templates published yet"
+          description="Published templates show up here for everyone in the workspace."
+        />
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="3xl:grid-cols-5 4xl:grid-cols-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
           {templates.map((template) => (
-            <Card key={template.id} className="flex flex-col">
-              <div className="from-muted to-card border-b bg-gradient-to-br">
-                <div className="text-muted-foreground/40 flex h-32 items-center justify-center text-4xl font-semibold">
-                  {template.name.slice(0, 1).toUpperCase()}
-                </div>
-              </div>
-              <CardHeader>
-                <CardTitle className="text-base">{template.name}</CardTitle>
-              </CardHeader>
-              <CardContent className="flex flex-1 flex-col justify-between gap-4">
-                <div>
-                  <p className="text-muted-foreground text-xs tracking-wide uppercase">
-                    {template.category?.name ?? 'Uncategorized'}
-                  </p>
-                  {template.description && (
-                    <p className="text-muted-foreground mt-2 text-sm">
-                      {template.description}
-                    </p>
-                  )}
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    render={<Link href={templatePreviewHref(template.id)} />}
-                    nativeButton={false}
-                  >
-                    Preview
-                  </Button>
-                  <Button
-                    size="sm"
-                    render={<Link href={templateUseHref(template.id)} />}
-                    nativeButton={false}
-                  >
-                    Use template
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
+            <TemplateTile
+              key={template.id}
+              name={template.name}
+              categoryName={template.category?.name ?? 'Uncategorized'}
+              description={template.description}
+              sectionCount={template._count.sections}
+              previewHref={templatePreviewHref(template.id)}
+              useHref={templateUseHref(template.id)}
+            />
           ))}
         </div>
       )}

@@ -2,7 +2,11 @@ import { notFound } from 'next/navigation'
 import { getTemplateForBuilder } from '@/server/services/templateService'
 import { prisma } from '@/server/db/client'
 import { BuilderShell } from '@/modules/builder/BuilderShell'
-import { saveTemplateSectionsAction } from './actions'
+import { listGlobalLiquidSections } from '@/server/services/liquidService'
+import {
+  renderTemplateSectionPreviewAction,
+  saveTemplateSectionsAction,
+} from './actions'
 
 export default async function TemplateEditPage({
   params,
@@ -26,6 +30,11 @@ export default async function TemplateEditPage({
     componentDefinitions.map((c) => [c.key, c.id])
   )
 
+  // Liquid sections have to be declared here or the canvas has no idea they
+  // need compiling — it looks them up in the React registry, finds nothing and
+  // paints an empty div where the section should be.
+  const liquidSections = await listGlobalLiquidSections()
+
   const initialSections = template.sections.map((section) => ({
     id: section.id,
     componentDefinitionId: section.componentDefinitionId,
@@ -44,6 +53,8 @@ export default async function TemplateEditPage({
       theme={theme}
       initialSections={initialSections}
       componentDefinitionIds={componentDefinitionIds}
+      liquidSections={liquidSections}
+      renderSection={renderTemplateSectionPreviewAction.bind(null, templateId)}
       canvasSrc={`/builder-canvas/template/${templateId}`}
       onSave={saveTemplateSectionsAction.bind(null, templateId)}
     />
