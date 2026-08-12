@@ -25,6 +25,7 @@ import {
 import { ProductStatusBadge } from '@/components/store/status-badges'
 import { Money } from '@/components/store/form-controls'
 import { formatMoney } from '@/lib/money'
+import { Checkbox } from '@/components/ui/checkbox'
 
 /**
  * The catalogue list, with selection and bulk actions.
@@ -102,11 +103,12 @@ export function ProductBulkList({
       <ListPanelHeader>
         {selected.size === 0 ? (
           <label className="flex items-center gap-2.5 text-sm">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={false}
-              onChange={() => setSelected(new Set(rows.map((row) => row.id)))}
-              className="size-4"
+              onCheckedChange={() =>
+                setSelected(new Set(rows.map((row) => row.id)))
+              }
+
               aria-label="Select all products"
             />
             <span className="text-muted-foreground">
@@ -116,15 +118,14 @@ export function ProductBulkList({
         ) : (
           <div className="flex w-full flex-wrap items-center gap-2">
             <label className="flex items-center gap-2.5 text-sm">
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={allSelected}
-                onChange={() =>
+                onCheckedChange={() =>
                   setSelected(
                     allSelected ? new Set() : new Set(rows.map((row) => row.id))
                   )
                 }
-                className="size-4"
+
                 aria-label="Select all products"
               />
               <span className="font-medium">{selected.size} selected</span>
@@ -213,11 +214,10 @@ export function ProductBulkList({
       {rows.map((row) => (
         <ListRow key={row.id}>
           <div className="flex min-w-0 items-center gap-3">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={selected.has(row.id)}
-              onChange={() => toggle(row.id)}
-              className="size-4 shrink-0"
+              onCheckedChange={() => toggle(row.id)}
+              className="shrink-0"
               aria-label={`Select ${row.title}`}
             />
             {row.imageUrl ? (

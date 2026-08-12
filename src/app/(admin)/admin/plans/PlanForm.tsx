@@ -25,6 +25,7 @@ import {
 } from '@/lib/plans'
 import { centsToMajorString } from '@/lib/money'
 import type { PlanModel } from '@/generated/prisma/models'
+import { Checkbox } from '@/components/ui/checkbox'
 
 /**
  * The plan editor.
@@ -108,11 +109,10 @@ function ToggleField({
 }) {
   return (
     <label className="hover:bg-muted/40 flex cursor-pointer items-start gap-3 rounded-xl p-2 transition-colors">
-      <input
-        type="checkbox"
+      <Checkbox
         name={name}
         defaultChecked={defaultChecked}
-        className="mt-0.5 size-4 shrink-0"
+        className="mt-0.5 shrink-0"
       />
       <span className="min-w-0">
         <span className="block text-sm font-medium">{label}</span>

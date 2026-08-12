@@ -19,6 +19,7 @@ import {
   FulfillmentStatusBadge,
 } from '@/components/store/status-badges'
 import { Money } from '@/components/store/form-controls'
+import { FormSelect } from '@/components/ui/form-select'
 
 const PAGE_SIZE = 50
 
@@ -84,30 +85,22 @@ export default async function OrdersPage({
           placeholder="Search order number or email"
           className="w-full sm:w-72"
         />
-        <select
-          name="financial"
-          defaultValue={financialStatus ?? ''}
-          className="border-input bg-card h-10 rounded-[0.875rem] border px-3 text-sm"
-        >
+        <FormSelect name="financial" defaultValue={financialStatus ?? ''}>
           <option value="">Any payment status</option>
           {FINANCIAL_VALUES.map((value) => (
             <option key={value} value={value}>
               {value.replace(/_/g, ' ').toLowerCase()}
             </option>
           ))}
-        </select>
-        <select
-          name="fulfillment"
-          defaultValue={fulfillmentStatus ?? ''}
-          className="border-input bg-card h-10 rounded-[0.875rem] border px-3 text-sm"
-        >
+        </FormSelect>
+        <FormSelect name="fulfillment" defaultValue={fulfillmentStatus ?? ''}>
           <option value="">Any fulfilment status</option>
           {FULFILLMENT_VALUES.map((value) => (
             <option key={value} value={value}>
               {value.replace(/_/g, ' ').toLowerCase()}
             </option>
           ))}
-        </select>
+        </FormSelect>
         <Button type="submit" variant="outline">
           Filter
         </Button>

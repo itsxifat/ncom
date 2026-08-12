@@ -14,6 +14,7 @@ import {
   PRODUCT_SORTS,
   type ProductSort,
 } from '@/server/services/productService'
+import { FormSelect } from '@/components/ui/form-select'
 
 const PAGE_SIZE = 50
 
@@ -86,27 +87,19 @@ export default async function ProductsPage({
           placeholder="Search title, handle or SKU"
           className="w-full sm:w-72"
         />
-        <select
-          name="status"
-          defaultValue={status ?? ''}
-          className="border-input bg-card h-10 rounded-[0.875rem] border px-3 text-sm"
-        >
+        <FormSelect name="status" defaultValue={status ?? ''}>
           <option value="">All statuses</option>
           <option value="ACTIVE">Active</option>
           <option value="DRAFT">Draft</option>
           <option value="ARCHIVED">Archived</option>
-        </select>
-        <select
-          name="sort"
-          defaultValue={sort}
-          className="border-input bg-card h-10 rounded-[0.875rem] border px-3 text-sm"
-        >
+        </FormSelect>
+        <FormSelect name="sort" defaultValue={sort}>
           <option value="newest">Newest first</option>
           <option value="oldest">Oldest first</option>
           <option value="updated">Recently updated</option>
           <option value="title">Title A–Z</option>
           <option value="title-desc">Title Z–A</option>
-        </select>
+        </FormSelect>
         <Button type="submit" variant="outline">
           Filter
         </Button>

@@ -13,6 +13,8 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import type { PageTheme } from '@/modules/sections/types'
 import { ImagePicker } from '@/modules/builder/ImagePicker'
+import { Checkbox } from '@/components/ui/checkbox'
+import { FormSelect } from '@/components/ui/form-select'
 
 function ColorField({
   name,
@@ -117,44 +119,41 @@ export function ThemeForm({
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <Field>
             <FieldLabel htmlFor="buttonStyle">Button style</FieldLabel>
-            <select
+            <FormSelect
               id="buttonStyle"
               name="buttonStyle"
               defaultValue={theme.buttonStyle}
-              className="border-input bg-card h-10 rounded-[0.875rem] border px-3 text-sm"
             >
               <option value="SOLID">Solid</option>
               <option value="OUTLINE">Outline</option>
               <option value="GHOST">Ghost</option>
-            </select>
+            </FormSelect>
           </Field>
           <Field>
             <FieldLabel htmlFor="borderRadius">Border radius</FieldLabel>
-            <select
+            <FormSelect
               id="borderRadius"
               name="borderRadius"
               defaultValue={theme.borderRadius}
-              className="border-input bg-card h-10 rounded-[0.875rem] border px-3 text-sm"
             >
               <option value="none">None</option>
               <option value="sm">Small</option>
               <option value="md">Medium</option>
               <option value="lg">Large</option>
               <option value="full">Full</option>
-            </select>
+            </FormSelect>
           </Field>
           <Field>
             <FieldLabel htmlFor="spacingScale">Spacing</FieldLabel>
-            <select
+            <FormSelect
               id="spacingScale"
               name="spacingScale"
               defaultValue={theme.spacingScale}
-              className="border-input bg-card h-10 rounded-[0.875rem] border px-3 text-sm"
             >
               <option value="compact">Compact</option>
               <option value="comfortable">Comfortable</option>
               <option value="spacious">Spacious</option>
-            </select>
+            </FormSelect>
           </Field>
         </div>
 
@@ -199,56 +198,51 @@ export function ThemeForm({
           </Field>
           <Field>
             <FieldLabel htmlFor="headingWeight">Heading weight</FieldLabel>
-            <select
+            <FormSelect
               id="headingWeight"
               name="headingWeight"
               defaultValue={theme.headingWeight ?? '600'}
-              className="border-input bg-card h-10 rounded-[0.875rem] border px-3 text-sm"
             >
               <option value="400">Regular</option>
               <option value="500">Medium</option>
               <option value="600">Semibold</option>
               <option value="700">Bold</option>
               <option value="800">Extra bold</option>
-            </select>
+            </FormSelect>
           </Field>
           <Field>
             <FieldLabel htmlFor="bodyScale">Text size</FieldLabel>
-            <select
+            <FormSelect
               id="bodyScale"
               name="bodyScale"
               defaultValue={theme.bodyScale ?? '1'}
-              className="border-input bg-card h-10 rounded-[0.875rem] border px-3 text-sm"
             >
               <option value="0.9">Small</option>
               <option value="1">Default</option>
               <option value="1.1">Large</option>
               <option value="1.2">Extra large</option>
-            </select>
+            </FormSelect>
           </Field>
         </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field>
             <FieldLabel htmlFor="sectionSpacing">Section spacing</FieldLabel>
-            <select
+            <FormSelect
               id="sectionSpacing"
               name="sectionSpacing"
               defaultValue={theme.sectionSpacing ?? 'comfortable'}
-              className="border-input bg-card h-10 rounded-[0.875rem] border px-3 text-sm"
             >
               <option value="compact">Compact</option>
               <option value="comfortable">Comfortable</option>
               <option value="spacious">Spacious</option>
-            </select>
+            </FormSelect>
           </Field>
           <Field>
             <label className="flex h-10 items-center gap-2 text-sm">
-              <input
-                type="checkbox"
+              <Checkbox
                 name="showStickyHeader"
                 defaultChecked={theme.showStickyHeader ?? true}
-                className="size-4"
               />
               Sticky header on scroll
             </label>

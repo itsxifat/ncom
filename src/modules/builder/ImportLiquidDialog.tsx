@@ -18,6 +18,7 @@ import {
   FieldGroup,
   FieldLabel,
 } from '@/components/ui/field'
+import { Checkbox } from '@/components/ui/checkbox'
 
 const EXAMPLE = `{% section 'hero' %}
   <h1>{{ section.settings.heading }}</h1>
@@ -97,12 +98,7 @@ export function ImportLiquidDialog({
             </Field>
 
             <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                name="replace"
-                defaultChecked
-                className="size-4"
-              />
+              <Checkbox name="replace" defaultChecked />
               Replace the sections already on this page
             </label>
 

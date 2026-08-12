@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/field'
 import { SettingsSection } from '@/components/app/settings-section'
 import { FormSelect } from '@/components/store/form-controls'
+import { Checkbox } from '@/components/ui/checkbox'
 
 export interface SmtpConfigRow {
   purpose: string
@@ -235,11 +236,10 @@ function SmtpForm({
             </div>
 
             <label className="flex cursor-pointer items-start gap-3 text-sm">
-              <input
-                type="checkbox"
+              <Checkbox
                 name="isEnabled"
                 defaultChecked={config?.isEnabled ?? true}
-                className="mt-0.5 size-4"
+                className="mt-0.5"
               />
               <span>
                 <span className="block font-medium">Enabled</span>

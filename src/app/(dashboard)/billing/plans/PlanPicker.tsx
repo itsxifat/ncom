@@ -19,6 +19,7 @@ import {
   formatQuota,
 } from '@/lib/plans'
 import type { CheckoutQuote } from '@/server/services/planCheckoutService'
+import { Checkbox } from '@/components/ui/checkbox'
 
 export interface PickerPlan {
   id: string
@@ -317,16 +318,15 @@ export function PlanPicker({
                         </div>
 
                         {isSwitch ? (
-                          <input
-                            type="checkbox"
+                          <Checkbox
                             checked={quantity > 0}
-                            onChange={(event) =>
+                            onCheckedChange={(checked) =>
                               setQuantities((previous) => ({
                                 ...previous,
-                                [addon.id]: event.target.checked ? 1 : 0,
+                                [addon.id]: checked ? 1 : 0,
                               }))
                             }
-                            className="mt-1 size-4 shrink-0"
+                            className="mt-1 shrink-0"
                             aria-label={addon.name}
                           />
                         ) : (

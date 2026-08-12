@@ -5,6 +5,7 @@ import { ImagePicker } from './ImagePicker'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
+import { FormSelect } from '@/components/ui/form-select'
 
 /**
  * Design controls shared by every section.
@@ -341,7 +342,7 @@ function Select({
   options: { value: string; label: string }[]
 }) {
   return (
-    <select
+    <FormSelect
       value={value}
       onChange={(event) => onChange(event.target.value)}
       className="border-input bg-card h-9 rounded-[0.875rem] border px-3 text-sm"
@@ -351,7 +352,7 @@ function Select({
           {option.label}
         </option>
       ))}
-    </select>
+    </FormSelect>
   )
 }
 

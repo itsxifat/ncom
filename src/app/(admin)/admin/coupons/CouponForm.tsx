@@ -16,6 +16,7 @@ import {
 import { SettingsSection } from '@/components/app/settings-section'
 import { FormSelect, MoneyInput } from '@/components/store/form-controls'
 import { centsToMajorString } from '@/lib/money'
+import { Checkbox } from '@/components/ui/checkbox'
 
 /**
  * The coupon editor.
@@ -158,11 +159,10 @@ function Toggle({
 }) {
   return (
     <label className="hover:bg-muted/40 flex cursor-pointer items-start gap-3 rounded-xl p-2">
-      <input
-        type="checkbox"
+      <Checkbox
         name={name}
         defaultChecked={defaultChecked}
-        className="accent-primary mt-0.5 size-4 shrink-0"
+        className="mt-0.5 shrink-0"
       />
       <span className="min-w-0">
         <span className="block text-sm font-medium">{label}</span>
@@ -407,12 +407,11 @@ export function CouponForm({
       >
         <FieldGroup>
           <label className="flex cursor-pointer items-start gap-3 text-sm">
-            <input
-              type="checkbox"
+            <Checkbox
               name="appliesToAllPlans"
               checked={allPlans}
-              onChange={(event) => setAllPlans(event.target.checked)}
-              className="accent-primary mt-0.5 size-4"
+              onCheckedChange={(checked) => setAllPlans(checked)}
+              className="mt-0.5"
             />
             Valid on every plan
           </label>
@@ -426,14 +425,12 @@ export function CouponForm({
                     key={plan.id}
                     className="flex cursor-pointer items-center gap-2 text-sm"
                   >
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       name="planIds"
                       value={plan.id}
                       defaultChecked={
                         coupon?.planIds.includes(plan.id) ?? false
                       }
-                      className="accent-primary size-4"
                     />
                     {plan.name}
                   </label>
@@ -451,14 +448,12 @@ export function CouponForm({
                   key={interval}
                   className="flex cursor-pointer items-center gap-2 text-sm"
                 >
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     name="allowedIntervals"
                     value={interval}
                     defaultChecked={
                       coupon?.allowedIntervals.includes(interval) ?? false
                     }
-                    className="accent-primary size-4"
                   />
                   {interval === 'MONTHLY' ? 'Monthly' : 'Annual'}
                 </label>

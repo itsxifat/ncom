@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { InventoryAdjust } from '@/components/store/inventory-adjust'
+import { Checkbox } from '@/components/ui/checkbox'
 
 export default async function InventoryPage({
   params,
@@ -56,13 +57,7 @@ export default async function InventoryPage({
           className="w-full sm:w-72"
         />
         <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            name="low"
-            value="1"
-            defaultChecked={lowStockOnly}
-            className="size-4"
-          />
+          <Checkbox name="low" value="1" defaultChecked={lowStockOnly} />
           Low stock only
         </label>
         <Button type="submit" variant="outline">

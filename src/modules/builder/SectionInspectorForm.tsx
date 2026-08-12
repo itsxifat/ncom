@@ -19,6 +19,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import { Button } from '@/components/ui/button'
 import { Field, FieldLabel } from '@/components/ui/field'
+import { FormSelect } from '@/components/ui/form-select'
 
 /**
  * The blank value a newly appended array item starts with, per field type.
@@ -72,17 +73,14 @@ function ProductField({
           No products yet — add one under Products, then choose it here.
         </p>
       ) : (
-        <select
-          {...register(name)}
-          className="border-input bg-card h-10 rounded-[0.875rem] border px-3 text-sm"
-        >
+        <FormSelect {...register(name)}>
           <option value="">Choose a product…</option>
           {variants.map((variant) => (
             <option key={variant.variantId} value={variant.variantId}>
               {variant.label}
             </option>
           ))}
-        </select>
+        </FormSelect>
       )}
     </Field>
   )
@@ -179,16 +177,13 @@ function FieldRenderer({
     return (
       <Field>
         <FieldLabel>{field.label}</FieldLabel>
-        <select
-          {...register(name)}
-          className="border-input bg-card h-10 rounded-[0.875rem] border px-3 text-sm"
-        >
+        <FormSelect {...register(name)}>
           {field.options.map((option) => (
             <option key={option} value={option}>
               {option}
             </option>
           ))}
-        </select>
+        </FormSelect>
       </Field>
     )
   }

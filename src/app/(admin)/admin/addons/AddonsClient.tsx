@@ -29,6 +29,7 @@ import {
 import { FormSelect, Money, MoneyInput } from '@/components/store/form-controls'
 import { centsToMajorString, formatMoney } from '@/lib/money'
 import { formatBytes } from '@/lib/plans'
+import { Checkbox } from '@/components/ui/checkbox'
 
 export interface AddonListItem {
   id: string
@@ -289,22 +290,20 @@ function AddonForm({
             </div>
 
             <label className="flex cursor-pointer items-start gap-3 text-sm">
-              <input
-                type="checkbox"
+              <Checkbox
                 name="isActive"
                 defaultChecked={addon?.isActive ?? true}
-                className="mt-0.5 size-4"
+                className="mt-0.5"
               />
               Active — sellable at checkout
             </label>
 
             <label className="flex cursor-pointer items-start gap-3 text-sm">
-              <input
-                type="checkbox"
+              <Checkbox
                 name="availableOnAllPlans"
                 checked={allPlans}
-                onChange={(event) => setAllPlans(event.target.checked)}
-                className="mt-0.5 size-4"
+                onCheckedChange={(checked) => setAllPlans(checked)}
+                className="mt-0.5"
               />
               Available on every plan
             </label>
@@ -318,14 +317,12 @@ function AddonForm({
                       key={plan.id}
                       className="flex cursor-pointer items-center gap-2 text-sm"
                     >
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         name="planIds"
                         value={plan.id}
                         defaultChecked={
                           addon?.planIds.includes(plan.id) ?? false
                         }
-                        className="size-4"
                       />
                       {plan.name}
                     </label>

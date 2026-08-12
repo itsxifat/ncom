@@ -19,6 +19,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
 import { SettingsSection } from '@/components/app/settings-section'
 import { FormSelect } from '@/components/store/form-controls'
+import { Checkbox } from '@/components/ui/checkbox'
 
 /**
  * Rule vocabulary, mirroring lib/validation/collection.ts.
@@ -317,13 +318,11 @@ export function CollectionForm({
                       key={product.id}
                       className="hover:bg-muted flex items-center gap-2 rounded px-2 py-1.5 text-sm"
                     >
-                      <input
-                        type="checkbox"
-                        className="size-4"
+                      <Checkbox
                         checked={productIds.includes(product.id)}
-                        onChange={(event) =>
+                        onCheckedChange={(checked) =>
                           setProductIds((current) =>
-                            event.target.checked
+                            checked
                               ? [...current, product.id]
                               : current.filter((id) => id !== product.id)
                           )

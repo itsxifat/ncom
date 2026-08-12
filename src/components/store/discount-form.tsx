@@ -19,6 +19,7 @@ import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { SettingsSection } from '@/components/app/settings-section'
 import { FormSelect, MoneyInput } from '@/components/store/form-controls'
+import { Checkbox } from '@/components/ui/checkbox'
 
 export interface DiscountFormInitial {
   id?: string
@@ -279,14 +280,12 @@ export function DiscountForm({
                     key={product.id}
                     className="hover:bg-muted flex items-center gap-2 rounded px-2 py-1.5 text-sm"
                   >
-                    <input
-                      type="checkbox"
-                      className="size-4"
+                    <Checkbox
                       checked={form.targetProductIds.includes(product.id)}
-                      onChange={(event) =>
+                      onCheckedChange={(checked) =>
                         set(
                           'targetProductIds',
-                          event.target.checked
+                          checked
                             ? [...form.targetProductIds, product.id]
                             : form.targetProductIds.filter(
                                 (id) => id !== product.id
@@ -309,14 +308,12 @@ export function DiscountForm({
                     key={collection.id}
                     className="hover:bg-muted flex items-center gap-2 rounded px-2 py-1.5 text-sm"
                   >
-                    <input
-                      type="checkbox"
-                      className="size-4"
+                    <Checkbox
                       checked={form.targetCollectionIds.includes(collection.id)}
-                      onChange={(event) =>
+                      onCheckedChange={(checked) =>
                         set(
                           'targetCollectionIds',
-                          event.target.checked
+                          checked
                             ? [...form.targetCollectionIds, collection.id]
                             : form.targetCollectionIds.filter(
                                 (id) => id !== collection.id

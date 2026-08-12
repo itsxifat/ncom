@@ -19,6 +19,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
+import { FormSelect } from '@/components/ui/form-select'
 
 export function NewTemplateForm({
   categories,
@@ -56,19 +57,14 @@ export function NewTemplateForm({
               </Field>
               <Field>
                 <FieldLabel htmlFor="categoryId">Category</FieldLabel>
-                <select
-                  id="categoryId"
-                  name="categoryId"
-                  defaultValue=""
-                  className="border-input bg-card h-10 rounded-[0.875rem] border px-3 text-sm"
-                >
+                <FormSelect id="categoryId" name="categoryId" defaultValue="">
                   <option value="">Uncategorized</option>
                   {categories.map((category) => (
                     <option key={category.id} value={category.id}>
                       {category.name}
                     </option>
                   ))}
-                </select>
+                </FormSelect>
               </Field>
               <Field>
                 <FieldLabel htmlFor="description">

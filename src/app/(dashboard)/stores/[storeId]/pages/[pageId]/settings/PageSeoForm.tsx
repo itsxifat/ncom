@@ -13,6 +13,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 
 export function PageSeoForm({
   storeId,
@@ -87,12 +88,10 @@ export function PageSeoForm({
           />
         </Field>
         <Field orientation="horizontal">
-          <input
-            type="checkbox"
+          <Checkbox
             id="robotsIndex"
             name="robotsIndex"
             defaultChecked={robotsIndex}
-            className="size-4"
           />
           <FieldLabel htmlFor="robotsIndex">
             Allow search engines to index this page

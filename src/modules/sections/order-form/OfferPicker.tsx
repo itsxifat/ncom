@@ -70,14 +70,22 @@ export function OfferPicker({
               </span>
             )}
 
+            {/*
+              A dial, not a control. The whole card is the button — this only
+              shows which one is chosen, so it is drawn rather than being a
+              real radio the keyboard can land on.
+            */}
             {style === 'radio' && (
-              <input
-                type="radio"
-                readOnly
-                checked={selected}
-                className="mr-3 accent-current"
-                tabIndex={-1}
-              />
+              <span
+                aria-hidden
+                className={`mr-3 inline-flex size-4 shrink-0 items-center justify-center rounded-full border transition ${
+                  selected ? 'border-current' : 'border-neutral-300'
+                }`}
+              >
+                {selected && (
+                  <span className="size-2 rounded-full bg-current" />
+                )}
+              </span>
             )}
 
             {offer.imageUrl && style !== 'radio' && style !== 'tiles' && (

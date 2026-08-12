@@ -17,9 +17,12 @@ interface VariantOption {
  * Default add-to-cart control, used when a store has not published its own
  * Liquid product template.
  *
- * The variant list is rendered as a real <select> inside a <form> so the
- * control works before hydration — a storefront's single most important
- * interaction should not depend on JavaScript having loaded.
+ * The variant list is a native <select> inside a <form> so the control works
+ * before hydration — a storefront's single most important interaction should
+ * not depend on JavaScript having loaded. This is the one place that keeps the
+ * browser's own picker rather than the app's `FormSelect`, which is a scripted
+ * listbox and therefore inert until React arrives. `color-scheme` on the
+ * storefront root is what keeps its popup legible on a dark theme.
  */
 export function AddToCartForm({
   subdomain,
@@ -51,7 +54,7 @@ export function AddToCartForm({
             name="variantId"
             value={selectedId}
             onChange={(event) => setSelectedId(event.target.value)}
-            className="rounded-[var(--page-radius)] border px-3 py-2"
+            className="rounded-[var(--page-radius)] border bg-transparent px-3 py-2"
           >
             {variants.map((variant) => (
               <option

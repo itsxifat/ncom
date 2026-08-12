@@ -11,6 +11,8 @@ import {
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
+import { FormSelect } from '@/components/ui/form-select'
 
 export function TemplateMetaForm({
   templateId,
@@ -42,11 +44,10 @@ export function TemplateMetaForm({
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field>
             <FieldLabel htmlFor="categoryId">Category</FieldLabel>
-            <select
+            <FormSelect
               id="categoryId"
               name="categoryId"
               defaultValue={categoryId ?? ''}
-              className="border-input bg-card h-10 rounded-[0.875rem] border px-3 text-sm"
             >
               <option value="">Uncategorized</option>
               {categories.map((category) => (
@@ -54,20 +55,15 @@ export function TemplateMetaForm({
                   {category.name}
                 </option>
               ))}
-            </select>
+            </FormSelect>
           </Field>
           <Field>
             <FieldLabel htmlFor="status">Status</FieldLabel>
-            <select
-              id="status"
-              name="status"
-              defaultValue={status}
-              className="border-input bg-card h-10 rounded-[0.875rem] border px-3 text-sm"
-            >
+            <FormSelect id="status" name="status" defaultValue={status}>
               <option value="DRAFT">Draft</option>
               <option value="PUBLISHED">Published</option>
               <option value="ARCHIVED">Archived</option>
-            </select>
+            </FormSelect>
           </Field>
         </div>
         <Field>
@@ -79,11 +75,10 @@ export function TemplateMetaForm({
           />
         </Field>
         <label className="hover:bg-muted/40 flex cursor-pointer items-start gap-3 rounded-xl p-2">
-          <input
-            type="checkbox"
+          <Checkbox
             name="isPremium"
             defaultChecked={isPremium}
-            className="mt-0.5 size-4 shrink-0"
+            className="mt-0.5 shrink-0"
           />
           <span>
             <span className="block text-sm font-medium">Premium template</span>

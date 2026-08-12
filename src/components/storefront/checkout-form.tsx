@@ -15,6 +15,8 @@ import {
   selectShippingRateAction,
   type CheckoutActionState,
 } from '@/app/(public-site)/sites/[subdomain]/checkout-actions'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Radio, RadioGroup } from '@/components/ui/radio'
 
 /**
  * Storefront checkout.
@@ -149,7 +151,7 @@ export function CheckoutDetailsForm({
       </div>
 
       <label className="flex items-center gap-2 text-sm">
-        <input type="checkbox" name="acceptsMarketing" className="size-4" />
+        <Checkbox tone="page" name="acceptsMarketing" />
         Email me with news and offers
       </label>
 
@@ -203,24 +205,20 @@ export function ShippingRatePicker({
     <form action={action} className="flex flex-col gap-3">
       <h2 className="text-xl font-semibold">Delivery</h2>
 
-      {rates.map((rate) => (
-        <label
-          key={rate.id}
-          className="flex items-center justify-between gap-3 rounded-[var(--page-radius)] border px-3 py-3"
-        >
-          <span className="flex items-center gap-3">
-            <input
-              type="radio"
-              name="shippingRateId"
-              value={rate.id}
-              defaultChecked={selectedId === rate.id}
-              className="size-4"
-            />
-            {rate.name}
-          </span>
-          <span>{formatPrice(rate.priceCents)}</span>
-        </label>
-      ))}
+      <RadioGroup name="shippingRateId" defaultValue={selectedId}>
+        {rates.map((rate) => (
+          <label
+            key={rate.id}
+            className="flex items-center justify-between gap-3 rounded-[var(--page-radius)] border px-3 py-3"
+          >
+            <span className="flex items-center gap-3">
+              <Radio tone="page" value={rate.id} />
+              {rate.name}
+            </span>
+            <span>{formatPrice(rate.priceCents)}</span>
+          </label>
+        ))}
+      </RadioGroup>
 
       {state?.error && (
         <p role="alert" className="text-sm" style={{ color: '#dc2626' }}>
@@ -267,24 +265,22 @@ export function PaymentSection({
       <h2 className="text-xl font-semibold">Payment</h2>
 
       {methods.length > 1 && (
-        <div className="flex flex-col gap-2">
+        <RadioGroup
+          name="paymentProvider"
+          value={selected}
+          onValueChange={(next) => setSelected(next as typeof selected)}
+          className="gap-2"
+        >
           {methods.map((method) => (
             <label
               key={method.provider}
               className="flex items-center gap-3 rounded-[var(--page-radius)] border px-3 py-3"
             >
-              <input
-                type="radio"
-                name="paymentProvider"
-                value={method.provider}
-                checked={selected === method.provider}
-                onChange={() => setSelected(method.provider)}
-                className="size-4"
-              />
+              <Radio tone="page" value={method.provider} />
               {method.displayName}
             </label>
           ))}
-        </div>
+        </RadioGroup>
       )}
 
       {active?.provider === 'STRIPE' ? (

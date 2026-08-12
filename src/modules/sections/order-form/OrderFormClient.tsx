@@ -15,6 +15,8 @@ import { applyPromotions, promotionHints } from '@/lib/offers/promotions'
 import { formatMoney } from '@/lib/money'
 import type { OfferSelectionItem, PublicOffer } from '@/lib/offers/types'
 import { OfferPicker } from './OfferPicker'
+import { Radio, RadioGroup } from '@/components/ui/radio'
+import { FormSelect } from '@/components/ui/form-select'
 
 /**
  * The interactive half of the order form.
@@ -292,7 +294,12 @@ export function OrderFormClient({
                 <legend className="mb-2 text-sm font-medium">
                   {content.zoneLabel}
                 </legend>
-                <div className="grid gap-2 sm:grid-cols-3">
+                <RadioGroup
+                  name="zone"
+                  value={rateId}
+                  onValueChange={(next) => setRateId(String(next))}
+                  className="grid gap-2 sm:grid-cols-3"
+                >
                   {shipping.rates.map((choice) => (
                     <label
                       key={choice.id}
@@ -303,14 +310,7 @@ export function OrderFormClient({
                       }`}
                     >
                       <span className="flex items-center gap-2">
-                        <input
-                          type="radio"
-                          name="zone"
-                          value={choice.id}
-                          checked={rateId === choice.id}
-                          onChange={() => setRateId(choice.id)}
-                          className="accent-current"
-                        />
+                        <Radio tone="page" value={choice.id} />
                         {choice.label}
                       </span>
                       <span className="tabular-nums">
@@ -318,7 +318,7 @@ export function OrderFormClient({
                       </span>
                     </label>
                   ))}
-                </div>
+                </RadioGroup>
               </fieldset>
             )}
 
@@ -488,7 +488,8 @@ function OfferDetail({
             <label className="mb-1.5 block text-sm font-medium">
               {line.title}
             </label>
-            <select
+            <FormSelect
+              tone="page"
               value={variantChoices[index] ?? ''}
               onChange={(event) => onVariant(index, event.target.value)}
               className="w-full rounded-xl border border-neutral-300 px-4 py-3"
@@ -504,7 +505,7 @@ function OfferDetail({
                   {variant.available ? '' : ' — out of stock'}
                 </option>
               ))}
-            </select>
+            </FormSelect>
           </div>
         ))}
       </div>

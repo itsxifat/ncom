@@ -14,6 +14,7 @@ import type {
   PageCheckoutInput,
 } from '@/server/services/offerAdminService'
 import type { OfferActionResult } from '@/app/(dashboard)/stores/[storeId]/pages/[pageId]/edit/offer-actions'
+import { FormSelect } from '@/components/ui/form-select'
 
 /**
  * The Offers tab: what this landing page actually sells.
@@ -434,7 +435,7 @@ function OfferEditor({
       </Row>
 
       <Row label="Type">
-        <select
+        <FormSelect
           value={draft.kind}
           onChange={(event) =>
             set('kind', event.target.value as OfferDraft['kind'])
@@ -446,7 +447,7 @@ function OfferEditor({
             Mix &amp; match — price by quantity
           </option>
           <option value="ALACARTE">À la carte — each at its own price</option>
-        </select>
+        </FormSelect>
       </Row>
 
       <ProductPicker
@@ -466,7 +467,7 @@ function OfferEditor({
       ) : (
         <>
           <Row label="Pricing">
-            <select
+            <FormSelect
               value={draft.pricingMode}
               onChange={(event) =>
                 set(
@@ -482,7 +483,7 @@ function OfferEditor({
               )}
               <option value="PERCENT">Percentage off</option>
               <option value="AMOUNT">Amount off</option>
-            </select>
+            </FormSelect>
           </Row>
 
           {draft.pricingMode === 'PERCENT' && (
@@ -608,7 +609,7 @@ function ProductPicker({
             </span>
 
             {product && product.variants.length > 1 && (
-              <select
+              <FormSelect
                 value={item.variantId ?? ''}
                 onChange={(event) =>
                   onChange(
@@ -631,7 +632,7 @@ function ProductPicker({
                     {formatMoneyAmount(variant.priceCents, currencyCode)}
                   </option>
                 ))}
-              </select>
+              </FormSelect>
             )}
 
             {showQuantity && (
@@ -671,7 +672,7 @@ function ProductPicker({
         )
       })}
 
-      <select
+      <FormSelect
         value=""
         onChange={(event) => {
           if (!event.target.value) return
@@ -688,7 +689,7 @@ function ProductPicker({
             {product.title}
           </option>
         ))}
-      </select>
+      </FormSelect>
 
       {products.length === 0 && (
         <p className="text-muted-foreground text-[11px]">
@@ -796,7 +797,7 @@ function DeliveryEditor({
       <h3 className="text-sm font-semibold">Delivery</h3>
 
       <Row label="Charge">
-        <select
+        <FormSelect
           value={checkout.shippingMode}
           onChange={(event) =>
             set(
@@ -810,7 +811,7 @@ function DeliveryEditor({
           <option value="FREE">Free delivery</option>
           <option value="FLAT">One flat rate</option>
           <option value="ZONES">Rates for this page</option>
-        </select>
+        </FormSelect>
       </Row>
 
       {checkout.shippingMode === 'FLAT' && (

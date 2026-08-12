@@ -87,7 +87,15 @@
  * Lime is a surface color only: at ~92% luminance it is unreadable as text on
  * white, so every use pairs it with ink text on top.
  */
+/*
+ * `color-scheme` is what the browser reads to paint the parts of a control it
+ * owns and CSS cannot reach: a native select's option popup, the date and
+ * time pickers, scrollbars, autofill. Without it those render light on a dark
+ * page — a white sheet of near-invisible grey text. Our own components handle
+ * the rest, but the pickers have no replacement, so this has to be right.
+ */
 :root {
+  color-scheme: light;
   --canvas: #eceef1;
   --background: #eceef1;
   --foreground: #0b0b0c;
@@ -133,6 +141,7 @@
 }
 
 .dark {
+  color-scheme: dark;
   --canvas: #0b0b0c;
   --background: #0b0b0c;
   --foreground: #f7f7f8;

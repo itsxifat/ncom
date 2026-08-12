@@ -119,9 +119,7 @@ export async function selectShippingRateAction(
  * public. The amount is read from the pricing engine, so the browser never
  * gets to name a figure.
  */
-export async function createPaymentIntentAction(
-  subdomain: string
-): Promise<
+export async function createPaymentIntentAction(subdomain: string): Promise<
   | {
       ok: true
       clientSecret: string

@@ -30,6 +30,7 @@ import {
 } from '@/components/app/list-panel'
 import { FormSelect, Money } from '@/components/store/form-controls'
 import { formatMoney } from '@/lib/money'
+import { Checkbox } from '@/components/ui/checkbox'
 
 export interface SubscriptionEditorData {
   organizationId: string
@@ -288,11 +289,10 @@ export function SubscriptionEditor({
               </div>
 
               <label className="border-destructive/30 bg-destructive/5 flex cursor-pointer items-start gap-3 rounded-xl border p-3">
-                <input
-                  type="checkbox"
+                <Checkbox
                   name="quotaEnforcementDisabled"
                   defaultChecked={data.quotaEnforcementDisabled}
-                  className="mt-0.5 size-4 shrink-0"
+                  className="mt-0.5 shrink-0"
                 />
                 <span>
                   <span className="block text-sm font-medium">
