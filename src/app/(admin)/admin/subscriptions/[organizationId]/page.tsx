@@ -7,6 +7,7 @@ import {
 import { getUsageSnapshot } from '@/server/services/usageService'
 import { getEntitlements } from '@/server/services/entitlementService'
 import { PageHeader } from '@/components/app/page-header'
+import { PageShell } from '@/components/app/page-shell'
 import { StatCard } from '@/components/app/stat-card'
 import { QUOTA_META, formatQuota, formatUsage } from '@/lib/plans'
 import {
@@ -68,7 +69,7 @@ export default async function AdminSubscriptionDetailPage({
   const plan = subscription.plan
 
   return (
-    <div className="flex flex-col gap-8">
+    <PageShell>
       <PageHeader
         eyebrow="Monetization"
         title={subscription.organization.name}
@@ -126,6 +127,6 @@ export default async function AdminSubscriptionDetailPage({
               : `${plan.monthlyTrafficMb} MB`,
         }}
       />
-    </div>
+    </PageShell>
   )
 }

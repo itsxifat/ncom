@@ -1,6 +1,7 @@
 import { getActiveOrganization } from '@/server/services/organizationService'
 import { getOrganizationSettings } from '@/server/services/organizationSettingsService'
 import { PageHeader } from '@/components/app/page-header'
+import { PageShell } from '@/components/app/page-shell'
 import { ProductForm } from '@/components/store/product-form'
 
 export default async function NewProductPage() {
@@ -8,7 +9,7 @@ export default async function NewProductPage() {
   const settings = await getOrganizationSettings(organization.id)
 
   return (
-    <div className="flex flex-col gap-8">
+    <PageShell>
       <PageHeader
         backHref={`/products`}
         backLabel="Products"
@@ -31,6 +32,6 @@ export default async function NewProductPage() {
           variants: [],
         }}
       />
-    </div>
+    </PageShell>
   )
 }

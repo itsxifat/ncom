@@ -3,6 +3,7 @@ import { listProducts } from '@/server/services/productService'
 import { listCollections } from '@/server/services/collectionService'
 import { getOrganizationSettings } from '@/server/services/organizationSettingsService'
 import { PageHeader } from '@/components/app/page-header'
+import { PageShell } from '@/components/app/page-shell'
 import { DiscountForm } from '@/components/store/discount-form'
 
 /** `datetime-local` wants "YYYY-MM-DDTHH:mm" in local time, not an ISO string. */
@@ -21,7 +22,7 @@ export default async function NewDiscountPage() {
   ])
 
   return (
-    <div className="flex flex-col gap-8">
+    <PageShell>
       <PageHeader
         backHref={`/discounts`}
         backLabel="Discounts"
@@ -53,6 +54,6 @@ export default async function NewDiscountPage() {
           codes: [],
         }}
       />
-    </div>
+    </PageShell>
   )
 }

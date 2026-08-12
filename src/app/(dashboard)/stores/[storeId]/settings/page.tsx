@@ -11,6 +11,7 @@ import { SettingsSection } from '@/components/app/settings-section'
 import { StoreDetailsForm } from '@/components/dashboard/store-details-form'
 import { DomainManager } from '@/components/dashboard/domain-manager'
 import { IntegrationForm } from '@/components/dashboard/integration-form'
+import { PageShell } from '@/components/app/page-shell'
 
 /**
  * A store owns its address and its tracking, and nothing else.
@@ -52,7 +53,7 @@ export default async function StoreSettingsPage({
   )
 
   return (
-    <div className="flex flex-col gap-8">
+    <PageShell>
       <SettingsSection
         title="General"
         description="What the store is called and where it publishes to."
@@ -125,6 +126,6 @@ export default async function StoreSettingsPage({
           ))}
         </div>
       </SettingsSection>
-    </div>
+    </PageShell>
   )
 }

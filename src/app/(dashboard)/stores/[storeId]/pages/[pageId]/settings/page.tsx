@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation'
 import { getActiveOrganization } from '@/server/services/organizationService'
 import { getPageForSeoSettings } from '@/server/services/pageService'
 import { PageHeader } from '@/components/app/page-header'
+import { PageShell } from '@/components/app/page-shell'
 import { SettingsSection } from '@/components/app/settings-section'
 import { PageSeoForm } from './PageSeoForm'
 
@@ -21,7 +22,7 @@ export default async function PageSeoSettingsPage({
   }
 
   return (
-    <div className="flex flex-col gap-8">
+    <PageShell>
       <PageHeader
         backHref={`/stores/${storeId}`}
         backLabel="Back to store"
@@ -47,6 +48,6 @@ export default async function PageSeoSettingsPage({
           ogImageUrl={page.ogImage?.url ?? null}
         />
       </SettingsSection>
-    </div>
+    </PageShell>
   )
 }

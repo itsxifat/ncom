@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation'
 import { getPlanForAdmin } from '@/server/services/planAdminService'
 import { PageHeader } from '@/components/app/page-header'
+import { PageShell } from '@/components/app/page-shell'
 import { PlanForm } from '../PlanForm'
 
 export default async function EditPlanPage({
@@ -13,7 +14,7 @@ export default async function EditPlanPage({
   if (!plan) notFound()
 
   return (
-    <div className="flex flex-col gap-8">
+    <PageShell>
       <PageHeader
         eyebrow="Monetization"
         title={plan.name}
@@ -22,6 +23,6 @@ export default async function EditPlanPage({
         backLabel="Plans"
       />
       <PlanForm plan={plan} />
-    </div>
+    </PageShell>
   )
 }

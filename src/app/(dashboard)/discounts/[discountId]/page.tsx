@@ -6,6 +6,7 @@ import { listCollections } from '@/server/services/collectionService'
 import { getOrganizationSettings } from '@/server/services/organizationSettingsService'
 import { centsToMajorString, bpsToPercent } from '@/lib/money'
 import { PageHeader } from '@/components/app/page-header'
+import { PageShell } from '@/components/app/page-shell'
 import { DiscountForm } from '@/components/store/discount-form'
 
 function toLocalInput(date: Date | null): string {
@@ -36,7 +37,7 @@ export default async function EditDiscountPage({
   const currency = settings?.currencyCode ?? 'USD'
 
   return (
-    <div className="flex flex-col gap-8">
+    <PageShell>
       <PageHeader
         backHref={`/discounts`}
         backLabel="Discounts"
@@ -82,6 +83,6 @@ export default async function EditDiscountPage({
           codes: discount.codes.map((code) => code.code),
         }}
       />
-    </div>
+    </PageShell>
   )
 }

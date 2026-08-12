@@ -14,7 +14,6 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardContent } from '@/components/ui/card'
 import {
   Field,
   FieldDescription,
@@ -158,7 +157,7 @@ export function SubscriptionEditor({
     data.addons.find((line) => line.addonId === addonId)?.quantity ?? 0
 
   return (
-    <div className="flex max-w-4xl flex-col gap-6">
+    <div className="flex w-full min-w-0 flex-col gap-8">
       <form action={action} key={formFingerprint(data)}>
         <input
           type="hidden"
@@ -171,161 +170,153 @@ export function SubscriptionEditor({
             title="Plan"
             description="Changing this here takes effect immediately and records an audit entry — no order and no payment."
           >
-            <Card>
-              <CardContent>
-                <FieldGroup>
-                  <div className="grid gap-4 sm:grid-cols-3">
-                    <Field>
-                      <FieldLabel htmlFor="planId">Plan</FieldLabel>
-                      <FormSelect
-                        id="planId"
-                        name="planId"
-                        defaultValue={data.planId}
-                      >
-                        {plans.map((plan) => (
-                          <option key={plan.id} value={plan.id}>
-                            {plan.name}
-                          </option>
-                        ))}
-                      </FormSelect>
-                    </Field>
-                    <Field>
-                      <FieldLabel htmlFor="interval">Billing period</FieldLabel>
-                      <FormSelect
-                        id="interval"
-                        name="interval"
-                        defaultValue={data.interval}
-                      >
-                        <option value="MONTHLY">Monthly</option>
-                        <option value="ANNUAL">Annual</option>
-                      </FormSelect>
-                    </Field>
-                    <Field>
-                      <FieldLabel htmlFor="status">Status</FieldLabel>
-                      <FormSelect
-                        id="status"
-                        name="status"
-                        defaultValue={data.status}
-                      >
-                        {STATUSES.map((status) => (
-                          <option key={status} value={status}>
-                            {status.toLowerCase()}
-                          </option>
-                        ))}
-                      </FormSelect>
-                    </Field>
-                  </div>
+            <FieldGroup>
+              <div className="grid gap-4 sm:grid-cols-3">
+                <Field>
+                  <FieldLabel htmlFor="planId">Plan</FieldLabel>
+                  <FormSelect
+                    id="planId"
+                    name="planId"
+                    defaultValue={data.planId}
+                  >
+                    {plans.map((plan) => (
+                      <option key={plan.id} value={plan.id}>
+                        {plan.name}
+                      </option>
+                    ))}
+                  </FormSelect>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="interval">Billing period</FieldLabel>
+                  <FormSelect
+                    id="interval"
+                    name="interval"
+                    defaultValue={data.interval}
+                  >
+                    <option value="MONTHLY">Monthly</option>
+                    <option value="ANNUAL">Annual</option>
+                  </FormSelect>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="status">Status</FieldLabel>
+                  <FormSelect
+                    id="status"
+                    name="status"
+                    defaultValue={data.status}
+                  >
+                    {STATUSES.map((status) => (
+                      <option key={status} value={status}>
+                        {status.toLowerCase()}
+                      </option>
+                    ))}
+                  </FormSelect>
+                </Field>
+              </div>
 
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <Field>
-                      <FieldLabel htmlFor="currentPeriodEnd">
-                        Period ends
-                      </FieldLabel>
-                      <Input
-                        id="currentPeriodEnd"
-                        name="currentPeriodEnd"
-                        type="datetime-local"
-                        defaultValue={data.currentPeriodEnd?.slice(0, 16) ?? ''}
-                      />
-                      <FieldDescription>
-                        Empty = never renews (free plans).
-                      </FieldDescription>
-                    </Field>
-                    <Field>
-                      <FieldLabel htmlFor="trialEndsAt">Trial ends</FieldLabel>
-                      <Input
-                        id="trialEndsAt"
-                        name="trialEndsAt"
-                        type="datetime-local"
-                        defaultValue={data.trialEndsAt?.slice(0, 16) ?? ''}
-                      />
-                    </Field>
-                  </div>
-                </FieldGroup>
-              </CardContent>
-            </Card>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field>
+                  <FieldLabel htmlFor="currentPeriodEnd">
+                    Period ends
+                  </FieldLabel>
+                  <Input
+                    id="currentPeriodEnd"
+                    name="currentPeriodEnd"
+                    type="datetime-local"
+                    defaultValue={data.currentPeriodEnd?.slice(0, 16) ?? ''}
+                  />
+                  <FieldDescription>
+                    Empty = never renews (free plans).
+                  </FieldDescription>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="trialEndsAt">Trial ends</FieldLabel>
+                  <Input
+                    id="trialEndsAt"
+                    name="trialEndsAt"
+                    type="datetime-local"
+                    defaultValue={data.trialEndsAt?.slice(0, 16) ?? ''}
+                  />
+                </Field>
+              </div>
+            </FieldGroup>
           </SettingsSection>
 
           <SettingsSection
             title="Limit overrides"
             description="For a bespoke deal or a migration. These replace the plan's numbers for this workspace only; add-ons still stack on top."
           >
-            <Card>
-              <CardContent>
-                <FieldGroup>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <OverrideField
-                      name="overrideMaxPages"
-                      label="Landing pages"
-                      value={data.overrideMaxPages}
-                      planValue={planLimits.pages ?? '—'}
-                    />
-                    <OverrideField
-                      name="overrideMaxStores"
-                      label="Sites"
-                      value={data.overrideMaxStores}
-                      planValue={planLimits.stores ?? '—'}
-                    />
-                    <OverrideField
-                      name="overrideMaxCustomDomains"
-                      label="Custom domains"
-                      value={data.overrideMaxCustomDomains}
-                      planValue={planLimits.domains ?? '—'}
-                    />
-                    <OverrideField
-                      name="overrideMaxTeamMembers"
-                      label="Team members"
-                      value={data.overrideMaxTeamMembers}
-                      planValue={planLimits.members ?? '—'}
-                    />
-                    <OverrideField
-                      name="overrideStorageMb"
-                      label="Storage"
-                      unit="MB"
-                      value={data.overrideStorageMb}
-                      planValue={planLimits.storage ?? '—'}
-                    />
-                    <OverrideField
-                      name="overrideMonthlyTrafficMb"
-                      label="Monthly traffic"
-                      unit="MB"
-                      value={data.overrideMonthlyTrafficMb}
-                      planValue={planLimits.traffic ?? '—'}
-                    />
-                  </div>
+            <FieldGroup>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <OverrideField
+                  name="overrideMaxPages"
+                  label="Landing pages"
+                  value={data.overrideMaxPages}
+                  planValue={planLimits.pages ?? '—'}
+                />
+                <OverrideField
+                  name="overrideMaxStores"
+                  label="Sites"
+                  value={data.overrideMaxStores}
+                  planValue={planLimits.stores ?? '—'}
+                />
+                <OverrideField
+                  name="overrideMaxCustomDomains"
+                  label="Custom domains"
+                  value={data.overrideMaxCustomDomains}
+                  planValue={planLimits.domains ?? '—'}
+                />
+                <OverrideField
+                  name="overrideMaxTeamMembers"
+                  label="Team members"
+                  value={data.overrideMaxTeamMembers}
+                  planValue={planLimits.members ?? '—'}
+                />
+                <OverrideField
+                  name="overrideStorageMb"
+                  label="Storage"
+                  unit="MB"
+                  value={data.overrideStorageMb}
+                  planValue={planLimits.storage ?? '—'}
+                />
+                <OverrideField
+                  name="overrideMonthlyTrafficMb"
+                  label="Monthly traffic"
+                  unit="MB"
+                  value={data.overrideMonthlyTrafficMb}
+                  planValue={planLimits.traffic ?? '—'}
+                />
+              </div>
 
-                  <label className="border-destructive/30 bg-destructive/5 flex cursor-pointer items-start gap-3 rounded-xl border p-3">
-                    <input
-                      type="checkbox"
-                      name="quotaEnforcementDisabled"
-                      defaultChecked={data.quotaEnforcementDisabled}
-                      className="mt-0.5 size-4 shrink-0"
-                    />
-                    <span>
-                      <span className="block text-sm font-medium">
-                        Waive all limits for this workspace
-                      </span>
-                      <span className="text-muted-foreground block text-xs">
-                        Every quota check passes. Feature gates still apply.
-                        Intended for an incident or a migration, not as a
-                        permanent setting.
-                      </span>
-                    </span>
-                  </label>
+              <label className="border-destructive/30 bg-destructive/5 flex cursor-pointer items-start gap-3 rounded-xl border p-3">
+                <input
+                  type="checkbox"
+                  name="quotaEnforcementDisabled"
+                  defaultChecked={data.quotaEnforcementDisabled}
+                  className="mt-0.5 size-4 shrink-0"
+                />
+                <span>
+                  <span className="block text-sm font-medium">
+                    Waive all limits for this workspace
+                  </span>
+                  <span className="text-muted-foreground block text-xs">
+                    Every quota check passes. Feature gates still apply.
+                    Intended for an incident or a migration, not as a permanent
+                    setting.
+                  </span>
+                </span>
+              </label>
 
-                  <Field>
-                    <FieldLabel htmlFor="adminNote">Internal note</FieldLabel>
-                    <Textarea
-                      id="adminNote"
-                      name="adminNote"
-                      rows={2}
-                      defaultValue={data.adminNote ?? ''}
-                      placeholder="Why this workspace has non-standard limits"
-                    />
-                  </Field>
-                </FieldGroup>
-              </CardContent>
-            </Card>
+              <Field>
+                <FieldLabel htmlFor="adminNote">Internal note</FieldLabel>
+                <Textarea
+                  id="adminNote"
+                  name="adminNote"
+                  rows={2}
+                  defaultValue={data.adminNote ?? ''}
+                  placeholder="Why this workspace has non-standard limits"
+                />
+              </Field>
+            </FieldGroup>
           </SettingsSection>
 
           {state?.error && (
@@ -346,6 +337,8 @@ export function SubscriptionEditor({
       <SettingsSection
         title="Add-ons"
         description="Granted directly, without an order. Set a quantity to 0 to remove it."
+
+        bare
       >
         <ListPanel>
           {addons.map((addon) => {

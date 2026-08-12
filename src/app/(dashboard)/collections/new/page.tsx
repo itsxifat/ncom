@@ -1,6 +1,7 @@
 import { getActiveOrganization } from '@/server/services/organizationService'
 import { listProducts } from '@/server/services/productService'
 import { PageHeader } from '@/components/app/page-header'
+import { PageShell } from '@/components/app/page-shell'
 import { CollectionForm } from '@/components/store/collection-form'
 
 export default async function NewCollectionPage() {
@@ -8,7 +9,7 @@ export default async function NewCollectionPage() {
   const { items } = await listProducts(organization.id, { take: 200 })
 
   return (
-    <div className="flex flex-col gap-8">
+    <PageShell>
       <PageHeader
         backHref={`/collections`}
         backLabel="Collections"
@@ -32,6 +33,6 @@ export default async function NewCollectionPage() {
           seoDescription: '',
         }}
       />
-    </div>
+    </PageShell>
   )
 }

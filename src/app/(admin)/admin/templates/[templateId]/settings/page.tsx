@@ -4,6 +4,7 @@ import {
   listTemplateCategories,
 } from '@/server/services/templateService'
 import { PageHeader } from '@/components/app/page-header'
+import { PageShell } from '@/components/app/page-shell'
 import { SettingsSection } from '@/components/app/settings-section'
 import { ThemeForm } from '@/components/dashboard/theme-form'
 import { TemplateLiquidUpload } from '@/components/admin/template-liquid-upload'
@@ -29,7 +30,7 @@ export default async function TemplateSettingsPage({
   const categories = await listTemplateCategories()
 
   return (
-    <div className="flex flex-col gap-8">
+    <PageShell>
       <PageHeader
         backHref="/admin/templates"
         backLabel="Templates"
@@ -79,6 +80,6 @@ export default async function TemplateSettingsPage({
           source={template.liquidSource}
         />
       </SettingsSection>
-    </div>
+    </PageShell>
   )
 }

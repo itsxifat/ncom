@@ -7,6 +7,7 @@ import { listStores } from '@/server/services/storeService'
 import { env } from '@/lib/env'
 import { centsToMajorString } from '@/lib/money'
 import { PageHeader } from '@/components/app/page-header'
+import { PageShell } from '@/components/app/page-shell'
 import { Button } from '@/components/ui/button'
 import { ProductForm } from '@/components/store/product-form'
 import { ProductDangerZone } from '@/components/store/product-danger-zone'
@@ -44,7 +45,7 @@ export default async function EditProductPage({
   const toMajor = (cents: number | null) => centsToMajorString(cents, currency)
 
   return (
-    <div className="flex flex-col gap-8">
+    <PageShell>
       <PageHeader
         backHref={`/products`}
         backLabel="Products"
@@ -124,6 +125,6 @@ export default async function EditProductPage({
       />
 
       <ProductDangerZone productId={product.id} />
-    </div>
+    </PageShell>
   )
 }

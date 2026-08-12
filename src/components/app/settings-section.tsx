@@ -5,16 +5,24 @@ import { cn } from '@/lib/utils'
  * Forms don't get wider on a wide screen — a 1600px-long input is unusable.
  * Instead the extra width goes to a label column beside the card, so the page
  * fills the display without stretching the fields.
+ *
+ * The card is supplied here. Callers pass field content, not another `<Card>` —
+ * nesting one produces a panel inside a panel with doubled padding and two
+ * borders. Content that already carries its own surface, such as a `ListPanel`,
+ * passes `bare` instead of being wrapped twice.
  */
 export function SettingsSection({
   title,
   description,
   children,
+  bare = false,
   className,
 }: {
   title: string
   description?: string
   children: React.ReactNode
+  /** Skip the card, for children that are already a panel of their own. */
+  bare?: boolean
   className?: string
 }) {
   return (
@@ -34,9 +42,13 @@ export function SettingsSection({
           </p>
         )}
       </div>
-      <Card className="w-full max-w-2xl">
-        <CardContent>{children}</CardContent>
-      </Card>
+      {bare ? (
+        <div className="w-full min-w-0">{children}</div>
+      ) : (
+        <Card className="w-full min-w-0">
+          <CardContent>{children}</CardContent>
+        </Card>
+      )}
     </section>
   )
 }

@@ -29,6 +29,19 @@ function extractTenantSubdomain(host: string): string | null {
 }
 
 /**
+ * DEPLOYMENT REQUIREMENT: whatever reverse proxy sits in front of this app must
+ * NOT forward `X-Forwarded-Proto: https`. Next builds the request URL as
+ * `${x-forwarded-proto}://${bind address}:${port}` — it does not use the Host
+ * header unless `experimental.trustHostHeader` is set, and that key is stripped
+ * by config validation, so it cannot be turned on from next.config.ts. A
+ * forwarded `https` therefore yields `https://127.0.0.1:3013`, an origin that
+ * does not exist: the rewrites below stop being same-origin, Next tries to
+ * *proxy* the request to itself over TLS, and the handshake dies against the
+ * plaintext port (`EPROTO`) — every tenant subdomain and custom domain 500s.
+ * Note the proxy must override the header rather than merely omit it, since an
+ * upstream CDN may set it. Nothing here reads the scheme; absolute URLs come
+ * from `AUTH_URL` instead.
+ *
  * Tenant subdomains are rewritten straight to the public site renderer,
  * bypassing auth entirely (those pages are public). Everything else keeps
  * going through NextAuth's own request handling — calling `auth(req, event)`

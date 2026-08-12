@@ -7,6 +7,11 @@ import { cn } from '@/lib/utils'
  * posts with FormData without a hidden-input bridge, works before hydration,
  * and gets the platform's own picker on mobile. The commerce admin is
  * data-entry-heavy, so that reliability matters more than a styled listbox.
+ *
+ * `w-full` is not cosmetic. A bare select shrinks to its widest option as the
+ * browser measures it, which both breaks the alignment of a grid row of fields
+ * and truncates the label it decided not to fit — "Forever — every renewal"
+ * arrives as "Forever — every rene".
  */
 export function FormSelect({
   className,
@@ -15,7 +20,7 @@ export function FormSelect({
   return (
     <select
       className={cn(
-        'border-input bg-card h-10 rounded-[0.875rem] border px-3 text-sm',
+        'border-input bg-card focus-visible:border-ring focus-visible:ring-ring/15 disabled:bg-muted dark:bg-input/30 h-10 w-full min-w-0 rounded-[0.875rem] border px-3 text-sm transition-colors outline-none focus-visible:ring-3 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50',
         className
       )}
       {...props}
@@ -42,7 +47,7 @@ export function MoneyInput({
         type="text"
         inputMode="decimal"
         className={cn(
-          'border-input bg-card h-10 w-full rounded-[0.875rem] border pr-3 pl-14 text-sm',
+          'border-input bg-card placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/15 disabled:bg-muted dark:bg-input/30 h-10 w-full min-w-0 rounded-[0.875rem] border pr-3 pl-14 text-sm transition-colors outline-none focus-visible:ring-3 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50',
           className
         )}
         {...props}

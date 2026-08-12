@@ -10,15 +10,26 @@ import { z } from 'zod'
  * leaving a limit box empty means, and typing 0 is how you forbid something.
  */
 
-/** Blank -> null (unlimited). A number -> that limit, where 0 means none. */
+/**
+ * Blank -> null (unlimited). A number -> that limit, where 0 means none.
+ *
+ * Absent counts as blank. A form only renders the fields that apply to the
+ * current selection — a percentage box on a fixed-amount coupon would be
+ * meaningless — and a field that was never rendered is missing from FormData
+ * rather than empty in it. Without the `undefined` branch those two identical
+ * intentions parse differently, and the form rejects itself over a box the
+ * operator was never shown.
+ */
 export const optionalQuota = z
   .union([z.literal(''), z.coerce.number().int().min(0).max(2_000_000_000)])
-  .transform((value) => (value === '' ? null : value))
+  .optional()
+  .transform((value) => (value === '' || value === undefined ? null : value))
 
-/** Blank -> null. Used for prices that may not be offered at all. */
+/** Blank or absent -> null. Used for prices that may not be offered at all. */
 export const optionalMoney = z
   .union([z.literal(''), z.coerce.number().min(0).max(100_000_000)])
-  .transform((value) => (value === '' ? null : value))
+  .optional()
+  .transform((value) => (value === '' || value === undefined ? null : value))
 
 export const requiredMoney = z.coerce.number().min(0).max(100_000_000)
 
@@ -162,9 +173,15 @@ export const couponFormSchema = z
       'OVERRIDE_PRICE',
       'FREE_TRIAL_DAYS',
     ]),
+    // Absent -> null, like optionalMoney: the box is only rendered for a
+    // percentage coupon. superRefine below is what insists on a value when the
+    // chosen type actually needs one.
     percentage: z
       .union([z.literal(''), z.coerce.number().min(0).max(100)])
-      .transform((value) => (value === '' ? null : value)),
+      .optional()
+      .transform((value) =>
+        value === '' || value === undefined ? null : value
+      ),
     amount: optionalMoney,
     freeTrialDays: optionalQuota,
     currencyCode: z.string().trim().length(3).toUpperCase().default('BDT'),

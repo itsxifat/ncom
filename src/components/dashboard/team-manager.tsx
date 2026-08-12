@@ -9,7 +9,6 @@ import {
   updateMemberRoleAction,
   type OrgActionState,
 } from '@/app/(dashboard)/organization/actions'
-import { Card, CardContent } from '@/components/ui/card'
 import {
   Field,
   FieldDescription,
@@ -189,87 +188,79 @@ export function TeamManager({
           title="Invite someone"
           description="They will need to sign in with this exact email address to accept."
         >
-          <Card>
-            <CardContent>
-              <form action={inviteAction}>
-                <FieldGroup>
-                  <Field>
-                    <FieldLabel htmlFor="invite-email">Email</FieldLabel>
-                    <Input
-                      id="invite-email"
-                      name="email"
-                      type="email"
-                      placeholder="teammate@example.com"
-                      required
-                    />
-                  </Field>
+          <form action={inviteAction}>
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="invite-email">Email</FieldLabel>
+                <Input
+                  id="invite-email"
+                  name="email"
+                  type="email"
+                  placeholder="teammate@example.com"
+                  required
+                />
+              </Field>
 
-                  <Field>
-                    <FieldLabel htmlFor="invite-role">Role</FieldLabel>
-                    <FormSelect
-                      id="invite-role"
-                      name="role"
-                      defaultValue="EDITOR"
-                    >
-                      {ROLES.map((role) => (
-                        <option key={role.value} value={role.value}>
-                          {role.label}
-                        </option>
-                      ))}
-                    </FormSelect>
-                    <FieldDescription>
-                      You cannot grant a role higher than your own.
-                    </FieldDescription>
-                  </Field>
+              <Field>
+                <FieldLabel htmlFor="invite-role">Role</FieldLabel>
+                <FormSelect id="invite-role" name="role" defaultValue="EDITOR">
+                  {ROLES.map((role) => (
+                    <option key={role.value} value={role.value}>
+                      {role.label}
+                    </option>
+                  ))}
+                </FormSelect>
+                <FieldDescription>
+                  You cannot grant a role higher than your own.
+                </FieldDescription>
+              </Field>
 
-                  {inviteState?.error && (
-                    <FieldError>{inviteState.error}</FieldError>
-                  )}
+              {inviteState?.error && (
+                <FieldError>{inviteState.error}</FieldError>
+              )}
 
-                  {inviteState?.inviteUrl && (
-                    <Field>
-                      <FieldLabel>Invitation link</FieldLabel>
-                      {/* Shown because there is no transactional email yet —
+              {inviteState?.inviteUrl && (
+                <Field>
+                  <FieldLabel>Invitation link</FieldLabel>
+                  {/* Shown because there is no transactional email yet —
                           without this the invite would be created and then be
                           unreachable. */}
-                      <div className="flex gap-2">
-                        <Input
-                          readOnly
-                          value={inviteState.inviteUrl}
-                          className="font-mono text-xs"
-                          onFocus={(event) => event.currentTarget.select()}
-                        />
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => {
-                            navigator.clipboard.writeText(
-                              inviteState.inviteUrl ?? ''
-                            )
-                            setCopied(true)
-                          }}
-                        >
-                          <Copy />
-                          {copied ? 'Copied' : 'Copy'}
-                        </Button>
-                      </div>
-                      <FieldDescription>
-                        Send this to them yourself — automatic invitation emails
-                        are not set up yet. The link expires in 14 days.
-                      </FieldDescription>
-                    </Field>
-                  )}
-
-                  <Field>
-                    <Button type="submit" disabled={inviting}>
-                      <Mail />
-                      {inviting ? 'Creating…' : 'Create invitation'}
+                  <div className="flex gap-2">
+                    <Input
+                      readOnly
+                      value={inviteState.inviteUrl}
+                      className="font-mono text-xs"
+                      onFocus={(event) => event.currentTarget.select()}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        navigator.clipboard.writeText(
+                          inviteState.inviteUrl ?? ''
+                        )
+                        setCopied(true)
+                      }}
+                    >
+                      <Copy />
+                      {copied ? 'Copied' : 'Copy'}
                     </Button>
-                  </Field>
-                </FieldGroup>
-              </form>
-            </CardContent>
-          </Card>
+                  </div>
+                  <FieldDescription>
+                    Send this to them yourself — automatic invitation emails are
+                    not set up yet. The link expires in 14 days.
+                  </FieldDescription>
+                </Field>
+              )}
+
+              <Field>
+                <Button type="submit" disabled={inviting}>
+                  <Mail />
+                  {inviting ? 'Creating…' : 'Create invitation'}
+                </Button>
+              </Field>
+            </FieldGroup>
+          </form>
         </SettingsSection>
       )}
 

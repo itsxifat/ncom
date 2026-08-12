@@ -5,6 +5,7 @@ import {
   getPlatformFlags,
 } from '@/server/services/platformFlagService'
 import { PageHeader } from '@/components/app/page-header'
+import { PageShell } from '@/components/app/page-shell'
 import { SettingsSection } from '@/components/app/settings-section'
 import { PlatformFlags, type FlagRow } from './PlatformFlags'
 import { SettingsClient } from './SettingsClient'
@@ -27,7 +28,7 @@ export default async function AdminSettingsPage() {
   // comes here to change. The raw key/value editor stays underneath as the
   // escape hatch it was built to be.
   return (
-    <div className="flex flex-col gap-8">
+    <PageShell>
       <PageHeader
         eyebrow="Configuration"
         title="Platform settings"
@@ -48,6 +49,6 @@ export default async function AdminSettingsPage() {
           }))}
         />
       </SettingsSection>
-    </div>
+    </PageShell>
   )
 }

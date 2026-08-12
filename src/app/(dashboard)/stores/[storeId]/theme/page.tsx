@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation'
 import { getActiveOrganization } from '@/server/services/organizationService'
 import { getStoreTheme } from '@/server/services/storeService'
 import { PageHeader } from '@/components/app/page-header'
+import { PageShell } from '@/components/app/page-shell'
 import { SettingsSection } from '@/components/app/settings-section'
 import { ThemeForm } from '@/components/dashboard/theme-form'
 import { updateThemeAction } from './actions'
@@ -22,7 +23,7 @@ export default async function StoreThemePage({
   }
 
   return (
-    <div className="flex flex-col gap-8">
+    <PageShell>
       <PageHeader
         backHref={`/stores/${storeId}`}
         backLabel="Back to store"
@@ -42,6 +43,6 @@ export default async function StoreThemePage({
           theme={theme}
         />
       </SettingsSection>
-    </div>
+    </PageShell>
   )
 }

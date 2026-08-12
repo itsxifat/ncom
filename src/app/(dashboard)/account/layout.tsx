@@ -1,4 +1,5 @@
 import { PageHeader } from '@/components/app/page-header'
+import { PageShell } from '@/components/app/page-shell'
 import { PillTabs } from '@/components/app/pill-tabs'
 
 export default function AccountLayout({
@@ -7,7 +8,7 @@ export default function AccountLayout({
   children: React.ReactNode
 }) {
   return (
-    <div className="flex flex-col gap-8">
+    <PageShell>
       <PageHeader
         eyebrow="You"
         title="Account"
@@ -20,6 +21,6 @@ export default function AccountLayout({
         ]}
       />
       {children}
-    </div>
+    </PageShell>
   )
 }

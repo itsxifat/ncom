@@ -5,6 +5,7 @@ import {
 } from '@/server/services/invitationService'
 import { hasMinRole } from '@/server/auth/rbac'
 import { PageHeader } from '@/components/app/page-header'
+import { PageShell } from '@/components/app/page-shell'
 import { SettingsSection } from '@/components/app/settings-section'
 import { TeamManager } from '@/components/dashboard/team-manager'
 import { OrganizationForm } from '@/components/dashboard/organization-form'
@@ -22,7 +23,7 @@ export default async function OrganizationPage() {
   ])
 
   return (
-    <div className="flex flex-col gap-8">
+    <PageShell>
       <PageHeader
         eyebrow="Workspace"
         title={organization.name}
@@ -56,6 +57,6 @@ export default async function OrganizationPage() {
           expiresAt: invitation.expiresAt.toLocaleDateString(),
         }))}
       />
-    </div>
+    </PageShell>
   )
 }

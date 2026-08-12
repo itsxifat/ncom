@@ -1,5 +1,6 @@
 import { listEmailLog, listSmtpConfigs } from '@/server/services/emailService'
 import { PageHeader } from '@/components/app/page-header'
+import { PageShell } from '@/components/app/page-shell'
 import { SettingsSection } from '@/components/app/settings-section'
 import { ListPanel, ListRow, ListRowText } from '@/components/app/list-panel'
 import { Badge } from '@/components/ui/badge'
@@ -38,7 +39,7 @@ export default async function AdminEmailPage() {
   }))
 
   return (
-    <div className="flex flex-col gap-8">
+    <PageShell>
       <PageHeader
         eyebrow="Configuration"
         title="Email"
@@ -86,6 +87,6 @@ export default async function AdminEmailPage() {
           </ListPanel>
         )}
       </SettingsSection>
-    </div>
+    </PageShell>
   )
 }

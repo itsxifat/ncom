@@ -21,8 +21,23 @@ export const DUMMY_BCRYPT_HASH =
 export function isTrustedOrigin(request: Request): boolean {
   const origin = request.headers.get('origin')
   if (!origin) return false
+
+  // Compared against the Host header rather than `request.url`. Behind a reverse
+  // proxy Next builds `request.url` from the address the server bound to
+  // (127.0.0.1:3013) rather than the hostname the browser used, so the two could
+  // never agree and every legitimate request to these routes was rejected as
+  // CSRF — registration and media upload returned 403 in production while
+  // working in dev, where the two happen to coincide.
+  //
+  // Host is also the correct thing to compare: it is the name the browser
+  // addressed, and Origin is what that same browser reports as the page's
+  // origin. A forged Host does not help an attacker, because a cross-site
+  // request still carries the attacker's own Origin and therefore still fails.
+  const host = request.headers.get('host')
+  if (!host) return false
+
   try {
-    return new URL(origin).host === new URL(request.url).host
+    return new URL(origin).host === host
   } catch {
     return false
   }

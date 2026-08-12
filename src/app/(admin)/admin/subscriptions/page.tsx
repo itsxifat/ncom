@@ -5,6 +5,7 @@ import {
   listSubscriptionsForAdmin,
 } from '@/server/services/planAdminService'
 import { PageHeader } from '@/components/app/page-header'
+import { PageShell } from '@/components/app/page-shell'
 import { EmptyState } from '@/components/app/empty-state'
 import { SettingsSection } from '@/components/app/settings-section'
 import {
@@ -36,7 +37,7 @@ export default async function AdminSubscriptionsPage() {
   ])
 
   return (
-    <div className="flex flex-col gap-8">
+    <PageShell>
       <PageHeader
         eyebrow="Monetization"
         title="Subscriptions"
@@ -47,6 +48,8 @@ export default async function AdminSubscriptionsPage() {
         <SettingsSection
           title="Waiting on payment"
           description="Checkouts that came to more than ৳0. No gateway is connected, so these need activating by hand once payment is settled."
+
+          bare
         >
           <ListPanel>
             {openOrders.map((order) => (
@@ -152,6 +155,6 @@ export default async function AdminSubscriptionsPage() {
           })}
         </ListPanel>
       )}
-    </div>
+    </PageShell>
   )
 }

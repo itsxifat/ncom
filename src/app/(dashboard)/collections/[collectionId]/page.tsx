@@ -4,6 +4,7 @@ import { listCollections } from '@/server/services/collectionService'
 import { listProducts } from '@/server/services/productService'
 import { prisma } from '@/server/db/client'
 import { PageHeader } from '@/components/app/page-header'
+import { PageShell } from '@/components/app/page-shell'
 import { CollectionForm } from '@/components/store/collection-form'
 import type { CollectionRule } from '@/lib/validation/collection'
 
@@ -29,7 +30,7 @@ export default async function EditCollectionPage({
   ])
 
   return (
-    <div className="flex flex-col gap-8">
+    <PageShell>
       <PageHeader
         backHref={`/collections`}
         backLabel="Collections"
@@ -58,6 +59,6 @@ export default async function EditCollectionPage({
           seoDescription: collection.seoDescription ?? '',
         }}
       />
-    </div>
+    </PageShell>
   )
 }

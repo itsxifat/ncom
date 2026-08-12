@@ -1,11 +1,12 @@
 import { PageHeader } from '@/components/app/page-header'
+import { PageShell } from '@/components/app/page-shell'
 import { PlanForm } from '../PlanForm'
 
 export const metadata = { title: 'New plan' }
 
 export default function NewPlanPage() {
   return (
-    <div className="flex flex-col gap-8">
+    <PageShell>
       <PageHeader
         eyebrow="Monetization"
         title="New plan"
@@ -14,6 +15,6 @@ export default function NewPlanPage() {
         backLabel="Plans"
       />
       <PlanForm plan={null} />
-    </div>
+    </PageShell>
   )
 }

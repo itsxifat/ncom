@@ -2,7 +2,6 @@
 
 import { useState, useTransition } from 'react'
 import { setPlatformFlagAction } from './actions'
-import { Card, CardContent } from '@/components/ui/card'
 import { Switch } from '@/components/ui/switch'
 import { SettingsSection } from '@/components/app/settings-section'
 import type { PlatformFlagKey } from '@/server/services/platformFlagService'
@@ -30,15 +29,13 @@ export function PlatformFlags({ flags }: { flags: FlagRow[] }) {
     <div className="flex flex-col gap-6">
       {groups.map((group) => (
         <SettingsSection key={group} title={group}>
-          <Card>
-            <CardContent className="flex flex-col gap-1">
-              {flags
-                .filter((flag) => flag.group === group)
-                .map((flag) => (
-                  <FlagToggle key={flag.key} flag={flag} />
-                ))}
-            </CardContent>
-          </Card>
+          <div className="flex flex-col gap-1">
+            {flags
+              .filter((flag) => flag.group === group)
+              .map((flag) => (
+                <FlagToggle key={flag.key} flag={flag} />
+              ))}
+          </div>
         </SettingsSection>
       ))}
     </div>

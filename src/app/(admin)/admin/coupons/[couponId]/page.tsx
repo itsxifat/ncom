@@ -5,6 +5,7 @@ import {
   listPlansForAdmin,
 } from '@/server/services/planAdminService'
 import { PageHeader } from '@/components/app/page-header'
+import { PageShell } from '@/components/app/page-shell'
 import { SettingsSection } from '@/components/app/settings-section'
 import { ListPanel, ListRow, ListRowText } from '@/components/app/list-panel'
 import { Money } from '@/components/store/form-controls'
@@ -63,7 +64,7 @@ export default async function EditCouponPage({
   }
 
   return (
-    <div className="flex flex-col gap-8">
+    <PageShell>
       <PageHeader
         eyebrow="Monetization"
         title={coupon.code}
@@ -81,7 +82,7 @@ export default async function EditCouponPage({
         <SettingsSection
           title="Redemptions"
           description={`${redemptions.length} recorded.`}
-          className="max-w-4xl"
+          bare
         >
           <ListPanel>
             {redemptions.map((redemption) => (
@@ -99,6 +100,6 @@ export default async function EditCouponPage({
           </ListPanel>
         </SettingsSection>
       )}
-    </div>
+    </PageShell>
   )
 }
