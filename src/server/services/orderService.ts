@@ -1,12 +1,15 @@
 import 'server-only'
 import { prisma } from '@/server/db/client'
-import { requireOrgAccess } from '@/server/auth/rbac'
+import { requireOrgAccess, requireHumanOrgAccess } from '@/server/auth/rbac'
 import {
   consumeInventoryForFulfillment,
   releaseInventoryForOrder,
   restockInventory,
 } from './inventoryService'
+import { emitWebhook } from './webhookService'
 import { clampNonNegative } from '@/lib/money'
+import type { WebhookTopic } from '@/generated/prisma/client'
+import type { OrderWorkflowState } from '@/generated/prisma/enums'
 
 /**
  * Order management: reading, fulfilling, cancelling and refunding.
@@ -46,6 +49,8 @@ export async function listOrders(
       | 'VOIDED'
     fulfillmentStatus?:
       'UNFULFILLED' | 'PARTIALLY_FULFILLED' | 'FULFILLED' | 'RESTOCKED'
+    /** Where the order sits in the courier pipeline — see OrderWorkflowState. */
+    workflowState?: OrderWorkflowState
     take?: number
     skip?: number
   } = {}
@@ -66,6 +71,7 @@ export async function listOrders(
     ...(options.fulfillmentStatus
       ? { fulfillmentStatus: options.fulfillmentStatus }
       : {}),
+    ...(options.workflowState ? { workflowState: options.workflowState } : {}),
     ...(options.search
       ? {
           OR: [
@@ -105,6 +111,88 @@ export async function listOrders(
   return { items, total }
 }
 
+/**
+ * Tells subscribers an order moved.
+ *
+ * Reloads the order rather than passing along whatever the caller happened to
+ * have, so every order event carries the same complete object regardless of
+ * which operation produced it — a receiver should not have to handle
+ * `order.fulfilled` being shaped differently from `order.cancelled`.
+ *
+ * Lines carry the variant id and quantity because the most common reason to
+ * subscribe to order events is to move the same stock in another system, and
+ * making that receiver call back for the lines defeats the point.
+ */
+export async function emitOrderWebhook(
+  organizationId: string,
+  orderId: string,
+  topic: WebhookTopic
+) {
+  const order = await prisma.order.findFirst({
+    where: { id: orderId, organizationId },
+    select: {
+      id: true,
+      orderNumber: true,
+      email: true,
+      phone: true,
+      financialStatus: true,
+      fulfillmentStatus: true,
+      currencyCode: true,
+      subtotalCents: true,
+      discountTotalCents: true,
+      shippingTotalCents: true,
+      taxTotalCents: true,
+      totalCents: true,
+      cancelledAt: true,
+      createdAt: true,
+      lines: {
+        select: {
+          id: true,
+          productId: true,
+          variantId: true,
+          title: true,
+          variantTitle: true,
+          sku: true,
+          quantity: true,
+          fulfilledQuantity: true,
+          unitPriceCents: true,
+          totalCents: true,
+        },
+      },
+    },
+  })
+  if (!order) return
+
+  await emitWebhook(organizationId, topic, {
+    id: order.id,
+    orderNumber: order.orderNumber,
+    email: order.email,
+    phone: order.phone,
+    financialStatus: order.financialStatus.toLowerCase(),
+    fulfillmentStatus: order.fulfillmentStatus.toLowerCase(),
+    currencyCode: order.currencyCode,
+    subtotalCents: order.subtotalCents,
+    discountTotalCents: order.discountTotalCents,
+    shippingTotalCents: order.shippingTotalCents,
+    taxTotalCents: order.taxTotalCents,
+    totalCents: order.totalCents,
+    cancelledAt: order.cancelledAt?.toISOString() ?? null,
+    createdAt: order.createdAt.toISOString(),
+    lines: order.lines.map((line) => ({
+      id: line.id,
+      productId: line.productId,
+      variantId: line.variantId,
+      title: line.title,
+      variantTitle: line.variantTitle,
+      sku: line.sku,
+      quantity: line.quantity,
+      fulfilledQuantity: line.fulfilledQuantity,
+      unitPriceCents: line.unitPriceCents,
+      totalCents: line.totalCents,
+    })),
+  })
+}
+
 export async function getOrder(organizationId: string, orderId: string) {
   await requireOrgAccess(organizationId, 'VIEWER')
 
@@ -137,7 +225,7 @@ export async function fulfillOrder(
     notifyCustomer?: boolean
   }
 ) {
-  const { session } = await requireOrgAccess(organizationId, 'EDITOR')
+  const { session } = await requireHumanOrgAccess(organizationId, 'EDITOR')
 
   const order = await prisma.order.findFirst({
     where: { id: orderId, organizationId },
@@ -160,7 +248,7 @@ export async function fulfillOrder(
     }
   }
 
-  return prisma.$transaction(async (tx) => {
+  const fulfillment = await prisma.$transaction(async (tx) => {
     const fulfillment = await tx.fulfillment.create({
       data: {
         orderId,
@@ -229,6 +317,12 @@ export async function fulfillOrder(
 
     return fulfillment
   })
+
+  // Emitted after the transaction commits, so a receiver that calls straight
+  // back to read the order sees the fulfilment rather than the state before it.
+  await emitOrderWebhook(organizationId, orderId, 'ORDER_FULFILLED')
+
+  return fulfillment
 }
 
 function deriveFulfillmentStatus(
@@ -270,7 +364,7 @@ export async function cancelOrder(
     restock?: boolean
   }
 ) {
-  const { session } = await requireOrgAccess(organizationId, 'EDITOR')
+  const { session } = await requireHumanOrgAccess(organizationId, 'EDITOR')
 
   const order = await prisma.order.findFirst({
     where: { id: orderId, organizationId },
@@ -279,7 +373,7 @@ export async function cancelOrder(
   if (!order) throw new Error('Order not found')
   if (order.cancelledAt) throw new Error('This order is already cancelled')
 
-  return prisma.$transaction(async (tx) => {
+  const cancelled = await prisma.$transaction(async (tx) => {
     if (input.restock !== false) {
       await releaseInventoryForOrder(
         tx,
@@ -314,6 +408,10 @@ export async function cancelOrder(
       },
     })
   })
+
+  await emitOrderWebhook(organizationId, orderId, 'ORDER_CANCELLED')
+
+  return cancelled
 }
 
 /**
@@ -335,7 +433,7 @@ export async function refundOrder(
     restock?: boolean
   }
 ) {
-  const { session } = await requireOrgAccess(organizationId, 'ADMIN')
+  const { session } = await requireHumanOrgAccess(organizationId, 'ADMIN')
 
   const order = await prisma.order.findFirst({
     where: { id: orderId, organizationId },
@@ -381,7 +479,7 @@ export async function refundOrder(
     )
   }
 
-  return prisma.$transaction(async (tx) => {
+  const refunded = await prisma.$transaction(async (tx) => {
     const refund = await tx.refund.create({
       data: {
         orderId,
@@ -474,11 +572,17 @@ export async function refundOrder(
 
     return refund
   })
+
+  // A refund with restock moves stock too, but that already emitted its own
+  // inventory.updated — this one says the *order* changed.
+  await emitOrderWebhook(organizationId, orderId, 'ORDER_UPDATED')
+
+  return refunded
 }
 
 /** Records an offline payment against a pending order (bank transfer, COD). */
 export async function markOrderPaid(organizationId: string, orderId: string) {
-  const { session } = await requireOrgAccess(organizationId, 'EDITOR')
+  const { session } = await requireHumanOrgAccess(organizationId, 'EDITOR')
 
   const order = await prisma.order.findFirst({
     where: { id: orderId, organizationId },
@@ -494,7 +598,7 @@ export async function markOrderPaid(organizationId: string, orderId: string) {
   const outstanding = order.totalCents - order.paidTotalCents
   if (outstanding <= 0) throw new Error('This order is already paid')
 
-  return prisma.$transaction(async (tx) => {
+  const paid = await prisma.$transaction(async (tx) => {
     await tx.transaction.create({
       data: {
         orderId,
@@ -523,6 +627,10 @@ export async function markOrderPaid(organizationId: string, orderId: string) {
       },
     })
   })
+
+  await emitOrderWebhook(organizationId, orderId, 'ORDER_UPDATED')
+
+  return paid
 }
 
 export async function addOrderNote(
@@ -530,7 +638,7 @@ export async function addOrderNote(
   orderId: string,
   note: string
 ) {
-  const { session } = await requireOrgAccess(organizationId, 'EDITOR')
+  const { session } = await requireHumanOrgAccess(organizationId, 'EDITOR')
 
   const order = await prisma.order.findFirst({
     where: { id: orderId, organizationId },

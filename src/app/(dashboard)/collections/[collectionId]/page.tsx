@@ -1,7 +1,7 @@
 import { notFound } from 'next/navigation'
 import { getActiveOrganization } from '@/server/services/organizationService'
 import { listCollections } from '@/server/services/collectionService'
-import { listProducts } from '@/server/services/productService'
+import { listPickerProducts } from '@/server/services/productService'
 import { prisma } from '@/server/db/client'
 import { PageHeader } from '@/components/app/page-header'
 import { PageShell } from '@/components/app/page-shell'
@@ -20,8 +20,8 @@ export default async function EditCollectionPage({
   const collection = collections.find((entry) => entry.id === collectionId)
   if (!collection) notFound()
 
-  const [{ items }, members] = await Promise.all([
-    listProducts(organization.id, { take: 200 }),
+  const [catalog, members] = await Promise.all([
+    listPickerProducts(organization.id),
     prisma.collectionProduct.findMany({
       where: { collectionId },
       select: { productId: true },
@@ -37,10 +37,8 @@ export default async function EditCollectionPage({
         title={collection.title}
       />
       <CollectionForm
-        products={items.map((product) => ({
-          id: product.id,
-          title: product.title,
-        }))}
+        products={catalog.products}
+        currencyCode={catalog.currencyCode}
         initial={{
           id: collection.id,
           title: collection.title,

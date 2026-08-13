@@ -26,6 +26,7 @@ import {
   type SellableVariant,
 } from './ProductCatalogContext'
 import type { PageTheme } from '../sections/types'
+import type { PickerProduct } from '@/server/services/productService'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
@@ -49,6 +50,7 @@ export function BuilderShell({
   componentDefinitionIds,
   liquidSections = [],
   products = [],
+  catalog,
   offers,
   renderSection,
   importAction,
@@ -66,6 +68,8 @@ export function BuilderShell({
   /** Sellable variants, for sections that take orders. Empty for templates,
    *  which are designed without a store behind them. */
   products?: SellableVariant[]
+  /** The same catalogue with photos, prices and stock, for the product picker. */
+  catalog?: { products: PickerProduct[]; currencyCode: string }
   /**
    * What this page sells. Absent for the template builder, which designs a
    * layout with no store, no catalogue and therefore nothing to sell — the
@@ -123,7 +127,11 @@ export function BuilderShell({
   )
 
   return (
-    <ProductCatalogProvider variants={products}>
+    <ProductCatalogProvider
+      variants={products}
+      products={catalog?.products}
+      currencyCode={catalog?.currencyCode}
+    >
       <div className="bg-background fixed inset-0 z-50 flex flex-col">
         <header className="flex h-14 shrink-0 items-center justify-between border-b px-4">
           <div className="flex min-w-0 items-center gap-3">

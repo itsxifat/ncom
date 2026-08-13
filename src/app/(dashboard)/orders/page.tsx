@@ -20,6 +20,8 @@ import {
 } from '@/components/store/status-badges'
 import { Money } from '@/components/store/form-controls'
 import { FormSelect } from '@/components/ui/form-select'
+import { WorkflowStateBadge } from '@/components/store/fraud-badges'
+import { WORKFLOW_STATE_LABEL } from '@/server/courier/statusMap'
 
 const PAGE_SIZE = 50
 
@@ -40,6 +42,20 @@ const FULFILLMENT_VALUES = [
   'RESTOCKED',
 ] as const
 
+const WORKFLOW_VALUES = [
+  'PENDING',
+  'FRAUD_REVIEW',
+  'PROCESSING',
+  'DISPATCHED',
+  'IN_TRANSIT',
+  'OUT_FOR_DELIVERY',
+  'DELIVERED',
+  'PARTIALLY_DELIVERED',
+  'RETURNED',
+  'CANCELLED',
+  'FAILED',
+] as const
+
 export default async function OrdersPage({
   params,
   searchParams,
@@ -53,6 +69,9 @@ export default async function OrdersPage({
   const fulfillmentStatus = FULFILLMENT_VALUES.find(
     (value) => value === query.fulfillment
   )
+  const workflowState = WORKFLOW_VALUES.find(
+    (value) => value === query.delivery
+  )
   const page = Math.max(1, Number(query.page) || 1)
 
   const { organization } = await getActiveOrganization()
@@ -60,13 +79,20 @@ export default async function OrdersPage({
     search,
     financialStatus,
     fulfillmentStatus,
+    workflowState,
     take: PAGE_SIZE,
     skip: (page - 1) * PAGE_SIZE,
   })
 
   const base = `/orders`
 
-  if (total === 0 && !search && !financialStatus && !fulfillmentStatus) {
+  if (
+    total === 0 &&
+    !search &&
+    !financialStatus &&
+    !fulfillmentStatus &&
+    !workflowState
+  ) {
     return (
       <EmptyState
         icon={ShoppingBag}
@@ -101,10 +127,29 @@ export default async function OrdersPage({
             </option>
           ))}
         </FormSelect>
+        <FormSelect name="delivery" defaultValue={workflowState ?? ''}>
+          <option value="">Any delivery state</option>
+          {WORKFLOW_VALUES.map((value) => (
+            <option key={value} value={value}>
+              {WORKFLOW_STATE_LABEL[value]}
+            </option>
+          ))}
+        </FormSelect>
         <Button type="submit" variant="outline">
           Filter
         </Button>
       </form>
+
+      {/* The review queue is the one filter a merchant needs every morning, so
+          it gets a link rather than being buried in a dropdown. */}
+      {!workflowState && (
+        <Link
+          href={`${base}?delivery=FRAUD_REVIEW`}
+          className="text-muted-foreground text-sm underline underline-offset-4"
+        >
+          Show only orders waiting for review
+        </Link>
+      )}
 
       {items.length === 0 ? (
         <EmptyState
@@ -156,6 +201,10 @@ export default async function OrdersPage({
                       <FulfillmentStatusBadge
                         status={order.fulfillmentStatus}
                       />
+                      {/* Where the parcel is. Shown beside the money statuses
+                          because in a cash-on-delivery market they answer
+                          different halves of "is this order done". */}
+                      <WorkflowStateBadge state={order.workflowState} />
                       {/* Which storefront sold it. One catalogue can be sold
                           from several landing pages, so this is how a merchant
                           tells which page is actually working. */}

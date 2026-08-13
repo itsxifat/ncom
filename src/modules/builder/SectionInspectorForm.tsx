@@ -20,6 +20,9 @@ import { Switch } from '@/components/ui/switch'
 import { Button } from '@/components/ui/button'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { FormSelect } from '@/components/ui/form-select'
+import { FontPicker } from '@/components/ui/font-picker'
+import { ProductPickerDialog } from '@/components/store/product-picker'
+import { formatMoneyAmount } from '@/lib/money'
 
 /**
  * The blank value a newly appended array item starts with, per field type.
@@ -52,35 +55,93 @@ function emptyValueForField(field: FieldConfig): unknown {
  * deleted fails loudly at order time instead of silently selling nothing. When
  * the store has no products yet the control says so rather than rendering an
  * empty dropdown the merchant would poke at.
+ *
+ * The chosen product is shown as a card with its photo, price and stock rather
+ * than as a line of text. A section is a thing on a page that sells something,
+ * and "is this the right one?" is answered by looking at it, not by reading an
+ * id back.
  */
 function ProductField({
   name,
   label,
-  register,
+  control,
 }: {
   name: string
   label: string
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  register: UseFormRegister<any>
+  control: Control<any>
 }) {
-  const variants = useProductCatalog()
+  const catalog = useProductCatalog()
 
   return (
     <Field>
       <FieldLabel>{label}</FieldLabel>
-      {variants.length === 0 ? (
+      {catalog.variants.length === 0 ? (
         <p className="text-muted-foreground text-sm">
           No products yet — add one under Products, then choose it here.
         </p>
       ) : (
-        <FormSelect {...register(name)}>
-          <option value="">Choose a product…</option>
-          {variants.map((variant) => (
-            <option key={variant.variantId} value={variant.variantId}>
-              {variant.label}
-            </option>
-          ))}
-        </FormSelect>
+        <Controller
+          name={name}
+          control={control}
+          render={({ field }) => {
+            const chosen = catalog.products.find((product) =>
+              product.variants.some((variant) => variant.id === field.value)
+            )
+            const chosenVariant = chosen?.variants.find(
+              (variant) => variant.id === field.value
+            )
+
+            return (
+              <div className="flex flex-col gap-2">
+                {chosen && (
+                  <div className="flex items-center gap-2.5 rounded-lg border p-2">
+                    <div className="bg-muted size-9 shrink-0 overflow-hidden rounded-md">
+                      {chosen.imageUrl && (
+                        // eslint-disable-next-line @next/next/no-img-element -- CDN URLs aren't in next/image's remote allowlist
+                        <img
+                          src={chosen.imageUrl}
+                          alt=""
+                          className="size-full object-cover"
+                        />
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-xs font-medium">
+                        {chosen.title}
+                      </p>
+                      <p className="text-muted-foreground truncate text-[11px]">
+                        {chosenVariant &&
+                        chosenVariant.title !== 'Default Title'
+                          ? `${chosenVariant.title} · `
+                          : ''}
+                        {formatMoneyAmount(
+                          chosenVariant?.priceCents ?? chosen.minPriceCents,
+                          catalog.currencyCode
+                        )}
+                        {chosenVariant?.tracksInventory
+                          ? ` · ${chosenVariant.available} in stock`
+                          : ''}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                <ProductPickerDialog
+                  initialProducts={catalog.products}
+                  currencyCode={catalog.currencyCode}
+                  pickVariant
+                  onPick={(_productId, variantId) => field.onChange(variantId)}
+                  trigger={
+                    <Button type="button" variant="outline" size="sm">
+                      {chosen ? 'Change product' : 'Choose a product…'}
+                    </Button>
+                  }
+                />
+              </div>
+            )
+          }}
+        />
       )}
     </Field>
   )
@@ -151,6 +212,24 @@ function FieldRenderer({
     )
   }
 
+  if (field.type === 'font') {
+    return (
+      <Controller
+        name={name}
+        control={control}
+        render={({ field: controllerField }) => (
+          <Field>
+            <FieldLabel>{field.label}</FieldLabel>
+            <FontPicker
+              value={(controllerField.value as string) ?? ''}
+              onValueChange={controllerField.onChange}
+            />
+          </Field>
+        )}
+      />
+    )
+  }
+
   if (field.type === 'number') {
     return (
       <Field>
@@ -170,7 +249,7 @@ function FieldRenderer({
   }
 
   if (field.type === 'product') {
-    return <ProductField name={name} label={field.label} register={register} />
+    return <ProductField name={name} label={field.label} control={control} />
   }
 
   if (field.type === 'select') {

@@ -22,6 +22,7 @@ import {
   duplicateProduct,
   createProduct,
   deleteProduct,
+  listPickerProducts,
   updateProduct,
 } from '@/server/services/productService'
 import {
@@ -32,6 +33,8 @@ import {
 } from '@/server/services/collectionService'
 import {
   adjustInventory,
+  ensureDefaultLocation,
+  listInventoryHistory,
   setVariantStock,
 } from '@/server/services/inventoryService'
 import {
@@ -161,6 +164,9 @@ const productFormSchema = z.object({
   productType: z.string().optional(),
   vendor: z.string().optional(),
   tags: z.array(z.string()).default([]),
+  // Sent on every save, and null is meaningful: it is how the editor says the
+  // product was taken out of its category.
+  categoryId: z.string().nullable().default(null),
   seoTitle: z.string().optional(),
   seoDescription: z.string().optional(),
   options: z
@@ -221,6 +227,10 @@ function toProductInput(
     description: raw.description || undefined,
     productType: raw.productType || undefined,
     vendor: raw.vendor || undefined,
+    // Kept as an explicit null rather than collapsed to undefined: undefined
+    // means "not mentioned" downstream, which would make clearing a category
+    // silently do nothing.
+    categoryId: raw.categoryId || null,
     seoTitle: raw.seoTitle || undefined,
     seoDescription: raw.seoDescription || undefined,
     images: raw.images.map((image) => ({
@@ -388,10 +398,21 @@ export async function adjustInventoryAction(
   _prev: StoreActionState,
   formData: FormData
 ): Promise<StoreActionState> {
+  // Parsed explicitly rather than through `Number()`: `Number('')` and
+  // `Number(null)` are both 0, so a blank box used to submit a valid-looking
+  // zero-unit adjustment and write a meaningless ledger row.
+  const raw = String(formData.get('delta') ?? '').trim()
+  if (raw === '') return { error: 'Enter how many units to add or remove.' }
+
+  const delta = Number(raw)
+  if (!Number.isInteger(delta)) {
+    return { error: 'Enter a whole number, like 12 or -3.' }
+  }
+
   const parsed = adjustInventorySchema.safeParse({
     variantId: formData.get('variantId'),
     locationId: formData.get('locationId'),
-    delta: Number(formData.get('delta')),
+    delta,
     reason: formData.get('reason') || 'MANUAL',
     note: formData.get('note') || undefined,
   })
@@ -406,7 +427,84 @@ export async function adjustInventoryAction(
   }
 
   revalidatePath('/inventory')
-  return { success: 'Inventory updated.' }
+  revalidatePath('/products')
+  return {
+    success:
+      delta > 0 ? `Added ${delta} to stock.` : `Removed ${Math.abs(delta)}.`,
+  }
+}
+
+/**
+ * Signed stock change from the inventory table's +/− buttons.
+ *
+ * Separate from the FormData action because there is no form here — the row
+ * calls it directly with a delta, and routing that through a hidden form only
+ * to parse it back would add a failure mode without adding anything.
+ */
+export async function adjustInventoryDeltaAction(
+  variantId: string,
+  locationId: string,
+  delta: number
+): Promise<StoreActionState> {
+  if (!Number.isInteger(delta) || delta === 0) {
+    return { error: 'Enter a whole number of units.' }
+  }
+
+  try {
+    const { organization, session } = await getActiveOrganizationWithSession()
+    const location = locationId
+      ? { id: locationId }
+      : await ensureDefaultLocation(organization)
+
+    await adjustInventory(
+      organization,
+      {
+        variantId,
+        locationId: location.id,
+        delta,
+        reason: delta > 0 ? 'RECEIVED' : 'MANUAL',
+        note: 'Adjusted from the inventory table',
+      },
+      session
+    )
+  } catch (cause) {
+    return fail(cause)
+  }
+
+  revalidatePath('/inventory')
+  revalidatePath('/products')
+  return { success: 'Stock updated.' }
+}
+
+/**
+ * Catalogue search for the product pickers.
+ *
+ * Server-side rather than filtering a preloaded list in the browser: a picker
+ * that quietly cannot find products past its first page is worse than one with
+ * no search, because the merchant concludes the product does not exist.
+ */
+export async function searchCatalogAction(
+  query: string,
+  includeArchived = false
+) {
+  const { organization } = await getActiveOrganization()
+
+  return listPickerProducts(organization.id, {
+    search: query,
+    includeArchived,
+    take: 60,
+  })
+}
+
+/** The ledger behind one variant's current count, for the history dialog. */
+export async function inventoryHistoryAction(variantId: string) {
+  const { organization } = await getActiveOrganization()
+  const entries = await listInventoryHistory(organization.id, variantId)
+
+  return entries.map((entry) => ({
+    ...entry,
+    createdAt: entry.createdAt.toISOString(),
+  }))
 }
 
 /**
@@ -418,7 +516,8 @@ export async function adjustInventoryAction(
  */
 export async function setVariantStockAction(
   variantId: string,
-  available: number
+  available: number,
+  locationId?: string
 ): Promise<StoreActionState> {
   if (!Number.isFinite(available) || available < 0) {
     return { error: 'Enter a stock count of zero or more.' }
@@ -426,7 +525,9 @@ export async function setVariantStockAction(
 
   try {
     const { organization, session } = await getActiveOrganizationWithSession()
-    await setVariantStock(organization, variantId, available, session)
+    await setVariantStock(organization, variantId, available, session, {
+      locationId,
+    })
   } catch (cause) {
     return fail(cause)
   }

@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react'
 
 import { cn } from '@/lib/utils'
+import { fontStack } from '@/lib/fonts'
 import type { PageTheme } from './types'
 
 const RADIUS_VALUES: Record<string, string> = {
@@ -30,8 +31,11 @@ export function themeToCssProperties(theme: PageTheme): CSSProperties {
     '--page-secondary': theme.secondaryColor,
     '--page-background': theme.backgroundColor,
     '--page-text': theme.textColor,
-    '--page-font-heading': `"${theme.headingFont}", ui-sans-serif, system-ui, sans-serif`,
-    '--page-font-body': `"${theme.bodyFont}", ui-sans-serif, system-ui, sans-serif`,
+    // Resolved through the catalogue rather than quoted straight in: that is
+    // what points these at the self-hosted face the merchant picked instead of
+    // at a family name the visitor's device probably does not have installed.
+    '--page-font-heading': fontStack(theme.headingFont),
+    '--page-font-body': fontStack(theme.bodyFont),
     '--page-radius': RADIUS_VALUES[theme.borderRadius] ?? theme.borderRadius,
     '--page-space-unit': SPACE_UNIT_VALUES[theme.spacingScale] ?? '1',
     '--page-container-width': theme.containerWidth,

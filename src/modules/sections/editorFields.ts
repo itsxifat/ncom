@@ -18,6 +18,10 @@ export type FieldConfig =
   // carry Shopify's `color`/`range`/`number` setting types (see
   // lib/liquid/schema.ts). Built-in React sections are free to use them too.
   | { type: 'color'; name: string; label: string }
+  // Stores a family name from the catalogue in `lib/fonts.ts`, which is the
+  // only set of faces this app can serve — a font a section names but nothing
+  // loads renders as the visitor's default and looks like a bug.
+  | { type: 'font'; name: string; label: string }
   // Picks a real sellable variant from the store's catalogue and stores its id.
   // A section that takes orders has to reference actual inventory — a typed-in
   // product name cannot be sold, priced or decremented from stock.

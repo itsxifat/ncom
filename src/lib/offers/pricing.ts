@@ -99,10 +99,26 @@ export function maxTierQuantity(tiers: OfferTierChoice[]): number {
 }
 
 /**
+ * Exactly how many pieces a COLLECTION can be ordered in, ascending.
+ *
+ * The ladder is the whole answer: a quantity with no rung has no price, so it
+ * cannot be bought. Callers use this to *say* so — "choose 2, 3 or 6 items"
+ * beats a 2–6 range that silently refuses 4 and 5. Empty for the other kinds,
+ * which are bounded by a range rather than by a set.
+ */
+export function pricedQuantities(offer: PublicOffer): number[] {
+  if (offer.kind !== 'COLLECTION') return []
+  return normalizeTiers(offer.tiers)
+    .filter((tier) => tier.priceCents > 0)
+    .map((tier) => tier.quantity)
+}
+
+/**
  * The piece-count bounds a buyer must stay inside.
  *
- * A COLLECTION is bounded by its ladder — there is no price outside it — while
- * an ALACARTE offer is bounded only by whatever the merchant typed.
+ * A COLLECTION is bounded by its ladder — there is no price outside it, so the
+ * offer's own min/max cannot widen it and are not consulted — while an ALACARTE
+ * offer is bounded only by whatever the merchant typed.
  */
 export function quantityBounds(offer: PublicOffer): {
   min: number
@@ -249,6 +265,41 @@ export function fixedSelection(
   }
 
   return out
+}
+
+/**
+ * Whether what this offer costs depends on which variant the buyer picks.
+ *
+ * True when a headline price is a *starting* price rather than the price:
+ * a Large that costs more than a Small makes "৳900" a half-truth, and a buyer
+ * who reads it as the price and is charged ৳1,100 at the summary has been
+ * misled by the page. The callers use it to say "from ৳900" instead.
+ *
+ * A FIXED total covers whatever is in the set, and a COLLECTION is priced by
+ * its ladder, so in both the buyer's variant choice cannot move the total.
+ */
+export function priceVariesByVariant(offer: PublicOffer): boolean {
+  if (offer.kind === 'COLLECTION') return false
+  if (offer.pricing.mode === 'FIXED') return false
+
+  if (offer.kind === 'ALACARTE') {
+    // The pool is priced piece by piece, so any spread across it — between two
+    // products or between one product's sizes — moves the total.
+    const prices = offer.pool.flatMap((line) =>
+      line.variants
+        .filter((variant) => variant.available)
+        .map((variant) => variant.priceCents)
+    )
+    return new Set(prices).size > 1
+  }
+
+  return offer.items.some((line) => {
+    if (line.pinnedVariantId) return false
+    const prices = line.variants
+      .filter((variant) => variant.available)
+      .map((variant) => variant.priceCents)
+    return new Set(prices).size > 1
+  })
 }
 
 /**

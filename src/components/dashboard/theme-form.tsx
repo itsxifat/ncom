@@ -15,6 +15,7 @@ import type { PageTheme } from '@/modules/sections/types'
 import { ImagePicker } from '@/modules/builder/ImagePicker'
 import { Checkbox } from '@/components/ui/checkbox'
 import { FormSelect } from '@/components/ui/form-select'
+import { FontPicker } from '@/components/ui/font-picker'
 
 function ColorField({
   name,
@@ -97,22 +98,28 @@ export function ThemeForm({
           />
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field>
             <FieldLabel htmlFor="headingFont">Heading font</FieldLabel>
-            <Input
+            <FontPicker
               id="headingFont"
               name="headingFont"
               defaultValue={theme.headingFont}
             />
+            <FieldDescription>
+              Titles, section headings and buttons.
+            </FieldDescription>
           </Field>
           <Field>
             <FieldLabel htmlFor="bodyFont">Body font</FieldLabel>
-            <Input
+            <FontPicker
               id="bodyFont"
               name="bodyFont"
               defaultValue={theme.bodyFont}
             />
+            <FieldDescription>
+              Paragraphs, product details and prices.
+            </FieldDescription>
           </Field>
         </div>
 

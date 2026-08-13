@@ -66,39 +66,71 @@ async function refreshPublishedSnapshot(
   }
 }
 
+/**
+ * One offer as the builder's Offers tab edits it.
+ *
+ * Only ids of products and variants, not the products themselves: the panel is
+ * rendered with the whole catalogue already and resolves titles, photos and
+ * prices from it. That matters because this shape is also what a save returns
+ * to the browser — the panel replaces its list with the server's answer so a
+ * freshly created offer knows its own id — and shipping the full product graph
+ * back on every keystroke-sized edit would be paying for data already on screen.
+ */
+export interface OfferSummaryRow {
+  id: string
+  key: string
+  label: string
+  description: string | null
+  badge: string | null
+  kind: OfferKind
+  pricingMode: OfferPricingMode
+  priceCents: number
+  discountBps: number
+  compareAtCents: number
+  minQuantity: number
+  maxQuantity: number
+  isDefault: boolean
+  isActive: boolean
+  position: number
+  items: { productId: string; variantId: string | null; quantity: number }[]
+  tiers: { quantity: number; priceCents: number }[]
+}
+
 export async function listOffers(
   organizationId: string,
   storeId: string,
   pageId: string
-) {
+): Promise<OfferSummaryRow[]> {
   await requireOrgAccess(organizationId, 'VIEWER')
   await assertPageInOrg(organizationId, storeId, pageId)
 
   return prisma.offer.findMany({
     where: { pageId },
     orderBy: { position: 'asc' },
-    include: {
+    select: {
+      id: true,
+      key: true,
+      label: true,
+      description: true,
+      badge: true,
+      kind: true,
+      pricingMode: true,
+      priceCents: true,
+      discountBps: true,
+      compareAtCents: true,
+      minQuantity: true,
+      maxQuantity: true,
+      isDefault: true,
+      isActive: true,
+      position: true,
       items: {
         orderBy: { position: 'asc' },
-        include: {
-          product: {
-            select: {
-              id: true,
-              title: true,
-              images: {
-                orderBy: { position: 'asc' },
-                take: 1,
-                select: { media: { select: { url: true } } },
-              },
-              variants: {
-                orderBy: { position: 'asc' },
-                select: { id: true, title: true, priceCents: true },
-              },
-            },
-          },
-        },
+        select: { productId: true, variantId: true, quantity: true },
       },
-      tiers: { orderBy: { quantity: 'asc' } },
+      tiers: {
+        orderBy: { quantity: 'asc' },
+        select: { quantity: true, priceCents: true },
+      },
     },
   })
 }

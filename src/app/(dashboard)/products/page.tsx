@@ -3,6 +3,10 @@ import { Package, Plus } from 'lucide-react'
 import { getActiveOrganization } from '@/server/services/organizationService'
 import { listProducts } from '@/server/services/productService'
 import { getOrganizationSettings } from '@/server/services/organizationSettingsService'
+import {
+  descendantIds,
+  listCategoryOptions,
+} from '@/server/services/categoryService'
 import { EmptyState } from '@/components/app/empty-state'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -36,16 +40,30 @@ export default async function ProductsPage({
       ? (query.sort as ProductSort)
       : 'newest'
 
+  const categoryParam = typeof query.category === 'string' ? query.category : ''
+
   const { organization } = await getActiveOrganization()
-  const [settings, { items, total }] = await Promise.all([
+
+  // "Womenswear" on this filter means everything beneath it too, which is what
+  // a merchant means by it — the products filed directly against a department
+  // are usually the minority.
+  const categoryIds =
+    categoryParam && categoryParam !== 'none'
+      ? await descendantIds(organization.id, categoryParam)
+      : undefined
+
+  const [settings, { items, total }, categoryOptions] = await Promise.all([
     getOrganizationSettings(organization.id),
     listProducts(organization.id, {
       search,
       status,
       sort,
+      categoryIds,
+      uncategorized: categoryParam === 'none',
       take: PAGE_SIZE,
       skip: (page - 1) * PAGE_SIZE,
     }),
+    listCategoryOptions(organization.id),
   ])
 
   const currency = settings?.currencyCode ?? 'USD'
@@ -57,12 +75,13 @@ export default async function ProductsPage({
     const params = new URLSearchParams()
     if (search) params.set('q', search)
     if (status) params.set('status', status)
+    if (categoryParam) params.set('category', categoryParam)
     if (sort !== 'newest') params.set('sort', sort)
     params.set('page', String(next))
     return params.toString()
   }
 
-  if (total === 0 && !search && !status) {
+  if (total === 0 && !search && !status && !categoryParam) {
     return (
       <EmptyState
         icon={Package}
@@ -93,6 +112,19 @@ export default async function ProductsPage({
           <option value="DRAFT">Draft</option>
           <option value="ARCHIVED">Archived</option>
         </FormSelect>
+        {categoryOptions.length > 0 && (
+          <FormSelect name="category" defaultValue={categoryParam}>
+            <option value="">All categories</option>
+            {/* Finding the unfiled products is how a taxonomy actually gets
+                finished, so it is a filter rather than something to notice. */}
+            <option value="none">Not in a category</option>
+            {categoryOptions.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
+          </FormSelect>
+        )}
         <FormSelect name="sort" defaultValue={sort}>
           <option value="newest">Newest first</option>
           <option value="oldest">Oldest first</option>
@@ -125,6 +157,7 @@ export default async function ProductsPage({
           total={total}
           currencyCode={currency}
           basePath={base}
+          categories={categoryOptions}
         />
       )}
 
@@ -169,6 +202,7 @@ function toListRow(product: {
   title: string
   status: 'DRAFT' | 'ACTIVE' | 'ARCHIVED'
   images: { media: { url: string } }[]
+  category: { name: string } | null
   variants: {
     priceCents: number
     inventoryTracked: boolean
@@ -183,6 +217,7 @@ function toListRow(product: {
     title: product.title,
     status: product.status,
     imageUrl: product.images[0]?.media.url ?? null,
+    categoryName: product.category?.name ?? null,
     variantCount: product.variants.length,
     stock: tracked
       ? product.variants.reduce((sum, variant) => {

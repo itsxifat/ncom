@@ -244,7 +244,7 @@ export function extractSection(source: string): ExtractedSection {
  * Compiles schema settings into the Inspector's FieldConfig[].
  *
  * Settings the editor has no widget for degrade to the nearest one that can
- * still round-trip the value (a `font_picker` becomes a text input) rather
+ * still round-trip the value (a `link_list` becomes a text input) rather
  * than disappearing — a field the author cannot see is a value they cannot
  * fix.
  */
@@ -263,7 +263,6 @@ export function compileSettingsToFields(
     switch (setting.type) {
       case 'text':
       case 'url':
-      case 'font_picker':
       case 'product':
       case 'collection':
       case 'page':
@@ -290,6 +289,13 @@ export function compileSettingsToFields(
       case 'color':
       case 'color_background':
         fields.push({ type: 'color', name, label })
+        break
+
+      // Shopify stores a font handle (`assistant_n4`) here; this stores the
+      // family name from our own catalogue, since that is what the renderer
+      // resolves and what the platform can actually serve.
+      case 'font_picker':
+        fields.push({ type: 'font', name, label })
         break
 
       case 'number':

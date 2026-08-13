@@ -2,7 +2,9 @@ import 'server-only'
 import { prisma } from '@/server/db/client'
 import { priceCartById } from './pricingService'
 import { commitInventoryForOrder } from './inventoryService'
+import { emitOrderWebhook } from './orderService'
 import { verifyPayment } from './paymentService'
+import { scheduleCourierEvaluation } from './courierService'
 import type { PlaceOrderInput } from '@/lib/validation/cart'
 import type { Prisma } from '@/generated/prisma/client'
 import type { PaymentProvider } from '@/generated/prisma/enums'
@@ -190,7 +192,7 @@ export async function placeOrder(
     )
   }
 
-  return prisma.$transaction(async (tx) => {
+  const placed = await prisma.$transaction(async (tx) => {
     // Re-check inside the transaction: between the read above and here another
     // request could have completed this same cart.
     const fresh = await tx.cart.findUnique({
@@ -390,6 +392,25 @@ export async function placeOrder(
       currencyCode: order.currencyCode,
     }
   })
+
+  // After the commit, so a receiver that immediately reads stock sees the
+  // quantities this order already reserved rather than the pre-order numbers.
+  // Never awaited into the buyer's critical path beyond queueing — see
+  // emitWebhook, which returns as soon as the delivery rows are written.
+  await emitOrderWebhook(organizationId, placed.orderId, 'ORDER_CREATED')
+
+  // Screen the customer against their courier delivery history, and dispatch if
+  // the merchant's thresholds allow it.
+  //
+  // Queued, never awaited. The screen involves signing into a third party's
+  // portal and a courier's create-order call, and the buyer pressing "Place
+  // order" must not wait on either — nor lose a completed sale because one of
+  // them is having a bad afternoon. The order already exists and is already
+  // paid for or promised; everything the courier pipeline does to it afterwards
+  // is a state change the merchant can also make by hand.
+  scheduleCourierEvaluation(organizationId, placed.orderId)
+
+  return placed
 }
 
 type Tx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0]

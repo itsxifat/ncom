@@ -5,7 +5,7 @@ import type {
   PlanOrderStatus,
   SubscriptionInterval,
 } from '@/generated/prisma/enums'
-import { requireOrgAccess } from '@/server/auth/rbac'
+import { requireOrgAccess, requireHumanOrgAccess } from '@/server/auth/rbac'
 import { logAudit } from '@/server/services/auditService'
 import {
   evaluateCoupon,
@@ -115,7 +115,7 @@ function addonPriceFor(
  * in the coupon field.
  */
 export async function quoteCheckout(input: QuoteInput): Promise<CheckoutQuote> {
-  const { session } = await requireOrgAccess(input.organizationId, 'OWNER')
+  const { session } = await requireHumanOrgAccess(input.organizationId, 'OWNER')
 
   const plan = await prisma.plan.findFirst({
     where: { id: input.planId, isActive: true },
@@ -243,7 +243,7 @@ export interface CheckoutResult {
 export async function startCheckout(
   input: QuoteInput
 ): Promise<CheckoutResult> {
-  const { session } = await requireOrgAccess(input.organizationId, 'OWNER')
+  const { session } = await requireHumanOrgAccess(input.organizationId, 'OWNER')
 
   const quote = await quoteCheckout(input)
 
@@ -562,7 +562,7 @@ export async function cancelSubscription(
   organizationId: string,
   options: { immediate?: boolean } = {}
 ): Promise<void> {
-  const { session } = await requireOrgAccess(organizationId, 'OWNER')
+  const { session } = await requireHumanOrgAccess(organizationId, 'OWNER')
 
   const subscription = await prisma.subscription.findUnique({
     where: { organizationId },

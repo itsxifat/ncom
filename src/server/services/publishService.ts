@@ -1,6 +1,6 @@
 import 'server-only'
 import { prisma } from '@/server/db/client'
-import { requireOrgAccess } from '@/server/auth/rbac'
+import { requireOrgAccess, requireHumanOrgAccess } from '@/server/auth/rbac'
 import { redis } from '@/server/redis/client'
 import type { PageTheme } from '@/modules/sections/types'
 import { compilePageSections } from './sectionCompiler'
@@ -47,7 +47,7 @@ export async function publishPage(
   storeId: string,
   pageId: string
 ) {
-  const { session } = await requireOrgAccess(organizationId, 'EDITOR')
+  const { session } = await requireHumanOrgAccess(organizationId, 'EDITOR')
 
   const page = await prisma.page.findFirst({
     where: { id: pageId, storeId, store: { organizationId } },

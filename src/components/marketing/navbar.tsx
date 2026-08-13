@@ -7,10 +7,14 @@ import { Button } from '@/components/ui/button'
 import { BrandMark } from '@/components/app/brand-mark'
 import { cn } from '@/lib/utils'
 
+// Anchors point at sections of the home page, so they carry the leading `/`
+// to stay correct from /docs — a bare `#pricing` on another route scrolls
+// nowhere and leaves the visitor on a page with no way back.
 const NAV_LINKS = [
-  { href: '#features', label: 'Features' },
-  { href: '#sections', label: 'Sections' },
-  { href: '#pricing', label: 'Pricing' },
+  { href: '/#features', label: 'Features' },
+  { href: '/#sections', label: 'Sections' },
+  { href: '/#pricing', label: 'Pricing' },
+  { href: '/docs', label: 'Developers' },
 ]
 
 export function Navbar({ isSignedIn }: { isSignedIn: boolean }) {

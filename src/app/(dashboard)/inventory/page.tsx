@@ -1,123 +1,183 @@
 import Link from 'next/link'
 import { Boxes } from 'lucide-react'
 import { getActiveOrganization } from '@/server/services/organizationService'
-import { listInventory } from '@/server/services/inventoryService'
+import {
+  DEFAULT_LOW_STOCK_THRESHOLD,
+  getInventorySummary,
+  listInventory,
+  type InventorySort,
+  type InventoryStockFilter,
+} from '@/server/services/inventoryService'
 import { listLocations } from '@/server/services/shippingService'
 import { EmptyState } from '@/components/app/empty-state'
-import {
-  ListPanel,
-  ListPanelHeader,
-  ListRow,
-  ListRowActions,
-  ListRowText,
-} from '@/components/app/list-panel'
+import { StatCard } from '@/components/app/stat-card'
+import { InventoryFilters } from '@/components/store/inventory-filters'
+import { InventoryTable } from '@/components/store/inventory-table'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Badge } from '@/components/ui/badge'
-import { InventoryAdjust } from '@/components/store/inventory-adjust'
-import { Checkbox } from '@/components/ui/checkbox'
+
+/** Rows per page. Enough to scan, few enough to keep the aggregate query cheap. */
+const PAGE_SIZE = 50
+
+const STOCK_FILTERS: InventoryStockFilter[] = ['all', 'low', 'out', 'in']
+const SORTS: InventorySort[] = [
+  'product',
+  'available-asc',
+  'available-desc',
+  'updated',
+]
 
 export default async function InventoryPage({
-  params,
   searchParams,
 }: PageProps<'/inventory'>) {
   const query = await searchParams
 
   const search = typeof query.q === 'string' ? query.q : undefined
-  const lowStockOnly = query.low === '1'
+  const stock = pick(query.stock, STOCK_FILTERS, 'all')
+  const sort = pick(query.sort, SORTS, 'product')
+  const locationId = typeof query.location === 'string' ? query.location : ''
+  const page = Math.max(1, Number(query.page) || 1)
 
   const { organization } = await getActiveOrganization()
-  const [{ items }, locations] = await Promise.all([
-    listInventory(organization.id, { search, lowStockOnly }),
+  const [{ items, total }, locations, summary] = await Promise.all([
+    listInventory(organization.id, {
+      search,
+      stock,
+      sort,
+      locationId: locationId || undefined,
+      take: PAGE_SIZE,
+      skip: (page - 1) * PAGE_SIZE,
+    }),
     listLocations(organization.id),
+    getInventorySummary(organization.id),
   ])
 
-  const locationOptions = locations.map((location) => ({
-    id: location.id,
-    name: location.name,
-  }))
+  const filtered = Boolean(search) || stock !== 'all' || Boolean(locationId)
 
-  if (items.length === 0 && !search && !lowStockOnly) {
+  if (summary.tracked === 0 && !filtered) {
     return (
       <EmptyState
         icon={Boxes}
         title="Nothing tracked yet"
-        description="Variants with inventory tracking switched on appear here so you can receive and adjust stock."
+        description="Variants with inventory tracking switched on appear here so you can receive, count and adjust stock."
       />
     )
   }
 
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
+
   return (
     <div className="flex flex-col gap-6">
-      <form className="flex flex-wrap items-center gap-3">
-        <Input
-          name="q"
-          defaultValue={search ?? ''}
-          placeholder="Search product"
-          className="w-full sm:w-72"
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard label="Tracked variants" value={summary.tracked} />
+        <StatCard
+          label={`Low stock (≤ ${DEFAULT_LOW_STOCK_THRESHOLD})`}
+          value={summary.low}
         />
-        <label className="flex items-center gap-2 text-sm">
-          <Checkbox name="low" value="1" defaultChecked={lowStockOnly} />
-          Low stock only
-        </label>
-        <Button type="submit" variant="outline">
-          Filter
-        </Button>
-      </form>
+        <StatCard label="Out of stock" value={summary.out} />
+        <StatCard label="Committed to orders" value={summary.committed} />
+      </div>
+
+      <InventoryFilters
+        search={search ?? ''}
+        stock={stock}
+        sort={sort}
+        locationId={locationId}
+        locations={locations.map((location) => ({
+          id: location.id,
+          name: location.name,
+        }))}
+      />
 
       {items.length === 0 ? (
-        <EmptyState icon={Boxes} title="Nothing matches" />
+        <EmptyState
+          icon={Boxes}
+          title="Nothing matches"
+          description="No tracked variant matches these filters. Try clearing the search or switching the stock filter back to all."
+        />
       ) : (
-        <ListPanel>
-          <ListPanelHeader>
-            <p className="text-muted-foreground text-sm">
-              {items.length} tracked{' '}
-              {items.length === 1 ? 'variant' : 'variants'}
-            </p>
-          </ListPanelHeader>
+        <>
+          <InventoryTable
+            rows={items}
+            locations={locations.map((location) => ({
+              id: location.id,
+              name: location.name,
+            }))}
+            lowStockThreshold={DEFAULT_LOW_STOCK_THRESHOLD}
+          />
 
-          {items.map((variant) => (
-            <ListRow key={variant.id}>
-              <ListRowText
-                title={
-                  <Link
-                    href={`/products/${variant.product.id}`}
-                    className="hover:underline"
-                  >
-                    {variant.product.title}
-                  </Link>
-                }
-                meta={
-                  <>
-                    {variant.title !== 'Default Title' && `${variant.title} · `}
-                    {variant.sku ? `SKU ${variant.sku} · ` : ''}
-                    {variant.totalAvailable} available
-                    {variant.totalCommitted > 0 &&
-                      ` · ${variant.totalCommitted} committed to orders`}
-                  </>
-                }
-                badges={
-                  variant.totalAvailable <= 0 ? (
-                    <Badge variant="destructive">
-                      {variant.inventoryPolicy === 'CONTINUE'
-                        ? 'Backorder'
-                        : 'Out of stock'}
-                    </Badge>
-                  ) : variant.totalAvailable <= 5 ? (
-                    <Badge variant="secondary">Low</Badge>
-                  ) : undefined
-                }
-              />
-              <ListRowActions>
-                <InventoryAdjust
-                  variantId={variant.id}
-                  locations={locationOptions}
-                />
-              </ListRowActions>
-            </ListRow>
-          ))}
-        </ListPanel>
+          {/* The count reflects everything the filters match, not just what is
+              on screen — the old page reported the page size as the total, so a
+              catalogue of 900 variants read as "50 tracked variants". */}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-muted-foreground text-sm">
+              Showing {(page - 1) * PAGE_SIZE + 1}–
+              {(page - 1) * PAGE_SIZE + items.length} of {total}
+            </p>
+
+            {pageCount > 1 && (
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page <= 1}
+                  nativeButton={false}
+                  render={
+                    <Link
+                      href={pageHref(query, page - 1)}
+                      aria-disabled={page <= 1}
+                    />
+                  }
+                >
+                  Previous
+                </Button>
+                <span className="text-muted-foreground text-sm">
+                  Page {page} of {pageCount}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page >= pageCount}
+                  nativeButton={false}
+                  render={
+                    <Link
+                      href={pageHref(query, page + 1)}
+                      aria-disabled={page >= pageCount}
+                    />
+                  }
+                >
+                  Next
+                </Button>
+              </div>
+            )}
+          </div>
+        </>
       )}
     </div>
   )
+}
+
+/** Keeps the active filters when paging, so page 2 is the same query. */
+function pageHref(
+  query: Record<string, string | string[] | undefined>,
+  page: number
+) {
+  const params = new URLSearchParams()
+  for (const [key, value] of Object.entries(query)) {
+    if (key === 'page') continue
+    if (typeof value === 'string' && value !== '') params.set(key, value)
+  }
+  if (page > 1) params.set('page', String(page))
+
+  const search = params.toString()
+  return search ? `/inventory?${search}` : '/inventory'
+}
+
+function pick<T extends string>(
+  value: string | string[] | undefined,
+  allowed: T[],
+  fallback: T
+): T {
+  return typeof value === 'string' && (allowed as string[]).includes(value)
+    ? (value as T)
+    : fallback
 }

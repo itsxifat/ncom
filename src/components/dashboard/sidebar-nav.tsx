@@ -17,6 +17,11 @@ import {
   Tag,
   Image as ImageIcon,
   CreditCard,
+  FolderTree,
+  KeyRound,
+  Webhook,
+  Truck,
+  BarChart3,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -38,7 +43,9 @@ const NAV_GROUPS: Array<{ label: string | null; items: NavItem[] }> = [
     label: 'Sell',
     items: [
       { href: '/orders', label: 'Orders', icon: ShoppingCart },
+      { href: '/analytics', label: 'Analytics', icon: BarChart3 },
       { href: '/products', label: 'Products', icon: Package },
+      { href: '/categories', label: 'Categories', icon: FolderTree },
       { href: '/collections', label: 'Collections', icon: Layers },
       { href: '/inventory', label: 'Inventory', icon: Warehouse },
       { href: '/customers', label: 'Customers', icon: UserRound },
@@ -54,9 +61,17 @@ const NAV_GROUPS: Array<{ label: string | null; items: NavItem[] }> = [
     ],
   },
   {
+    label: 'Developers',
+    items: [
+      { href: '/settings/api-keys', label: 'API keys', icon: KeyRound },
+      { href: '/settings/webhooks', label: 'Webhooks', icon: Webhook },
+    ],
+  },
+  {
     label: 'Setup',
     items: [
       { href: '/settings/payments', label: 'Payments', icon: Settings },
+      { href: '/settings/courier', label: 'Courier & fraud', icon: Truck },
       { href: '/settings/shipping', label: 'Shipping', icon: Settings },
       { href: '/settings/taxes', label: 'Taxes', icon: Settings },
       { href: '/settings/locations', label: 'Locations', icon: Settings },

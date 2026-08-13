@@ -2,7 +2,7 @@ import 'server-only'
 import sharp from 'sharp'
 import type { Prisma } from '@/generated/prisma/client'
 import { prisma } from '@/server/db/client'
-import { requireOrgAccess } from '@/server/auth/rbac'
+import { requireOrgAccess, requireHumanOrgAccess } from '@/server/auth/rbac'
 import { requireQuota } from '@/server/services/entitlementService'
 import { uploadToCdn, deleteFromCdn } from '@/server/storage'
 import { slugify } from '@/lib/slug'
@@ -48,7 +48,7 @@ export async function uploadMediaAsset(
   fileName: string,
   input: UploadMetadataInput
 ) {
-  const { session } = await requireOrgAccess(organizationId, 'EDITOR')
+  const { session } = await requireHumanOrgAccess(organizationId, 'EDITOR')
 
   const optimized = await optimize(data)
 

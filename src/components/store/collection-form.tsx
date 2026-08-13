@@ -19,7 +19,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
 import { SettingsSection } from '@/components/app/settings-section'
 import { FormSelect } from '@/components/store/form-controls'
-import { Checkbox } from '@/components/ui/checkbox'
+import { ProductMultiPicker } from '@/components/store/product-picker'
+import type { PickerProduct } from '@/server/services/productService'
 
 /**
  * Rule vocabulary, mirroring lib/validation/collection.ts.
@@ -76,9 +77,11 @@ export interface CollectionFormInitial {
 export function CollectionForm({
   initial,
   products,
+  currencyCode,
 }: {
   initial: CollectionFormInitial
-  products: { id: string; title: string }[]
+  products: PickerProduct[]
+  currencyCode: string
 }) {
   const boundAction = saveCollectionAction.bind(null, initial.id ?? null)
   const [state, action, pending] = useActionState<StoreActionState, FormData>(
@@ -307,36 +310,13 @@ export function CollectionForm({
           ) : (
             <Field>
               <FieldLabel>Products in this collection</FieldLabel>
-              <div className="max-h-80 overflow-y-auto rounded-lg border p-2">
-                {products.length === 0 ? (
-                  <p className="text-muted-foreground p-2 text-sm">
-                    No products yet.
-                  </p>
-                ) : (
-                  products.map((product) => (
-                    <label
-                      key={product.id}
-                      className="hover:bg-muted flex items-center gap-2 rounded px-2 py-1.5 text-sm"
-                    >
-                      <Checkbox
-                        checked={productIds.includes(product.id)}
-                        onCheckedChange={(checked) =>
-                          setProductIds((current) =>
-                            checked
-                              ? [...current, product.id]
-                              : current.filter((id) => id !== product.id)
-                          )
-                        }
-                      />
-                      {product.title}
-                    </label>
-                  ))
-                )}
-              </div>
-              <FieldDescription>
-                {productIds.length} selected. Order follows the sequence you
-                check them in.
-              </FieldDescription>
+              <ProductMultiPicker
+                initialProducts={products}
+                currencyCode={currencyCode}
+                selectedIds={productIds}
+                onChange={setProductIds}
+                emptyLabel="No products yet — add one under Products first."
+              />
             </Field>
           )}
 

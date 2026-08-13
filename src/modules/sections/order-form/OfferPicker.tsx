@@ -1,6 +1,7 @@
 'use client'
 
 import type { PublicOffer } from '@/lib/offers/types'
+import { priceVariesByVariant } from '@/lib/offers/pricing'
 
 /**
  * How the buyer chooses between the page's offers.
@@ -24,12 +25,22 @@ export function OfferPicker({
   onSelect,
   style,
   money,
+  live = null,
 }: {
   offers: PublicOffer[]
   selectedKey: string
   onSelect: (key: string) => void
   style: 'cards' | 'rows' | 'tiles' | 'radio'
   money: (cents: number) => string
+  /**
+   * The chosen offer priced against what the buyer has actually picked.
+   *
+   * A headline price is computed before anyone has chosen a size, so on a page
+   * where Large costs more than Small the card would go on advertising the
+   * Small price while the summary below charged for the Large. Handing the live
+   * quote back up keeps the two numbers the same number.
+   */
+  live?: { key: string; priceCents: number; compareAtCents: number } | null
 }) {
   const layout =
     style === 'rows'
@@ -44,13 +55,15 @@ export function OfferPicker({
     <div className={`grid gap-2.5 ${layout}`}>
       {offers.map((offer) => {
         const selected = offer.key === selectedKey
+        const quoted = live && live.key === offer.key ? live : null
+        const price = quoted ? quoted.priceCents : offer.headlinePriceCents
+        const compareAt = quoted ? quoted.compareAtCents : offer.compareAtCents
+        // "from" only until the buyer's own choices have priced it exactly.
+        const isFrom = !quoted && priceVariesByVariant(offer)
         // Only a genuine saving is advertised. A compare-at that is not above
         // the price is a fake discount, and rendering it as one teaches buyers
         // to distrust every price on the page.
-        const saving = Math.max(
-          0,
-          offer.compareAtCents - offer.headlinePriceCents
-        )
+        const saving = Math.max(0, compareAt - price)
 
         return (
           <button
@@ -116,12 +129,17 @@ export function OfferPicker({
               }
             >
               <span className="block text-xl font-extrabold tabular-nums">
-                {money(offer.headlinePriceCents)}
+                {isFrom && (
+                  <span className="text-xs font-semibold text-[color:var(--page-muted,#64748b)]">
+                    from{' '}
+                  </span>
+                )}
+                {money(price)}
               </span>
               {saving > 0 && (
                 <span className="block text-xs">
                   <s className="text-[color:var(--page-muted,#64748b)]">
-                    {money(offer.compareAtCents)}
+                    {money(compareAt)}
                   </s>{' '}
                   <span className="font-semibold text-emerald-600">
                     save {money(saving)}

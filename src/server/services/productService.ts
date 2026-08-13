@@ -2,6 +2,7 @@ import 'server-only'
 import { prisma } from '@/server/db/client'
 import { requireOrgAccess } from '@/server/auth/rbac'
 import { slugify, withRandomSuffix } from '@/lib/slug'
+import { emitWebhook } from '@/server/services/webhookService'
 import type {
   CreateProductInput,
   ProductImageInput,
@@ -79,6 +80,9 @@ const PRODUCT_INCLUDE = {
       inventoryLevels: { select: { available: true, committed: true } },
     },
   },
+  category: {
+    select: { id: true, name: true, handle: true, level: true, parentId: true },
+  },
 } as const
 
 /**
@@ -103,6 +107,14 @@ export async function listProducts(
   options: {
     search?: string
     status?: 'DRAFT' | 'ACTIVE' | 'ARCHIVED'
+    /**
+     * Usually a category and its descendants — see categoryService.descendantIds.
+     * A department page means "everything under here", not "the handful filed
+     * directly against the department itself".
+     */
+    categoryIds?: string[]
+    /** Products with no category at all, for finding the ones nobody filed. */
+    uncategorized?: boolean
     sort?: ProductSort
     take?: number
     skip?: number
@@ -110,28 +122,53 @@ export async function listProducts(
 ) {
   await requireOrgAccess(organizationId, 'VIEWER')
 
+  const search = options.search?.trim()
+
   const where = {
     organizationId,
     ...(options.status ? { status: options.status } : {}),
-    ...(options.search
+    ...(options.uncategorized
+      ? { categoryId: null }
+      : options.categoryIds && options.categoryIds.length > 0
+        ? { categoryId: { in: options.categoryIds } }
+        : {}),
+    ...(search
       ? {
           OR: [
             {
-              title: { contains: options.search, mode: 'insensitive' as const },
+              title: { contains: search, mode: 'insensitive' as const },
             },
             {
               handle: {
-                contains: options.search,
+                contains: search,
                 mode: 'insensitive' as const,
               },
             },
+            { vendor: { contains: search, mode: 'insensitive' as const } },
+            {
+              productType: { contains: search, mode: 'insensitive' as const },
+            },
+            // Tags are an exact-match array contains rather than a substring —
+            // "sale" should not match "wholesale", and a tag is a chosen label.
+            { tags: { has: search.toLowerCase() } },
             {
               variants: {
                 some: {
-                  sku: {
-                    contains: options.search,
-                    mode: 'insensitive' as const,
-                  },
+                  OR: [
+                    {
+                      sku: {
+                        contains: search,
+                        mode: 'insensitive' as const,
+                      },
+                    },
+                    // Barcodes are what a scanner types into the search box.
+                    {
+                      barcode: {
+                        contains: search,
+                        mode: 'insensitive' as const,
+                      },
+                    },
+                  ],
                 },
               },
             },
@@ -178,6 +215,10 @@ export async function createProduct(
 
   assertVariantOptionsAreUnique(input.variants)
 
+  if (input.categoryId) {
+    await assertCategoryBelongsToOrg(organizationId, input.categoryId)
+  }
+
   const created = await prisma.product.create({
     data: {
       organizationId,
@@ -188,6 +229,9 @@ export async function createProduct(
       productType: input.productType ?? null,
       vendor: input.vendor ?? null,
       tags: input.tags,
+      categoryId: input.categoryId ?? null,
+      externalId: input.externalId ?? null,
+      externalSource: input.externalSource ?? null,
       seoTitle: input.seoTitle ?? null,
       seoDescription: input.seoDescription ?? null,
       // An ACTIVE product needs publishedAt for the storefront to consider it
@@ -237,10 +281,32 @@ export async function createProduct(
 
   await linkVariantImages(prisma, created.id, input.variants)
 
-  return prisma.product.findUniqueOrThrow({
+  const product = await prisma.product.findUniqueOrThrow({
     where: { id: created.id },
     include: PRODUCT_INCLUDE,
   })
+
+  await emitWebhook(organizationId, 'PRODUCT_CREATED', productPayload(product))
+
+  return product
+}
+
+/**
+ * Refuses a category id belonging to someone else.
+ *
+ * Prisma would accept the write — `categoryId` is just a column — and the row
+ * would then be filed under a category the organisation cannot see, invisible
+ * in its own tree and quietly leaking a foreign id through the API.
+ */
+async function assertCategoryBelongsToOrg(
+  organizationId: string,
+  categoryId: string
+) {
+  const category = await prisma.category.findFirst({
+    where: { id: categoryId, organizationId },
+    select: { id: true },
+  })
+  if (!category) throw new Error('Category not found')
 }
 
 /**
@@ -337,8 +403,11 @@ export async function updateProduct(
     : undefined
 
   if (input.variants) assertVariantOptionsAreUnique(input.variants)
+  if (input.categoryId) {
+    await assertCategoryBelongsToOrg(organizationId, input.categoryId)
+  }
 
-  return prisma.$transaction(async (tx) => {
+  const updated = await prisma.$transaction(async (tx) => {
     if (input.options) {
       // Options are replaced wholesale rather than diffed: they are a small
       // fixed set (at most 3) and a positional diff is more code than it is
@@ -377,6 +446,11 @@ export async function updateProduct(
         productType: input.productType,
         vendor: input.vendor,
         tags: input.tags,
+        // Explicit null is "remove it from its category", which is different
+        // from `undefined` meaning "the form did not mention categories".
+        categoryId: input.categoryId,
+        externalId: input.externalId,
+        externalSource: input.externalSource,
         seoTitle: input.seoTitle,
         seoDescription: input.seoDescription,
         publishedAt:
@@ -389,6 +463,10 @@ export async function updateProduct(
       include: PRODUCT_INCLUDE,
     })
   })
+
+  await emitWebhook(organizationId, 'PRODUCT_UPDATED', productPayload(updated))
+
+  return updated
 }
 
 /**
@@ -545,10 +623,18 @@ export async function archiveProduct(
   })
   if (!product) throw new Error('Product not found')
 
-  return prisma.product.update({
+  const archived = await prisma.product.update({
     where: { id: productId },
     data: { status: 'ARCHIVED', publishedAt: null },
+    include: PRODUCT_INCLUDE,
   })
+
+  // Archiving is an update, not a deletion: the product still exists, it has
+  // simply left the storefront, and a receiver that treats it as deleted would
+  // lose the row it needs when the merchant un-archives it.
+  await emitWebhook(organizationId, 'PRODUCT_UPDATED', productPayload(archived))
+
+  return archived
 }
 
 export async function deleteProduct(organizationId: string, productId: string) {
@@ -556,7 +642,7 @@ export async function deleteProduct(organizationId: string, productId: string) {
 
   const product = await prisma.product.findFirst({
     where: { id: productId, organizationId },
-    select: { id: true },
+    select: { id: true, title: true, handle: true, externalId: true },
   })
   if (!product) throw new Error('Product not found')
 
@@ -568,6 +654,141 @@ export async function deleteProduct(organizationId: string, productId: string) {
   }
 
   await prisma.product.delete({ where: { id: productId } })
+
+  await emitWebhook(organizationId, 'PRODUCT_DELETED', {
+    id: product.id,
+    title: product.title,
+    handle: product.handle,
+    externalId: product.externalId,
+  })
+}
+
+/**
+ * The public shape of a product: what the REST API returns and what a webhook
+ * carries.
+ *
+ * One function for both so an integration that reads `GET /products/{id}` and
+ * one that listens for `product.updated` are looking at the same object. Two
+ * hand-written shapes drift, and the drift shows up as a receiver that works
+ * until the day it is fed a webhook instead of a poll.
+ */
+export function productPayload(product: {
+  id: string
+  title: string
+  handle: string
+  description: string | null
+  status: string
+  productType: string | null
+  vendor: string | null
+  tags: string[]
+  externalId?: string | null
+  seoTitle: string | null
+  seoDescription: string | null
+  publishedAt: Date | null
+  createdAt: Date
+  updatedAt: Date
+  category?: {
+    id: string
+    name: string
+    handle: string
+    level: number
+    parentId: string | null
+  } | null
+  options?: { name: string; position: number; values: string[] }[]
+  images?: {
+    id: string
+    altText: string | null
+    position: number
+    media: { url: string }
+  }[]
+  variants?: {
+    id: string
+    title: string
+    sku: string | null
+    barcode: string | null
+    position: number
+    option1: string | null
+    option2: string | null
+    option3: string | null
+    priceCents: number
+    compareAtPriceCents: number | null
+    inventoryTracked: boolean
+    inventoryPolicy: string
+    requiresShipping: boolean
+    weightGrams: number
+    inventoryLevels?: { available: number; committed: number }[]
+  }[]
+}) {
+  return {
+    id: product.id,
+    title: product.title,
+    handle: product.handle,
+    description: product.description,
+    status: product.status.toLowerCase(),
+    productType: product.productType,
+    vendor: product.vendor,
+    tags: product.tags,
+    externalId: product.externalId ?? null,
+    category: product.category
+      ? {
+          id: product.category.id,
+          name: product.category.name,
+          handle: product.category.handle,
+          level: product.category.level,
+          parentId: product.category.parentId,
+        }
+      : null,
+    seo: {
+      title: product.seoTitle,
+      description: product.seoDescription,
+    },
+    options:
+      product.options?.map((option) => ({
+        name: option.name,
+        position: option.position,
+        values: option.values,
+      })) ?? [],
+    images:
+      product.images?.map((image) => ({
+        id: image.id,
+        url: image.media.url,
+        altText: image.altText,
+        position: image.position,
+      })) ?? [],
+    variants:
+      product.variants?.map((variant) => ({
+        id: variant.id,
+        title: variant.title,
+        sku: variant.sku,
+        barcode: variant.barcode,
+        position: variant.position,
+        options: [variant.option1, variant.option2, variant.option3].filter(
+          (value): value is string => typeof value === 'string'
+        ),
+        priceCents: variant.priceCents,
+        compareAtPriceCents: variant.compareAtPriceCents,
+        inventoryTracked: variant.inventoryTracked,
+        inventoryPolicy: variant.inventoryPolicy.toLowerCase(),
+        requiresShipping: variant.requiresShipping,
+        weightGrams: variant.weightGrams,
+        // Summed across locations: an integration syncing stock wants one
+        // sellable number, and per-location detail is on the inventory endpoint
+        // for the few that need it.
+        available:
+          variant.inventoryLevels?.reduce(
+            (sum, level) => sum + level.available,
+            0
+          ) ?? 0,
+        committed:
+          variant.inventoryLevels?.reduce(
+            (sum, level) => sum + level.committed,
+            0
+          ) ?? 0,
+      })) ?? [],
+    publishedAt: product.publishedAt?.toISOString() ?? null,
+    createdAt: product.createdAt.toISOString(),
+    updatedAt: product.updatedAt.toISOString(),
+  }
 }
 
 /**
@@ -615,6 +836,158 @@ export async function listSellableVariants(organizationId: string) {
       currencyCode,
     }))
   )
+}
+
+/**
+ * The catalogue as every product picker needs it.
+ *
+ * There is one of these rather than one shape per caller because "choose a
+ * product" appears in the collection editor, the offers panel, the page
+ * builder's inspector and the bulk-file bar, and each had grown its own
+ * query returning a different subset — so the same list showed a price in one
+ * place, a bare title in another, and no stock anywhere. A merchant choosing
+ * between two similar products needs the photo, the price and whether it is in
+ * stock in all four.
+ *
+ * Drafts are included on purpose: building the page before publishing the
+ * product is the normal order of work. Archived ones are not — they are not for
+ * sale, and offering them is offering a mistake.
+ */
+export interface PickerProduct {
+  id: string
+  title: string
+  handle: string
+  status: 'DRAFT' | 'ACTIVE' | 'ARCHIVED'
+  imageUrl: string | null
+  categoryName: string | null
+  minPriceCents: number
+  maxPriceCents: number
+  available: number
+  /** False when no variant tracks stock, so the row says "not tracked", not "0". */
+  tracksInventory: boolean
+  variants: {
+    id: string
+    title: string
+    sku: string | null
+    priceCents: number
+    available: number
+    tracksInventory: boolean
+  }[]
+}
+
+export async function listPickerProducts(
+  organizationId: string,
+  options: { search?: string; take?: number; includeArchived?: boolean } = {}
+): Promise<{ products: PickerProduct[]; currencyCode: string; total: number }> {
+  await requireOrgAccess(organizationId, 'VIEWER')
+
+  const search = options.search?.trim()
+  const take = Math.min(options.take ?? 60, 200)
+
+  const where = {
+    organizationId,
+    ...(options.includeArchived
+      ? {}
+      : { status: { not: 'ARCHIVED' as const } }),
+    ...(search
+      ? {
+          OR: [
+            { title: { contains: search, mode: 'insensitive' as const } },
+            { handle: { contains: search, mode: 'insensitive' as const } },
+            { vendor: { contains: search, mode: 'insensitive' as const } },
+            {
+              variants: {
+                some: {
+                  OR: [
+                    { sku: { contains: search, mode: 'insensitive' as const } },
+                    {
+                      barcode: {
+                        contains: search,
+                        mode: 'insensitive' as const,
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          ],
+        }
+      : {}),
+  }
+
+  const [settings, products, total] = await Promise.all([
+    prisma.organizationSettings.findUnique({
+      where: { organizationId },
+      select: { currencyCode: true },
+    }),
+    prisma.product.findMany({
+      where,
+      orderBy: { updatedAt: 'desc' },
+      take,
+      select: {
+        id: true,
+        title: true,
+        handle: true,
+        status: true,
+        category: { select: { name: true } },
+        images: {
+          orderBy: { position: 'asc' },
+          take: 1,
+          select: { media: { select: { url: true } } },
+        },
+        variants: {
+          orderBy: { position: 'asc' },
+          select: {
+            id: true,
+            title: true,
+            sku: true,
+            priceCents: true,
+            inventoryTracked: true,
+            inventoryLevels: { select: { available: true } },
+          },
+        },
+      },
+    }),
+    prisma.product.count({ where }),
+  ])
+
+  return {
+    currencyCode: settings?.currencyCode ?? 'USD',
+    total,
+    products: products.map((product) => {
+      const variants = product.variants.map((variant) => ({
+        id: variant.id,
+        title: variant.title,
+        sku: variant.sku,
+        priceCents: variant.priceCents,
+        tracksInventory: variant.inventoryTracked,
+        available: variant.inventoryTracked
+          ? variant.inventoryLevels.reduce(
+              (sum, level) => sum + level.available,
+              0
+            )
+          : 0,
+      }))
+
+      const prices = variants.map((variant) => variant.priceCents)
+
+      return {
+        id: product.id,
+        title: product.title,
+        handle: product.handle,
+        status: product.status,
+        imageUrl: product.images[0]?.media.url ?? null,
+        categoryName: product.category?.name ?? null,
+        minPriceCents: prices.length > 0 ? Math.min(...prices) : 0,
+        maxPriceCents: prices.length > 0 ? Math.max(...prices) : 0,
+        tracksInventory: variants.some((variant) => variant.tracksInventory),
+        available: variants
+          .filter((variant) => variant.tracksInventory)
+          .reduce((sum, variant) => sum + variant.available, 0),
+        variants,
+      }
+    }),
+  }
 }
 
 /**
@@ -669,6 +1042,40 @@ export async function listOfferProducts(organizationId: string): Promise<{
       variants: product.variants,
     })),
   }
+}
+
+/**
+ * Creates or updates a product keyed on the merchant's own id.
+ *
+ * This is what makes importing an existing catalogue safe to run more than
+ * once. An importer that only creates turns three interrupted runs into three
+ * copies of every product; one that matches on title breaks the moment two
+ * products are called "Classic Tee" or someone fixes a typo. Matching on
+ * `externalId` — the id the product already has in the system it came from —
+ * is the only key that survives both.
+ *
+ * Products that exist here but not upstream are left alone. A partial import
+ * (one page of a paginated feed, a single-product retry) must not read as
+ * "everything else was deleted".
+ */
+export async function upsertProductByExternalId(
+  organizationId: string,
+  input: CreateProductInput & { externalId: string }
+) {
+  await requireOrgAccess(organizationId, 'EDITOR')
+
+  const existing = await prisma.product.findFirst({
+    where: { organizationId, externalId: input.externalId },
+    select: { id: true },
+  })
+
+  if (!existing) {
+    const created = await createProduct(organizationId, input)
+    return { product: created, created: true }
+  }
+
+  const updated = await updateProduct(organizationId, existing.id, input)
+  return { product: updated, created: false }
 }
 
 /**

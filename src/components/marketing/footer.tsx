@@ -9,10 +9,19 @@ const FOOTER_LINKS: {
   {
     title: 'Product',
     links: [
-      { label: 'Features', href: '#features' },
-      { label: 'Sections', href: '#sections' },
-      { label: 'Pricing', href: '#pricing' },
+      { label: 'Features', href: '/#features' },
+      { label: 'Sections', href: '/#sections' },
+      { label: 'Pricing', href: '/#pricing' },
       { label: 'Templates', href: '/templates' },
+    ],
+  },
+  {
+    title: 'Developers',
+    links: [
+      { label: 'API documentation', href: '/docs' },
+      { label: 'Import your catalogue', href: '/docs#import' },
+      { label: 'Webhooks', href: '/docs#webhooks' },
+      { label: 'Stock sync', href: '/docs#stock-sync' },
     ],
   },
   {
@@ -38,7 +47,7 @@ export function Footer() {
   return (
     <footer className="border-border/60 bg-ink border-t text-white">
       <div className="mx-auto max-w-6xl px-6 py-16 sm:px-10">
-        <div className="grid grid-cols-2 gap-10 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-10 sm:grid-cols-3 lg:grid-cols-5">
           <div className="col-span-2 sm:col-span-1">
             <Link href="/" aria-label="NCOM home">
               <BrandMark tone="onDark" size="lg" />

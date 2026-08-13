@@ -6,6 +6,7 @@ import { BuilderShell } from '@/modules/builder/BuilderShell'
 import { listBuilderLiquidSections } from '@/server/services/liquidService'
 import {
   listOfferProducts,
+  listPickerProducts,
   listSellableVariants,
 } from '@/server/services/productService'
 import {
@@ -15,6 +16,7 @@ import {
 import { toOfferDrafts, toCheckoutDraft } from '@/modules/builder/offer-drafts'
 import {
   deleteOfferAction,
+  reorderOffersAction,
   saveCheckoutAction,
   saveOfferAction,
 } from './offer-actions'
@@ -72,10 +74,11 @@ export default async function PageEditPage({
   }))
 
   // The Offers tab: what this page sells, and how it charges for delivery.
-  const [catalogue, offerRows, checkout] = await Promise.all([
+  const [catalogue, offerRows, checkout, picker] = await Promise.all([
     listOfferProducts(organization.id),
     listOffers(organization.id, storeId, pageId),
     getPageCheckout(organization.id, storeId, pageId),
+    listPickerProducts(organization.id),
   ])
 
   return (
@@ -88,15 +91,21 @@ export default async function PageEditPage({
       componentDefinitionIds={componentDefinitionIds}
       liquidSections={liquidSections}
       products={products}
+      catalog={{
+        products: picker.products,
+        currencyCode: picker.currencyCode,
+      }}
       offers={{
         storeId,
         pageId,
         products: catalogue.products,
         currencyCode: catalogue.currencyCode,
+        pickerProducts: picker.products,
         initialOffers: toOfferDrafts(offerRows, catalogue.currencyCode),
         initialCheckout: toCheckoutDraft(checkout, catalogue.currencyCode),
         saveOffer: saveOfferAction,
         deleteOffer: deleteOfferAction,
+        reorderOffers: reorderOffersAction,
         saveCheckout: saveCheckoutAction,
       }}
       renderSection={renderSectionPreviewAction.bind(null, storeId, pageId)}

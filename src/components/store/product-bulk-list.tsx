@@ -26,6 +26,8 @@ import { ProductStatusBadge } from '@/components/store/status-badges'
 import { Money } from '@/components/store/form-controls'
 import { formatMoney } from '@/lib/money'
 import { Checkbox } from '@/components/ui/checkbox'
+import { FormSelect } from '@/components/ui/form-select'
+import { assignProductsToCategoryAction } from '@/app/(dashboard)/category-actions'
 
 /**
  * The catalogue list, with selection and bulk actions.
@@ -46,6 +48,7 @@ export interface ProductListRow {
   title: string
   status: 'DRAFT' | 'ACTIVE' | 'ARCHIVED'
   imageUrl: string | null
+  categoryName: string | null
   variantCount: number
   /** Null when nothing on the product tracks stock. */
   stock: number | null
@@ -58,11 +61,14 @@ export function ProductBulkList({
   total,
   currencyCode,
   basePath,
+  categories = [],
 }: {
   rows: ProductListRow[]
   total: number
   currencyCode: string
   basePath: string
+  /** The tree, flattened and indented, for the bulk filing control. */
+  categories?: { id: string; label: string }[]
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [message, setMessage] = useState<{
@@ -163,6 +169,36 @@ export function ProductBulkList({
               >
                 Archive
               </Button>
+
+              {/* Filing a season's worth of products one editor page at a time
+                  is the single most tedious thing about setting up a catalogue,
+                  so it is a bulk action rather than only a per-product field. */}
+              {categories.length > 0 && (
+                <FormSelect
+                  value=""
+                  aria-label="File selected products into a category"
+                  className="h-9 w-48 text-xs"
+                  placeholder="File into category…"
+                  onChange={(event) => {
+                    const value = event.target.value
+                    if (!value) return
+                    run(() =>
+                      assignProductsToCategoryAction(
+                        ids,
+                        value === 'none' ? null : value
+                      )
+                    )
+                  }}
+                >
+                  <option value="none">Remove from category</option>
+                  {categories.map((category) => (
+                    <option key={category.id} value={category.id}>
+                      {category.label}
+                    </option>
+                  ))}
+                </FormSelect>
+              )}
+
               <Button
                 type="button"
                 size="sm"
@@ -246,6 +282,9 @@ export function ProductBulkList({
                   {row.variantCount}{' '}
                   {row.variantCount === 1 ? 'variant' : 'variants'}
                   {row.stock !== null && ` · ${row.stock} in stock`}
+                  {row.categoryName
+                    ? ` · ${row.categoryName}`
+                    : ' · no category'}
                   {row.imageUrl === null && ' · no photo'}
                 </>
               }

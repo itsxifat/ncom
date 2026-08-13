@@ -1,7 +1,11 @@
 import 'server-only'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { prisma } from '@/server/db/client'
-import { requireAuth, requireOrgAccess } from '@/server/auth/rbac'
+import {
+  requireAuth,
+  requireOrgAccess,
+  requireHumanOrgAccess,
+} from '@/server/auth/rbac'
 import { requireQuota } from '@/server/services/entitlementService'
 import type { OrgRole } from '@/generated/prisma/enums'
 
@@ -201,7 +205,7 @@ export async function updateMemberRole(
   userId: string,
   role: OrgRole
 ) {
-  const { session, role: actorRole } = await requireOrgAccess(
+  const { session, role: actorRole } = await requireHumanOrgAccess(
     organizationId,
     'ADMIN'
   )
@@ -235,7 +239,7 @@ export async function updateMemberRole(
 }
 
 export async function removeMember(organizationId: string, userId: string) {
-  const { session, role: actorRole } = await requireOrgAccess(
+  const { session, role: actorRole } = await requireHumanOrgAccess(
     organizationId,
     'ADMIN'
   )

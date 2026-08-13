@@ -1,0 +1,1690 @@
+import 'server-only'
+import { after } from 'next/server'
+import { prisma } from '@/server/db/client'
+import { requireOrgAccess, requireHumanOrgAccess } from '@/server/auth/rbac'
+import { emitWebhook } from './webhookService'
+import { cancelOrder, emitOrderWebhook } from './orderService'
+import { consumeInventoryForFulfillment } from './inventoryService'
+import {
+  courierClientFor,
+  defaultCourierProvider,
+} from './courierConfigService'
+import { getCourierSettings, screenPhone } from './fraudCheckService'
+import { isTerminal, workflowStateFor } from '@/server/courier/statusMap'
+import { normalizeBdPhone } from '@/server/courier/phone'
+import {
+  CourierApiError,
+  CourierNotConfiguredError,
+  type CourierConsignmentRequest,
+  type CourierStatusResult,
+} from '@/server/courier/types'
+import type {
+  CourierEventSource,
+  CourierProvider,
+  CourierShipmentStatus,
+  FraudVerdict,
+  OrderWorkflowState,
+} from '@/generated/prisma/enums'
+
+/**
+ * The courier pipeline.
+ *
+ * An order arrives, is screened against the customer's delivery history, and
+ * then either goes to a courier without anyone touching it or waits in a queue
+ * for a human. Once a consignment exists, the courier's own webhooks drive
+ * every state after that, with a reconciliation poll behind them.
+ *
+ * Three invariants hold everything together:
+ *
+ *   Only PROCESSING dispatches. An order reaches PROCESSING by passing the
+ *   screen or by a named human approving it, and nothing else auto-dispatches.
+ *   That is what makes it safe for legacy orders — and any order the screen
+ *   could not evaluate — to sit at PENDING indefinitely.
+ *
+ *   Dispatch is idempotent per order. The shipment row is created before the
+ *   courier is called and carries the order's unique number as the merchant
+ *   reference, so a retried dispatch reuses the row rather than creating a
+ *   second parcel. Double-shipping a cash-on-delivery order costs the merchant
+ *   twice and confuses the customer once.
+ *
+ *   Inbound events never move a parcel backwards. Couriers retry webhooks and
+ *   deliver them out of order; a delivered parcel that receives a late
+ *   "in transit" retry must stay delivered.
+ */
+
+/** Attempts at reaching a courier before a dispatch is left for a human. */
+const MAX_DISPATCH_ATTEMPTS = 5
+
+/** Backoff between dispatch attempts, in seconds: 30s, 2m, 10m, 1h. */
+const DISPATCH_BACKOFF_SECONDS = [30, 120, 600, 3600]
+
+/**
+ * How long a parcel may go silent before the sweep polls the courier about it.
+ *
+ * Webhooks are the primary channel and are usually immediate; this is the
+ * backstop for the ones that are dropped, and a dropped webhook is invisible by
+ * definition — the only way to notice is to ask.
+ */
+const POLL_AFTER_QUIET_MINUTES = 90
+
+// ── Screening and admission ──────────────────────────────────────────────
+
+/**
+ * Screens a newly placed order and decides what happens to it.
+ *
+ * Called after checkout commits, off the buyer's critical path. Never throws:
+ * a screening failure leaves the order at PENDING with an explanation attached,
+ * which a merchant can act on, rather than turning a completed sale into an
+ * error the customer sees.
+ */
+export async function evaluateOrderForCourier(
+  organizationId: string,
+  orderId: string
+): Promise<void> {
+  try {
+    const order = await prisma.order.findFirst({
+      where: { id: orderId, organizationId },
+      select: {
+        id: true,
+        orderNumber: true,
+        phone: true,
+        totalCents: true,
+        financialStatus: true,
+        workflowState: true,
+        cancelledAt: true,
+        shippingAddress: true,
+      },
+    })
+
+    // Only a fresh order is screened. Anything already moved on — approved,
+    // dispatched, cancelled — must not be dragged back through the gate by a
+    // retried call.
+    if (!order || order.workflowState !== 'PENDING' || order.cancelledAt) return
+
+    // Nothing configured, nothing to do. This whole pipeline is opt-in, and a
+    // workspace that has never opened courier settings must see no change at
+    // all: no verdict on its orders, no timeline entries, and above all no
+    // review queue. Without this check the screen returns "could not check"
+    // for every order — there are no credentials to check with — and every
+    // order of every existing merchant lands in FRAUD_REVIEW.
+    const configuredCouriers = await prisma.courierConfig.count({
+      where: { organizationId },
+    })
+    if (configuredCouriers === 0) return
+
+    const settings = await getCourierSettings(organizationId)
+
+    const assessment = await screenPhone(
+      organizationId,
+      order.phone ?? readAddressPhone(order.shippingAddress),
+      settings
+    )
+
+    // Value-based review is a separate gate from the customer's history: a
+    // spotless customer ordering far above the usual basket is exactly the
+    // pattern a merchant wants to eyeball, and it is not visible in a delivery
+    // rate.
+    const overValueLimit =
+      settings.manualReviewAboveCents != null &&
+      order.totalCents > settings.manualReviewAboveCents
+
+    const unpaidButPaidRequired =
+      settings.requirePaidOrders && order.financialStatus !== 'PAID'
+
+    let state: OrderWorkflowState
+    let reason = assessment.reason
+
+    if (assessment.verdict === 'FAIL' && settings.autoCancelOnFail) {
+      state = 'CANCELLED'
+    } else if (
+      assessment.verdict === 'FAIL' ||
+      assessment.verdict === 'REVIEW'
+    ) {
+      state = 'FRAUD_REVIEW'
+    } else if (assessment.verdict === 'UNAVAILABLE') {
+      // The customer is not at fault and the merchant should not lose the sale
+      // to a third party's outage — but nothing auto-ships on no information.
+      state = 'FRAUD_REVIEW'
+      reason = `Could not screen this customer: ${assessment.reason}`
+    } else if (overValueLimit) {
+      state = 'FRAUD_REVIEW'
+      reason = `${assessment.reason} Held because the order is above your manual-review value.`
+    } else if (unpaidButPaidRequired) {
+      state = 'FRAUD_REVIEW'
+      reason = `${assessment.reason} Held because you only auto-dispatch paid orders.`
+    } else if (settings.autoDispatchEnabled) {
+      state = 'PROCESSING'
+    } else {
+      // Screened clean, but the merchant dispatches by hand. PENDING is the
+      // honest state: cleared, waiting for a person.
+      state = 'PENDING'
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.order.update({
+        where: { id: orderId },
+        data: {
+          workflowState: state,
+          workflowUpdatedAt: new Date(),
+          fraudVerdict: assessment.verdict,
+          fraudCheckedAt: assessment.checkedAt,
+          fraudDelivered: assessment.delivered,
+          fraudCancelled: assessment.cancelled,
+          fraudReports: assessment.frauds,
+          fraudSuccessRateBps: assessment.successRateBps,
+          fraudReason: reason.slice(0, 500),
+          ...(state === 'CANCELLED'
+            ? { cancelledAt: new Date(), cancelReason: 'FRAUD' as const }
+            : {}),
+        },
+      })
+
+      await tx.orderEvent.create({
+        data: {
+          orderId,
+          type: 'fraud_screened',
+          message: reason,
+          metadata: {
+            verdict: assessment.verdict,
+            delivered: assessment.delivered,
+            cancelled: assessment.cancelled,
+            frauds: assessment.frauds,
+            successRateBps: assessment.successRateBps,
+            cached: assessment.cached,
+          },
+        },
+      })
+    })
+
+    if (state === 'FRAUD_REVIEW') {
+      await emitOrderWebhook(organizationId, orderId, 'ORDER_HELD_FOR_REVIEW')
+    }
+
+    if (state === 'CANCELLED') {
+      await emitOrderWebhook(organizationId, orderId, 'ORDER_CANCELLED')
+      return
+    }
+
+    if (state === 'PROCESSING') {
+      // A delay gives the customer a window to call and change or cancel before
+      // a parcel is physically created — cheaper for everyone than chasing one.
+      if (settings.dispatchDelayMinutes > 0) {
+        await prisma.orderEvent.create({
+          data: {
+            orderId,
+            type: 'dispatch_scheduled',
+            message: `Queued for dispatch in ${settings.dispatchDelayMinutes} minutes`,
+          },
+        })
+        return
+      }
+
+      await dispatchOrderInternal(organizationId, orderId, null)
+    }
+  } catch (cause) {
+    // Screening is an enhancement to an order that already succeeded. It must
+    // never be the reason a placed order breaks.
+    console.error('[courier] screening failed for', orderId, cause)
+  }
+}
+
+/** Queues screening to run after the response is flushed. */
+export function scheduleCourierEvaluation(
+  organizationId: string,
+  orderId: string
+): void {
+  const run = () => evaluateOrderForCourier(organizationId, orderId)
+
+  try {
+    after(run)
+  } catch {
+    // Outside a request — seed scripts, cron — `after` throws rather than
+    // quietly doing nothing.
+    void run().catch((cause) => console.error('[courier] evaluation', cause))
+  }
+}
+
+/**
+ * Screens one order again on demand, with fresh numbers.
+ *
+ * Forced past the cache: the whole reason a merchant presses this is that the
+ * stored verdict is from when the order arrived, and a customer's delivery
+ * history moves as they order from other shops. The order's own state is left
+ * alone — this updates what is *known*, it does not re-decide. Releasing a held
+ * order stays an explicit human act with a name attached to it.
+ */
+export async function rescreenOrder(
+  organizationId: string,
+  orderId: string
+): Promise<{ verdict: FraudVerdict; reason: string }> {
+  await requireOrgAccess(organizationId, 'EDITOR')
+
+  const order = await prisma.order.findFirst({
+    where: { id: orderId, organizationId },
+    select: { id: true, phone: true, shippingAddress: true },
+  })
+  if (!order) throw new Error('Order not found')
+
+  const settings = await getCourierSettings(organizationId)
+  const assessment = await screenPhone(
+    organizationId,
+    order.phone ?? readAddressPhone(order.shippingAddress),
+    settings,
+    { force: true }
+  )
+
+  await prisma.$transaction([
+    prisma.order.update({
+      where: { id: orderId },
+      data: {
+        fraudVerdict: assessment.verdict,
+        fraudCheckedAt: assessment.checkedAt,
+        fraudDelivered: assessment.delivered,
+        fraudCancelled: assessment.cancelled,
+        fraudReports: assessment.frauds,
+        fraudSuccessRateBps: assessment.successRateBps,
+        fraudReason: assessment.reason.slice(0, 500),
+      },
+    }),
+    prisma.orderEvent.create({
+      data: {
+        orderId,
+        type: 'fraud_screened',
+        message: `Re-checked: ${assessment.reason}`,
+        metadata: {
+          verdict: assessment.verdict,
+          delivered: assessment.delivered,
+          cancelled: assessment.cancelled,
+          frauds: assessment.frauds,
+          successRateBps: assessment.successRateBps,
+        },
+      },
+    }),
+  ])
+
+  return { verdict: assessment.verdict, reason: assessment.reason }
+}
+
+// ── Human decisions on held orders ───────────────────────────────────────
+
+/**
+ * A person releases a held order.
+ *
+ * Records who, because this is the decision that overrides an automated refusal
+ * and the merchant will want to know whose judgement it was when a released
+ * order comes back refused.
+ */
+export async function approveOrderForDispatch(
+  organizationId: string,
+  orderId: string,
+  options: { provider?: CourierProvider | null; note?: string } = {}
+) {
+  const { session } = await requireHumanOrgAccess(organizationId, 'EDITOR')
+
+  const order = await prisma.order.findFirst({
+    where: { id: orderId, organizationId },
+    select: { id: true, workflowState: true, cancelledAt: true },
+  })
+  if (!order) throw new Error('Order not found')
+  if (order.cancelledAt) throw new Error('This order has been cancelled')
+  if (
+    order.workflowState !== 'FRAUD_REVIEW' &&
+    order.workflowState !== 'PENDING'
+  ) {
+    throw new Error('This order has already moved past review')
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.order.update({
+      where: { id: orderId },
+      data: {
+        workflowState: 'PROCESSING',
+        workflowUpdatedAt: new Date(),
+        reviewedByUserId: session.user.id,
+        reviewedAt: new Date(),
+      },
+    })
+
+    await tx.orderEvent.create({
+      data: {
+        orderId,
+        type: 'order_approved',
+        message: options.note?.trim()
+          ? `Approved for dispatch — ${options.note.trim()}`
+          : 'Approved for dispatch',
+        actorUserId: session.user.id,
+      },
+    })
+  })
+
+  await emitOrderWebhook(organizationId, orderId, 'ORDER_UPDATED')
+
+  return dispatchOrderInternal(
+    organizationId,
+    orderId,
+    options.provider ?? null
+  )
+}
+
+/** A person refuses a held order. Cancels it and returns the stock. */
+export async function rejectHeldOrder(
+  organizationId: string,
+  orderId: string,
+  note?: string
+) {
+  const { session } = await requireHumanOrgAccess(organizationId, 'EDITOR')
+
+  const order = await prisma.order.findFirst({
+    where: { id: orderId, organizationId },
+    select: { id: true, workflowState: true, cancelledAt: true },
+  })
+  if (!order) throw new Error('Order not found')
+  if (order.cancelledAt) throw new Error('This order is already cancelled')
+
+  await prisma.order.update({
+    where: { id: orderId },
+    data: {
+      workflowState: 'CANCELLED',
+      workflowUpdatedAt: new Date(),
+      reviewedByUserId: session.user.id,
+      reviewedAt: new Date(),
+    },
+  })
+
+  await prisma.orderEvent.create({
+    data: {
+      orderId,
+      type: 'order_rejected',
+      message: note?.trim()
+        ? `Rejected at review — ${note.trim()}`
+        : 'Rejected at review',
+      actorUserId: session.user.id,
+    },
+  })
+
+  // Reuse the ordinary cancellation path so stock, statuses and the outbound
+  // order.cancelled webhook all behave exactly as a manual cancel does. A
+  // second way to cancel an order is a second way to get it wrong.
+  return cancelOrder(organizationId, orderId, {
+    reason: 'FRAUD',
+    restock: true,
+  })
+}
+
+// ── Dispatch ─────────────────────────────────────────────────────────────
+
+/** Merchant-triggered dispatch from the order page. */
+export async function dispatchOrder(
+  organizationId: string,
+  orderId: string,
+  provider?: CourierProvider | null
+) {
+  await requireHumanOrgAccess(organizationId, 'EDITOR')
+  return dispatchOrderInternal(organizationId, orderId, provider ?? null)
+}
+
+/**
+ * Hands an order to a courier.
+ *
+ * The shipment row is written before the courier is called, and reused if one
+ * already exists. That ordering is what makes a failed call recoverable: a
+ * timeout leaves a PENDING row with the error on it, visible and retryable,
+ * rather than a silent nothing that a merchant discovers when the customer
+ * calls a week later.
+ */
+async function dispatchOrderInternal(
+  organizationId: string,
+  orderId: string,
+  requestedProvider: CourierProvider | null
+): Promise<{ ok: boolean; shipmentId: string | null; error?: string }> {
+  const order = await prisma.order.findFirst({
+    where: { id: orderId, organizationId },
+    select: {
+      id: true,
+      orderNumber: true,
+      phone: true,
+      email: true,
+      totalCents: true,
+      paidTotalCents: true,
+      currencyCode: true,
+      note: true,
+      cancelledAt: true,
+      workflowState: true,
+      shippingAddress: true,
+      customer: { select: { firstName: true, lastName: true } },
+      lines: {
+        select: { title: true, quantity: true, weightGrams: true },
+      },
+      shipments: {
+        where: { status: { not: 'CANCELLED' } },
+        select: { id: true, consignmentId: true, status: true },
+      },
+    },
+  })
+
+  if (!order) return { ok: false, shipmentId: null, error: 'Order not found' }
+  if (order.cancelledAt) {
+    return { ok: false, shipmentId: null, error: 'This order is cancelled' }
+  }
+
+  // Already at a courier. Not an error — a merchant double-clicking Dispatch
+  // should get the existing parcel, not a second one.
+  const live = order.shipments.find((shipment) => shipment.consignmentId)
+  if (live) {
+    return { ok: true, shipmentId: live.id }
+  }
+
+  const provider =
+    requestedProvider ?? (await defaultCourierProvider(organizationId))
+
+  if (!provider) {
+    await noteDispatchFailure(
+      orderId,
+      'No courier is switched on for this workspace'
+    )
+    return {
+      ok: false,
+      shipmentId: null,
+      error: 'No courier is switched on for this workspace',
+    }
+  }
+
+  const address = readAddress(order.shippingAddress)
+  const recipientPhone =
+    normalizeBdPhone(order.phone) ?? normalizeBdPhone(address.phone)
+
+  if (!recipientPhone) {
+    await noteDispatchFailure(
+      orderId,
+      'This order has no usable Bangladeshi mobile number to deliver to'
+    )
+    return {
+      ok: false,
+      shipmentId: null,
+      error: 'This order has no usable Bangladeshi mobile number',
+    }
+  }
+
+  const recipientName =
+    [address.firstName, address.lastName].filter(Boolean).join(' ').trim() ||
+    [order.customer?.firstName, order.customer?.lastName]
+      .filter(Boolean)
+      .join(' ')
+      .trim() ||
+    'Customer'
+
+  const recipientAddress = formatAddress(address)
+  // The rider collects whatever is still owed, not the order total — a
+  // part-paid order must not be charged twice at the door.
+  const codAmountCents = Math.max(0, order.totalCents - order.paidTotalCents)
+
+  const config = await prisma.courierConfig.findUnique({
+    where: { organizationId_provider: { organizationId, provider } },
+    select: { id: true },
+  })
+
+  // Reuse an undispatched row from a previous failed attempt so the attempt
+  // count and the error history survive.
+  const existing = order.shipments.find((shipment) => !shipment.consignmentId)
+
+  const shipment = existing
+    ? await prisma.courierShipment.update({
+        where: { id: existing.id },
+        data: {
+          provider,
+          courierConfigId: config?.id ?? null,
+          recipientName,
+          recipientPhone,
+          recipientAddress,
+          codAmountCents,
+        },
+        select: { id: true, attempts: true },
+      })
+    : await prisma.courierShipment.create({
+        data: {
+          organizationId,
+          orderId,
+          courierConfigId: config?.id ?? null,
+          provider,
+          merchantOrderId: order.orderNumber,
+          status: 'PENDING',
+          codAmountCents,
+          recipientName,
+          recipientPhone,
+          recipientAddress,
+        },
+        select: { id: true, attempts: true },
+      })
+
+  const request: CourierConsignmentRequest = {
+    merchantOrderId: order.orderNumber,
+    recipientName,
+    recipientPhone,
+    recipientAddress,
+    codAmountCents,
+    note: order.note,
+    itemDescription: order.lines
+      .map((line) => `${line.title} x${line.quantity}`)
+      .join(', ')
+      .slice(0, 220),
+    itemQuantity: order.lines.reduce((sum, line) => sum + line.quantity, 0),
+    itemWeightKg: totalWeightKg(order.lines),
+    alternativePhone: null,
+    recipientEmail: order.email,
+  }
+
+  const attempt = shipment.attempts + 1
+
+  try {
+    const client = await courierClientFor(organizationId, provider)
+    const result = await client.createConsignment(request)
+
+    await prisma.$transaction(async (tx) => {
+      await tx.courierShipment.update({
+        where: { id: shipment.id },
+        data: {
+          consignmentId: result.consignmentId,
+          trackingCode: result.trackingCode,
+          status: result.status,
+          rawStatus: result.rawStatus,
+          statusMessage: `Handed to ${provider === 'STEADFAST' ? 'Steadfast' : 'Pathao'}`,
+          deliveryFeeCents: result.deliveryFeeCents,
+          requestPayload: request as never,
+          responsePayload: toJson(result.raw),
+          attempts: attempt,
+          lastError: null,
+          nextAttemptAt: null,
+          dispatchedAt: new Date(),
+          lastEventAt: new Date(),
+        },
+      })
+
+      await tx.courierShipmentEvent.create({
+        data: {
+          shipmentId: shipment.id,
+          status: result.status,
+          message: `Consignment ${result.consignmentId} created`,
+          source: 'SYSTEM',
+          rawEvent: toJson(result.raw),
+          occurredAt: new Date(),
+        },
+      })
+
+      await tx.order.update({
+        where: { id: orderId },
+        data: { workflowState: 'DISPATCHED', workflowUpdatedAt: new Date() },
+      })
+
+      await tx.orderEvent.create({
+        data: {
+          orderId,
+          type: 'courier_dispatched',
+          message: `Sent to ${provider === 'STEADFAST' ? 'Steadfast' : 'Pathao'} — consignment ${result.consignmentId}`,
+          metadata: {
+            provider,
+            consignmentId: result.consignmentId,
+            trackingCode: result.trackingCode,
+          },
+        },
+      })
+    })
+
+    await emitShipmentWebhook(organizationId, shipment.id, 'SHIPMENT_CREATED')
+
+    return { ok: true, shipmentId: shipment.id }
+  } catch (cause) {
+    const retryable =
+      cause instanceof CourierApiError
+        ? cause.retryable
+        : !(cause instanceof CourierNotConfiguredError)
+
+    const message =
+      cause instanceof Error ? cause.message : 'The courier rejected the parcel'
+
+    const exhausted = attempt >= MAX_DISPATCH_ATTEMPTS || !retryable
+    const backoff =
+      DISPATCH_BACKOFF_SECONDS[attempt - 1] ??
+      DISPATCH_BACKOFF_SECONDS[DISPATCH_BACKOFF_SECONDS.length - 1]!
+
+    await prisma.courierShipment.update({
+      where: { id: shipment.id },
+      data: {
+        attempts: attempt,
+        lastError: message.slice(0, 500),
+        // A permanent rejection — bad address, wrong credentials — is left for
+        // a human. Retrying it just delays the person who has to fix it.
+        nextAttemptAt: exhausted
+          ? null
+          : new Date(Date.now() + backoff * 1_000),
+        requestPayload: request as never,
+      },
+    })
+
+    await prisma.$transaction([
+      prisma.orderEvent.create({
+        data: {
+          orderId,
+          type: 'courier_dispatch_failed',
+          message: exhausted
+            ? `Could not send to the courier: ${message}`
+            : `Courier attempt ${attempt} failed, retrying: ${message}`,
+        },
+      }),
+      // Only a final failure moves the order — an order that is mid-retry is
+      // still on its way and must not flip to FAILED and back.
+      ...(exhausted
+        ? [
+            prisma.order.update({
+              where: { id: orderId },
+              data: { workflowState: 'FAILED', workflowUpdatedAt: new Date() },
+            }),
+          ]
+        : []),
+    ])
+
+    return { ok: false, shipmentId: shipment.id, error: message }
+  }
+}
+
+async function noteDispatchFailure(orderId: string, message: string) {
+  await prisma.orderEvent.create({
+    data: {
+      orderId,
+      type: 'courier_dispatch_failed',
+      message,
+    },
+  })
+  await prisma.order.update({
+    where: { id: orderId },
+    data: { workflowState: 'FAILED', workflowUpdatedAt: new Date() },
+  })
+}
+
+// ── Inbound status updates ───────────────────────────────────────────────
+
+export interface IncomingCourierEvent {
+  status: CourierShipmentStatus
+  rawStatus: string | null
+  message: string
+  occurredAt: Date
+  collectedAmountCents?: number | null
+  deliveryFeeCents?: number | null
+  raw: unknown
+  source: CourierEventSource
+}
+
+/**
+ * Finds the shipment an inbound event belongs to.
+ *
+ * Scoped to one organisation by the caller, which resolves it from the webhook
+ * token in the URL. Matching on the consignment id first and the merchant order
+ * id second matters because Pathao's early events carry a consignment id we may
+ * not have stored yet if the create response was lost in flight.
+ */
+export async function findShipmentForEvent(
+  organizationId: string,
+  provider: CourierProvider,
+  reference: { consignmentId?: string | null; merchantOrderId?: string | null }
+) {
+  if (reference.consignmentId) {
+    const byConsignment = await prisma.courierShipment.findFirst({
+      where: {
+        organizationId,
+        provider,
+        consignmentId: String(reference.consignmentId),
+      },
+      select: { id: true },
+    })
+    if (byConsignment) return byConsignment
+  }
+
+  if (reference.merchantOrderId) {
+    const byOrder = await prisma.courierShipment.findFirst({
+      where: {
+        organizationId,
+        provider,
+        merchantOrderId: String(reference.merchantOrderId),
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
+    })
+    if (byOrder) {
+      // Backfill the consignment id we now know, so the next event resolves on
+      // the indexed lookup instead of the fallback.
+      if (reference.consignmentId) {
+        await prisma.courierShipment
+          .update({
+            where: { id: byOrder.id },
+            data: { consignmentId: String(reference.consignmentId) },
+          })
+          .catch(() => {
+            // A unique-constraint clash means another row already claims that
+            // consignment id; the event still belongs to this shipment.
+          })
+      }
+      return byOrder
+    }
+  }
+
+  return null
+}
+
+/**
+ * Takes a parsed courier callback and does whatever it implies.
+ *
+ * The single entry point for both webhook routes, so the two providers cannot
+ * drift apart in how an event is applied. Returns rather than throws on a
+ * parcel it cannot find: an unknown consignment is a normal occurrence — a test
+ * event from the courier's panel, a parcel created outside this platform — and
+ * answering it with a 500 makes the courier retry a callback that will never
+ * match.
+ */
+export async function ingestCourierEvent(
+  organizationId: string,
+  provider: CourierProvider,
+  parsed: {
+    consignmentId: string | null
+    merchantOrderId: string | null
+    status: CourierShipmentStatus | null
+    rawStatus: string | null
+    message: string
+    occurredAt: Date
+    collectedAmountCents: number | null
+    deliveryFeeCents: number | null
+  },
+  raw: unknown,
+  source: CourierEventSource = 'WEBHOOK'
+): Promise<{ handled: boolean; reason?: string }> {
+  const shipment = await findShipmentForEvent(organizationId, provider, {
+    consignmentId: parsed.consignmentId,
+    merchantOrderId: parsed.merchantOrderId,
+  })
+
+  if (!shipment) {
+    return { handled: false, reason: 'No matching parcel for this workspace' }
+  }
+
+  // A status-less update — Steadfast's `tracking_update` — is a progress note,
+  // not a state change. It belongs on the timeline the customer reads, but
+  // writing it as a status would overwrite a known state with a guess.
+  if (!parsed.status) {
+    const current = await prisma.courierShipment.findUnique({
+      where: { id: shipment.id },
+      select: { status: true },
+    })
+    if (!current) return { handled: false }
+
+    const duplicate = await prisma.courierShipmentEvent.findFirst({
+      where: {
+        shipmentId: shipment.id,
+        message: parsed.message.slice(0, 500),
+        occurredAt: parsed.occurredAt,
+      },
+      select: { id: true },
+    })
+    if (duplicate) return { handled: true }
+
+    await prisma.$transaction([
+      prisma.courierShipmentEvent.create({
+        data: {
+          shipmentId: shipment.id,
+          status: current.status,
+          message: parsed.message.slice(0, 500),
+          source,
+          rawEvent: toJson(raw),
+          occurredAt: parsed.occurredAt,
+        },
+      }),
+      prisma.courierShipment.update({
+        where: { id: shipment.id },
+        data: {
+          statusMessage: parsed.message.slice(0, 500),
+          lastEventAt: new Date(),
+        },
+      }),
+    ])
+
+    return { handled: true }
+  }
+
+  await applyCourierEvent(shipment.id, {
+    status: parsed.status,
+    rawStatus: parsed.rawStatus,
+    message: parsed.message,
+    occurredAt: parsed.occurredAt,
+    collectedAmountCents: parsed.collectedAmountCents,
+    deliveryFeeCents: parsed.deliveryFeeCents,
+    raw,
+    source,
+  })
+
+  return { handled: true }
+}
+
+/**
+ * Records an event against a parcel and moves everything downstream of it.
+ *
+ * Idempotent by design. Couriers retry, and the same "delivered" arrives three
+ * times: the duplicate check drops repeats, and the terminal-state guard means
+ * a late out-of-order event cannot un-deliver a parcel.
+ */
+export async function applyCourierEvent(
+  shipmentId: string,
+  event: IncomingCourierEvent
+): Promise<void> {
+  const shipment = await prisma.courierShipment.findUnique({
+    where: { id: shipmentId },
+    select: {
+      id: true,
+      organizationId: true,
+      orderId: true,
+      status: true,
+      provider: true,
+      codAmountCents: true,
+    },
+  })
+  if (!shipment) return
+
+  // Same status, same instant, already recorded. Couriers resend on any
+  // non-2xx, and a receiver that appends every retry produces a timeline the
+  // merchant cannot read.
+  const duplicate = await prisma.courierShipmentEvent.findFirst({
+    where: {
+      shipmentId,
+      status: event.status,
+      occurredAt: event.occurredAt,
+    },
+    select: { id: true },
+  })
+
+  const terminal = isTerminal(shipment.status)
+  // A terminal parcel accepts nothing but a correction to another terminal
+  // state — a delivered parcel later marked returned is real; a delivered
+  // parcel later marked "in transit" is a retry arriving late.
+  const regressive = terminal && !isTerminal(event.status)
+
+  await prisma.$transaction(async (tx) => {
+    if (!duplicate) {
+      await tx.courierShipmentEvent.create({
+        data: {
+          shipmentId,
+          status: event.status,
+          message: event.message.slice(0, 500),
+          source: event.source,
+          rawEvent: toJson(event.raw),
+          occurredAt: event.occurredAt,
+        },
+      })
+    }
+
+    await tx.courierShipment.update({
+      where: { id: shipmentId },
+      data: {
+        ...(regressive
+          ? {}
+          : {
+              status: event.status,
+              rawStatus: event.rawStatus,
+              statusMessage: event.message.slice(0, 500),
+            }),
+        ...(event.collectedAmountCents != null
+          ? { collectedAmountCents: event.collectedAmountCents }
+          : {}),
+        ...(event.deliveryFeeCents != null
+          ? { deliveryFeeCents: event.deliveryFeeCents }
+          : {}),
+        ...(event.status === 'DELIVERED' && !regressive
+          ? { deliveredAt: event.occurredAt }
+          : {}),
+        ...(event.status === 'CANCELLED' && !regressive
+          ? { cancelledAt: event.occurredAt }
+          : {}),
+        lastEventAt: new Date(),
+      },
+    })
+  })
+
+  if (regressive) return
+
+  await syncOrderFromShipments(shipment.organizationId, shipment.orderId)
+
+  // Goods physically left once the courier has them, and inventory should say
+  // so. Guarded inside so repeated pickup events do not fulfil twice.
+  if (
+    event.status === 'PICKED_UP' ||
+    event.status === 'IN_TRANSIT' ||
+    event.status === 'OUT_FOR_DELIVERY' ||
+    event.status === 'DELIVERED'
+  ) {
+    await ensureFulfillment(
+      shipment.organizationId,
+      shipment.orderId,
+      shipmentId
+    )
+  }
+
+  if (event.status === 'DELIVERED') {
+    await settleCashOnDelivery(
+      shipment.organizationId,
+      shipment.orderId,
+      event.collectedAmountCents ?? shipment.codAmountCents
+    )
+    await emitShipmentWebhook(
+      shipment.organizationId,
+      shipmentId,
+      'SHIPMENT_DELIVERED'
+    )
+  } else if (event.status === 'RETURNED') {
+    await restockReturnedParcel(shipment.organizationId, shipment.orderId)
+    await emitShipmentWebhook(
+      shipment.organizationId,
+      shipmentId,
+      'SHIPMENT_RETURNED'
+    )
+  } else if (!duplicate) {
+    await emitShipmentWebhook(
+      shipment.organizationId,
+      shipmentId,
+      'SHIPMENT_UPDATED'
+    )
+  }
+}
+
+/**
+ * Recomputes an order's pipeline state from its parcels.
+ *
+ * Derived rather than asserted, and derived from the *least* advanced live
+ * parcel: an order split across two consignments is only delivered when both
+ * are, and telling a merchant it arrived while half of it is still on a van is
+ * worse than saying nothing.
+ */
+async function syncOrderFromShipments(
+  organizationId: string,
+  orderId: string
+): Promise<void> {
+  const shipments = await prisma.courierShipment.findMany({
+    where: { orderId },
+    select: { status: true },
+  })
+
+  const states = shipments
+    .map((shipment) => workflowStateFor(shipment.status))
+    .filter((state): state is OrderWorkflowState => state !== null)
+
+  if (states.length === 0) return
+
+  // Ranked by how far along the pipeline each state is. The minimum wins.
+  const RANK: Record<OrderWorkflowState, number> = {
+    PENDING: 0,
+    FRAUD_REVIEW: 0,
+    PROCESSING: 1,
+    FAILED: 2,
+    CANCELLED: 3,
+    DISPATCHED: 4,
+    IN_TRANSIT: 5,
+    OUT_FOR_DELIVERY: 6,
+    RETURNED: 7,
+    PARTIALLY_DELIVERED: 8,
+    DELIVERED: 9,
+  }
+
+  const next = states.reduce((lowest, state) =>
+    RANK[state] < RANK[lowest] ? state : lowest
+  )
+
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: { workflowState: true },
+  })
+  if (!order || order.workflowState === next) return
+
+  await prisma.order.update({
+    where: { id: orderId },
+    data: { workflowState: next, workflowUpdatedAt: new Date() },
+  })
+
+  await emitOrderWebhook(organizationId, orderId, 'ORDER_UPDATED')
+}
+
+/**
+ * Creates the fulfilment for a parcel the courier now physically holds.
+ *
+ * Stock was reserved at checkout (`available` down, `committed` up); this is
+ * the step that consumes the commitment. Skipped entirely if the merchant
+ * already fulfilled by hand, so the two routes cannot double-count.
+ */
+async function ensureFulfillment(
+  organizationId: string,
+  orderId: string,
+  shipmentId: string
+): Promise<void> {
+  const order = await prisma.order.findFirst({
+    where: { id: orderId, organizationId },
+    select: {
+      id: true,
+      fulfillments: { select: { id: true } },
+      lines: {
+        select: {
+          id: true,
+          variantId: true,
+          quantity: true,
+          fulfilledQuantity: true,
+          requiresShipping: true,
+        },
+      },
+    },
+  })
+  if (!order || order.fulfillments.length > 0) return
+
+  const outstanding = order.lines
+    .filter((line) => line.requiresShipping)
+    .map((line) => ({
+      ...line,
+      remaining: line.quantity - line.fulfilledQuantity,
+    }))
+    .filter((line) => line.remaining > 0)
+
+  if (outstanding.length === 0) return
+
+  const shipment = await prisma.courierShipment.findUnique({
+    where: { id: shipmentId },
+    select: { provider: true, trackingCode: true, consignmentId: true },
+  })
+
+  await prisma.$transaction(async (tx) => {
+    const fulfillment = await tx.fulfillment.create({
+      data: {
+        orderId,
+        status: 'SHIPPED',
+        trackingCompany:
+          shipment?.provider === 'STEADFAST' ? 'Steadfast' : 'Pathao',
+        trackingNumber:
+          shipment?.trackingCode ?? shipment?.consignmentId ?? null,
+        trackingUrl: trackingUrlFor(
+          shipment?.provider ?? 'STEADFAST',
+          shipment?.trackingCode ?? shipment?.consignmentId ?? null
+        ),
+        shippedAt: new Date(),
+        lines: {
+          create: outstanding.map((line) => ({
+            orderLineId: line.id,
+            quantity: line.remaining,
+          })),
+        },
+      },
+      select: { id: true },
+    })
+
+    for (const line of outstanding) {
+      await tx.orderLine.update({
+        where: { id: line.id },
+        data: { fulfilledQuantity: { increment: line.remaining } },
+      })
+    }
+
+    await consumeInventoryForFulfillment(
+      tx,
+      fulfillment.id,
+      null,
+      outstanding.map((line) => ({
+        variantId: line.variantId ?? '',
+        quantity: line.remaining,
+        inventoryTracked: Boolean(line.variantId),
+      }))
+    )
+
+    await tx.order.update({
+      where: { id: orderId },
+      data: { fulfillmentStatus: 'FULFILLED' },
+    })
+
+    await tx.orderEvent.create({
+      data: {
+        orderId,
+        type: 'fulfillment_created',
+        message: 'Courier collected the parcel',
+      },
+    })
+  })
+
+  await emitOrderWebhook(organizationId, orderId, 'ORDER_FULFILLED')
+}
+
+/**
+ * Records the money the rider collected at the door.
+ *
+ * This is the moment a cash-on-delivery order actually becomes paid, and
+ * without it every delivered COD order sits at PENDING forever and the
+ * merchant's revenue reporting is fiction. Written through the same Transaction
+ * ledger as any other payment so the order's totals stay reconstructable.
+ */
+async function settleCashOnDelivery(
+  organizationId: string,
+  orderId: string,
+  collectedCents: number
+): Promise<void> {
+  if (collectedCents <= 0) return
+
+  const order = await prisma.order.findFirst({
+    where: { id: orderId, organizationId },
+    select: {
+      id: true,
+      totalCents: true,
+      paidTotalCents: true,
+      currencyCode: true,
+    },
+  })
+  if (!order) return
+
+  const outstanding = order.totalCents - order.paidTotalCents
+  if (outstanding <= 0) return
+
+  // Never credit more than is owed, whatever the courier reports. An
+  // over-collection is a dispute for the merchant to settle, not a number to
+  // silently write into the ledger.
+  const amount = Math.min(outstanding, collectedCents)
+
+  await prisma.$transaction(async (tx) => {
+    await tx.transaction.create({
+      data: {
+        orderId,
+        kind: 'SALE',
+        status: 'SUCCESS',
+        provider: 'CASH_ON_DELIVERY',
+        amountCents: amount,
+        currencyCode: order.currencyCode,
+      },
+    })
+
+    const paid = order.paidTotalCents + amount
+
+    await tx.order.update({
+      where: { id: orderId },
+      data: {
+        paidTotalCents: paid,
+        financialStatus: paid >= order.totalCents ? 'PAID' : 'PARTIALLY_PAID',
+      },
+    })
+
+    await tx.orderEvent.create({
+      data: {
+        orderId,
+        type: 'payment_captured',
+        message: 'Cash collected on delivery by the courier',
+      },
+    })
+  })
+
+  await emitOrderWebhook(organizationId, orderId, 'ORDER_UPDATED')
+}
+
+/**
+ * Puts a refused parcel's goods back on the shelf.
+ *
+ * Written out rather than routed through `restockInventory`, which stamps every
+ * adjustment REFUND. A courier return is not a refund — no money moved, and in
+ * a cash-on-delivery order none ever did. Logging it as one would make the
+ * inventory ledger, which exists precisely to answer "how did this variant get
+ * to -3", tell the merchant a story that never happened.
+ */
+async function restockReturnedParcel(
+  organizationId: string,
+  orderId: string
+): Promise<void> {
+  const order = await prisma.order.findFirst({
+    where: { id: orderId, organizationId },
+    select: {
+      id: true,
+      fulfillmentStatus: true,
+      lines: {
+        select: { id: true, variantId: true, fulfilledQuantity: true },
+      },
+    },
+  })
+  // Already restocked. Couriers resend "returned" and this must not add stock
+  // twice.
+  if (!order || order.fulfillmentStatus === 'RESTOCKED') return
+
+  const returnable = order.lines
+    .filter((line) => line.variantId && line.fulfilledQuantity > 0)
+    .map((line) => ({
+      variantId: line.variantId!,
+      quantity: line.fulfilledQuantity,
+    }))
+
+  await prisma.$transaction(async (tx) => {
+    const tracked = new Set(
+      (
+        await tx.productVariant.findMany({
+          where: {
+            id: { in: returnable.map((line) => line.variantId) },
+            inventoryTracked: true,
+          },
+          select: { id: true },
+        })
+      ).map((variant) => variant.id)
+    )
+
+    for (const line of returnable) {
+      if (!tracked.has(line.variantId)) continue
+
+      const level = await tx.inventoryLevel.findFirst({
+        where: { variantId: line.variantId },
+        orderBy: { available: 'desc' },
+        select: { id: true, locationId: true },
+      })
+      if (!level) continue
+
+      await tx.inventoryLevel.update({
+        where: { id: level.id },
+        data: { available: { increment: line.quantity } },
+      })
+
+      await tx.inventoryAdjustment.create({
+        data: {
+          locationId: level.locationId,
+          variantId: line.variantId,
+          delta: line.quantity,
+          reason: 'RESTOCK',
+          referenceId: `courier-return:${orderId}`,
+        },
+      })
+    }
+
+    await tx.order.update({
+      where: { id: orderId },
+      data: { fulfillmentStatus: 'RESTOCKED' },
+    })
+
+    await tx.orderEvent.create({
+      data: {
+        orderId,
+        type: 'parcel_returned',
+        message: 'Courier returned the parcel — stock returned to inventory',
+      },
+    })
+  })
+}
+
+// ── Scheduled work ───────────────────────────────────────────────────────
+
+/**
+ * Sends the orders whose dispatch is now due.
+ *
+ * Covers both halves of the delayed pipeline: orders held back by the
+ * merchant's dispatch delay, and shipments whose courier call failed and whose
+ * backoff has elapsed.
+ */
+export async function runDueDispatches(limit = 50): Promise<number> {
+  const now = new Date()
+
+  const retries = await prisma.courierShipment.findMany({
+    where: {
+      status: 'PENDING',
+      consignmentId: null,
+      nextAttemptAt: { lte: now },
+    },
+    orderBy: { nextAttemptAt: 'asc' },
+    take: limit,
+    select: { organizationId: true, orderId: true, provider: true },
+  })
+
+  for (const shipment of retries) {
+    await dispatchOrderInternal(
+      shipment.organizationId,
+      shipment.orderId,
+      shipment.provider
+    ).catch((cause) => console.error('[courier] retry failed', cause))
+  }
+
+  // Orders approved (by screen or by hand) that have no parcel yet. Their delay
+  // window is checked per organisation, because it is a per-merchant setting.
+  const waiting = await prisma.order.findMany({
+    where: {
+      workflowState: 'PROCESSING',
+      cancelledAt: null,
+      shipments: { none: {} },
+    },
+    orderBy: { workflowUpdatedAt: 'asc' },
+    take: limit,
+    select: { id: true, organizationId: true, workflowUpdatedAt: true },
+  })
+
+  const settingsByOrg = new Map<
+    string,
+    Awaited<ReturnType<typeof getCourierSettings>>
+  >()
+
+  let dispatched = 0
+  for (const order of waiting) {
+    let settings = settingsByOrg.get(order.organizationId)
+    if (!settings) {
+      settings = await getCourierSettings(order.organizationId)
+      settingsByOrg.set(order.organizationId, settings)
+    }
+
+    const dueAt = new Date(
+      order.workflowUpdatedAt.getTime() + settings.dispatchDelayMinutes * 60_000
+    )
+    if (dueAt > now) continue
+
+    await dispatchOrderInternal(order.organizationId, order.id, null).catch(
+      (cause) => console.error('[courier] scheduled dispatch failed', cause)
+    )
+    dispatched += 1
+  }
+
+  return retries.length + dispatched
+}
+
+/**
+ * Polls couriers about parcels that have gone quiet.
+ *
+ * The reason this exists rather than trusting webhooks: a webhook that is
+ * dropped is dropped silently. There is no failed delivery to retry, no error
+ * in a log — the parcel simply stops updating, and nobody notices until a
+ * customer asks. Asking the courier directly is the only way to close that gap.
+ */
+export async function syncStaleShipments(limit = 50): Promise<number> {
+  const quietBefore = new Date(Date.now() - POLL_AFTER_QUIET_MINUTES * 60_000)
+
+  const stale = await prisma.courierShipment.findMany({
+    where: {
+      consignmentId: { not: null },
+      status: {
+        notIn: ['DELIVERED', 'RETURNED', 'CANCELLED', 'PARTIALLY_DELIVERED'],
+      },
+      OR: [
+        { lastEventAt: { lte: quietBefore } },
+        { lastEventAt: null, createdAt: { lte: quietBefore } },
+      ],
+    },
+    // Round-robin: the least recently polled go first, so one busy organisation
+    // cannot starve everyone else's parcels.
+    orderBy: [{ lastPolledAt: { sort: 'asc', nulls: 'first' } }],
+    take: limit,
+    select: {
+      id: true,
+      organizationId: true,
+      provider: true,
+      consignmentId: true,
+      merchantOrderId: true,
+      trackingCode: true,
+    },
+  })
+
+  let updated = 0
+
+  for (const shipment of stale) {
+    await prisma.courierShipment.update({
+      where: { id: shipment.id },
+      data: { lastPolledAt: new Date() },
+    })
+
+    try {
+      const client = await courierClientFor(
+        shipment.organizationId,
+        shipment.provider
+      )
+
+      const status: CourierStatusResult | null = await client.fetchStatus({
+        consignmentId: shipment.consignmentId,
+        merchantOrderId: shipment.merchantOrderId,
+        trackingCode: shipment.trackingCode,
+      })
+      if (!status) continue
+
+      await applyCourierEvent(shipment.id, {
+        status: status.status,
+        rawStatus: status.rawStatus,
+        message: status.message ?? 'Status refreshed from the courier',
+        occurredAt: status.occurredAt,
+        collectedAmountCents: status.collectedAmountCents,
+        deliveryFeeCents: status.deliveryFeeCents,
+        raw: status.raw,
+        source: 'POLL',
+      })
+      updated += 1
+    } catch (cause) {
+      // A courier being down must not stop the sweep reaching the next parcel.
+      console.error('[courier] poll failed for', shipment.id, cause)
+    }
+  }
+
+  return updated
+}
+
+// ── Reading ──────────────────────────────────────────────────────────────
+
+export async function getShipmentForOrder(
+  organizationId: string,
+  orderId: string
+) {
+  await requireOrgAccess(organizationId, 'VIEWER')
+
+  return prisma.courierShipment.findFirst({
+    where: { organizationId, orderId },
+    orderBy: { createdAt: 'desc' },
+    include: {
+      events: { orderBy: { occurredAt: 'desc' }, take: 50 },
+    },
+  })
+}
+
+/**
+ * Public parcel tracking.
+ *
+ * Requires the order number *and* the phone number it was placed with. An order
+ * number alone is guessable — they are sequential — and a tracking page that
+ * takes one would hand a stranger a customer's name, address and order value.
+ * The phone number is the shared secret that makes the pair safe to expose
+ * without a login.
+ */
+export async function trackParcelPublicly(
+  organizationId: string,
+  orderNumber: string,
+  phone: string
+) {
+  const normalised = normalizeBdPhone(phone)
+  if (!normalised) return null
+
+  const order = await prisma.order.findFirst({
+    where: {
+      organizationId,
+      // Merchants write "#1001" on a receipt and customers type "1001".
+      orderNumber: {
+        in: [orderNumber.trim(), `#${orderNumber.trim().replace(/^#/, '')}`],
+      },
+    },
+    select: {
+      id: true,
+      orderNumber: true,
+      phone: true,
+      workflowState: true,
+      createdAt: true,
+      totalCents: true,
+      currencyCode: true,
+      shippingAddress: true,
+      shipments: {
+        orderBy: { createdAt: 'desc' },
+        take: 1,
+        select: {
+          provider: true,
+          status: true,
+          statusMessage: true,
+          trackingCode: true,
+          consignmentId: true,
+          dispatchedAt: true,
+          deliveredAt: true,
+          events: {
+            orderBy: { occurredAt: 'desc' },
+            take: 20,
+            select: { status: true, message: true, occurredAt: true },
+          },
+        },
+      },
+    },
+  })
+
+  if (!order) return null
+
+  const onOrder =
+    normalizeBdPhone(order.phone) ??
+    normalizeBdPhone(readAddressPhone(order.shippingAddress))
+
+  // Wrong phone reads exactly like a missing order, so the endpoint cannot be
+  // used to confirm that an order number exists.
+  if (onOrder !== normalised) return null
+
+  const shipment = order.shipments[0] ?? null
+
+  return {
+    orderNumber: order.orderNumber,
+    placedAt: order.createdAt,
+    workflowState: order.workflowState,
+    totalCents: order.totalCents,
+    currencyCode: order.currencyCode,
+    // Deliberately no address, no email, no line items: the customer knows what
+    // they ordered, and this page is reachable by anyone holding two facts.
+    courier: shipment
+      ? {
+          provider: shipment.provider,
+          status: shipment.status,
+          message: shipment.statusMessage,
+          trackingCode: shipment.trackingCode ?? shipment.consignmentId,
+          trackingUrl: trackingUrlFor(
+            shipment.provider,
+            shipment.trackingCode ?? shipment.consignmentId
+          ),
+          dispatchedAt: shipment.dispatchedAt,
+          deliveredAt: shipment.deliveredAt,
+          events: shipment.events,
+        }
+      : null,
+  }
+}
+
+/** The courier's own tracking page, for a customer who wants the source. */
+export function trackingUrlFor(
+  provider: CourierProvider,
+  code: string | null
+): string | null {
+  if (!code) return null
+  return provider === 'STEADFAST'
+    ? `https://steadfast.com.bd/t/${encodeURIComponent(code)}`
+    : `https://merchant.pathao.com/tracking?consignment_id=${encodeURIComponent(code)}`
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────
+
+async function emitShipmentWebhook(
+  organizationId: string,
+  shipmentId: string,
+  topic:
+    | 'SHIPMENT_CREATED'
+    | 'SHIPMENT_UPDATED'
+    | 'SHIPMENT_DELIVERED'
+    | 'SHIPMENT_RETURNED'
+): Promise<void> {
+  const shipment = await prisma.courierShipment.findUnique({
+    where: { id: shipmentId },
+    select: {
+      id: true,
+      provider: true,
+      status: true,
+      rawStatus: true,
+      statusMessage: true,
+      consignmentId: true,
+      trackingCode: true,
+      merchantOrderId: true,
+      codAmountCents: true,
+      collectedAmountCents: true,
+      deliveryFeeCents: true,
+      dispatchedAt: true,
+      deliveredAt: true,
+      order: { select: { id: true, orderNumber: true } },
+    },
+  })
+  if (!shipment) return
+
+  await emitWebhook(organizationId, topic, {
+    id: shipment.id,
+    orderId: shipment.order.id,
+    orderNumber: shipment.order.orderNumber,
+    provider: shipment.provider.toLowerCase(),
+    status: shipment.status.toLowerCase(),
+    courierStatus: shipment.rawStatus,
+    message: shipment.statusMessage,
+    consignmentId: shipment.consignmentId,
+    trackingCode: shipment.trackingCode,
+    trackingUrl: trackingUrlFor(
+      shipment.provider,
+      shipment.trackingCode ?? shipment.consignmentId
+    ),
+    codAmountCents: shipment.codAmountCents,
+    collectedAmountCents: shipment.collectedAmountCents,
+    deliveryFeeCents: shipment.deliveryFeeCents,
+    dispatchedAt: shipment.dispatchedAt?.toISOString() ?? null,
+    deliveredAt: shipment.deliveredAt?.toISOString() ?? null,
+  })
+}
+
+interface AddressShape {
+  firstName?: string
+  lastName?: string
+  company?: string
+  address1?: string
+  address2?: string
+  city?: string
+  provinceCode?: string
+  countryCode?: string
+  postalCode?: string
+  phone?: string
+}
+
+function readAddress(raw: unknown): AddressShape {
+  return raw && typeof raw === 'object' ? (raw as AddressShape) : {}
+}
+
+function readAddressPhone(raw: unknown): string | null {
+  return readAddress(raw).phone ?? null
+}
+
+/**
+ * Flattens a structured address into the single line both couriers take.
+ *
+ * Neither accepts fields; both want one string a rider can read. Order matters
+ * — street first, area last — because that is how an address is spoken in
+ * Bangladesh and how a rider will parse it.
+ */
+function formatAddress(address: AddressShape): string {
+  return (
+    [
+      address.address1,
+      address.address2,
+      address.city,
+      address.provinceCode,
+      address.postalCode,
+    ]
+      .map((part) => part?.trim())
+      .filter((part): part is string => Boolean(part))
+      .join(', ') || 'Address not provided'
+  )
+}
+
+function totalWeightKg(
+  lines: { quantity: number; weightGrams: number | null }[]
+): number {
+  const grams = lines.reduce(
+    (sum, line) => sum + (line.weightGrams ?? 0) * line.quantity,
+    0
+  )
+  // Zero is not a weight a courier accepts; their floor is applied in the
+  // client, so this just avoids sending a nonsense number.
+  return grams > 0 ? grams / 1000 : 0.5
+}
+
+/** Prisma's Json column rejects `undefined`; a round-trip normalises it away. */
+function toJson(data: unknown) {
+  return JSON.parse(JSON.stringify(data ?? {}))
+}

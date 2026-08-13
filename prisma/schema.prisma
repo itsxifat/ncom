@@ -52,6 +52,7 @@ model User {
 
   verificationCodes EmailVerificationCode[]
   couponsCreated    PlanCoupon[]
+  apiKeysCreated    ApiKey[]
 }
 
 enum PlatformRole {
@@ -121,6 +122,7 @@ model Organization {
   // the organisation runs. A store is a website; this is the business.
   settings         OrganizationSettings?
   products         Product[]
+  categories       Category[]
   collections      Collection[]
   customers        Customer[]
   carts            Cart[]
@@ -137,6 +139,18 @@ model Organization {
   couponRedemptions PlanCouponRedemption[]
   usageCounters     UsageCounter[]
   customDomains     CustomDomain[]
+
+  // Integration surface: how other systems talk to this organisation's data.
+  apiKeys          ApiKey[]
+  webhookEndpoints WebhookEndpoint[]
+
+  // Courier automation: who ships the parcels, on what terms, and what the
+  // fraud history of the phone numbers ordering them looks like.
+  courierConfigs   CourierConfig[]
+  courierSettings  CourierSettings?
+  courierShipments CourierShipment[]
+  fraudChecks      CourierFraudCheck[]
+  fraudAccounts    FraudAccount[]
 }
 
 // A pending invitation to join an organisation.
@@ -692,6 +706,7 @@ model MediaAsset {
   pagesUsingAsOgImage Page[]
   productImages       ProductImage[]
   offers              Offer[]
+  categories          Category[]
 
   @@index([organizationId])
 }
@@ -1435,6 +1450,17 @@ model Product {
   vendor      String?
   tags        String[]      @default([])
 
+  // Where the product sits in the merchandising tree. Nullable because a
+  // catalogue is usable before anyone has designed its taxonomy, and because
+  // deleting a category must not delete the products filed under it.
+  categoryId String?
+
+  // Set by an integration that owns this row upstream. `externalId` is the id
+  // in the merchant's own system, and it is what makes an import idempotent:
+  // re-importing the same catalogue updates rows instead of duplicating them.
+  externalId     String?
+  externalSource String?
+
   seoTitle       String?
   seoDescription String?
 
@@ -1443,6 +1469,7 @@ model Product {
   updatedAt   DateTime  @updatedAt
 
   organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  category     Category?           @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   options      ProductOption[]
   variants     ProductVariant[]
   images       ProductImage[]
@@ -1451,8 +1478,70 @@ model Product {
   offerItems   OfferItem[]
 
   @@unique([organizationId, handle])
+  // An upstream id is unique per organisation, which is what lets an importer
+  // upsert on it without a lookup table.
+  @@unique([organizationId, externalId])
   @@index([organizationId, status])
   @@index([organizationId, createdAt])
+  @@index([organizationId, categoryId])
+}
+
+// ── Categories ───────────────────────────────────────────────────────────
+
+// The merchandising tree: category → subcategory → child category.
+//
+// Depth is capped at three levels (`level` 0, 1, 2) and enforced in
+// categoryService, not by the database. The cap is a product decision rather
+// than a technical one — an unbounded tree is easy to store and miserable to
+// navigate, and every storefront nav, breadcrumb and filter here assumes it can
+// render the whole tree at once.
+//
+// `level` is denormalized from the parent chain so "list the top-level
+// categories" is one indexed read rather than a recursive walk, and so a
+// mis-parented row is detectable. It is only ever written by the service.
+model Category {
+  id             String  @id @default(cuid())
+  organizationId String
+  parentId       String?
+
+  name        String
+  handle      String // URL slug, unique per organisation
+  description String? @db.Text
+
+  // Short uppercase code (e.g. "DRS") used to build SKUs and read-friendly
+  // exports. Mirrors what the merchant's existing system usually already has.
+  code String?
+
+  imageMediaId String?
+
+  level      Int     @default(0)
+  position   Int     @default(0)
+  isActive   Boolean @default(true)
+  isFeatured Boolean @default(false)
+
+  seoTitle       String?
+  seoDescription String?
+
+  externalId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  // Deleting a parent orphans its children rather than cascading: losing a
+  // whole department because someone removed its top node is not recoverable,
+  // and the service re-parents children explicitly instead.
+  parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children Category[] @relation("CategoryTree")
+
+  image    MediaAsset? @relation(fields: [imageMediaId], references: [id], onDelete: SetNull)
+  products Product[]
+
+  @@unique([organizationId, handle])
+  @@unique([organizationId, externalId])
+  @@index([organizationId, parentId, position])
+  @@index([organizationId, level])
 }
 
 enum ProductStatus {
@@ -1889,6 +1978,38 @@ model Order {
   financialStatus   FinancialStatus   @default(PENDING)
   fulfillmentStatus FulfillmentStatus @default(UNFULFILLED)
 
+  /// Where the order sits in the courier pipeline, which is a different
+  /// question from whether it is paid or how much of it has shipped.
+  /// `fulfillmentStatus` answers "how many units left the building";
+  /// this answers "is a human still deciding, is a courier holding it, did it
+  /// arrive". A cash-on-delivery market needs both: an order can be
+  /// UNFULFILLED and FRAUD_REVIEW at once, and the merchant acts on the second.
+  workflowState     OrderWorkflowState @default(PENDING)
+  workflowUpdatedAt DateTime           @default(now())
+
+  /// Fraud screening result, snapshotted at the moment it was taken.
+  ///
+  /// Copied onto the order rather than joined to CourierFraudCheck for the same
+  /// reason line titles are copied: the cached lookup for a phone number keeps
+  /// moving as that customer orders elsewhere, and an order must keep reporting
+  /// the numbers the decision was actually made on. A dispute six months later
+  /// asks "what did you know when you shipped it", not "what is true today".
+  fraudVerdict        FraudVerdict?
+  fraudCheckedAt      DateTime?
+  fraudDelivered      Int?
+  fraudCancelled      Int?
+  fraudReports        Int?
+  /// Delivery success rate in basis points (7000 = 70.00%), so the stored value
+  /// is exact and comparable against the merchant's threshold without floats.
+  fraudSuccessRateBps Int?
+  /// Why the order was held or released, in the merchant's language.
+  fraudReason         String?
+
+  /// Who released or refused a held order, and when. Null on anything that was
+  /// never held.
+  reviewedByUserId String?
+  reviewedAt       DateTime?
+
   shippingAddress     Json?
   billingAddress      Json?
   // Denormalized from shippingAddress purely so tax/shipping reporting can
@@ -1911,23 +2032,76 @@ model Order {
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
-  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  store        Store?        @relation(fields: [storeId], references: [id], onDelete: SetNull)
-  page         Page?         @relation(fields: [pageId], references: [id], onDelete: SetNull)
-  customer     Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  cart         Cart?         @relation(fields: [cartId], references: [id], onDelete: SetNull)
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  store        Store?            @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  page         Page?             @relation(fields: [pageId], references: [id], onDelete: SetNull)
+  customer     Customer?         @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  cart         Cart?             @relation(fields: [cartId], references: [id], onDelete: SetNull)
   lines        OrderLine[]
   transactions Transaction[]
   fulfillments Fulfillment[]
   refunds      Refund[]
   events       OrderEvent[]
+  shipments    CourierShipment[]
 
   @@unique([organizationId, orderNumber])
   @@index([organizationId, createdAt])
   @@index([organizationId, financialStatus])
   @@index([organizationId, fulfillmentStatus])
+  // Drives the review queue and the auto-dispatch sweep, both of which read
+  // "every order in this state for this organisation, newest first".
+  @@index([organizationId, workflowState, createdAt])
   @@index([customerId])
   @@index([pageId])
+}
+
+/// The courier pipeline, from placement to doorstep.
+///
+/// Deliberately linear in the happy path — PENDING, PROCESSING, DISPATCHED,
+/// IN_TRANSIT, DELIVERED — because that is the sequence a merchant reads down a
+/// list and a customer reads on a tracking page. Everything else is an exit:
+/// held for a human, refused, sent back, or lost.
+enum OrderWorkflowState {
+  /// Placed, not yet screened. Transient — the screening runs immediately after
+  /// checkout — but it is a real state because screening can be slow or the
+  /// fraud provider can be down.
+  PENDING
+  /// Screening said no, or said "not sure". A human has to release or refuse it
+  /// before anything else happens. Nothing auto-dispatches out of here.
+  FRAUD_REVIEW
+  /// Cleared for shipping and queued for the courier. Separate from DISPATCHED
+  /// because the courier call can fail and be retried without losing the fact
+  /// that the order was approved.
+  PROCESSING
+  /// A consignment exists at the courier.
+  DISPATCHED
+  IN_TRANSIT
+  OUT_FOR_DELIVERY
+  DELIVERED
+  /// Delivered short — some units accepted, some refused at the door. Common
+  /// enough in cash-on-delivery to deserve its own state rather than being
+  /// rounded to DELIVERED or RETURNED.
+  PARTIALLY_DELIVERED
+  /// Courier is bringing it back, or has.
+  RETURNED
+  CANCELLED
+  /// The courier could not deliver and the parcel is not yet moving back, or
+  /// the dispatch itself was rejected. Needs a human either way.
+  FAILED
+}
+
+enum FraudVerdict {
+  /// Cleared every threshold the merchant set.
+  PASS
+  /// Failed at least one threshold, or the customer has no history and the
+  /// merchant chose not to trust unknown numbers.
+  REVIEW
+  /// Confirmed fraud reports over the merchant's limit.
+  FAIL
+  /// The check could not be run — no credentials, provider down, network gone.
+  /// Distinct from REVIEW because the customer did nothing wrong and the
+  /// merchant may want to treat the two differently.
+  UNAVAILABLE
 }
 
 enum FinancialStatus {
@@ -2361,4 +2535,549 @@ model LiquidSnippet {
   store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
 
   @@unique([storeId, name])
+}
+
+// ── Integration: API keys ────────────────────────────────────────────────
+
+// A machine credential for the public REST API.
+//
+// Only the SHA-256 of the token is stored. The plaintext is shown once, at
+// creation, and is unrecoverable afterwards — which is the point: a leaked
+// database, backup or read replica yields hashes that cannot be replayed
+// against the API. Losing a key therefore means rotating it, not looking it up.
+//
+// SHA-256 rather than bcrypt/argon2 deliberately. Those exist to slow down
+// guessing of *low-entropy human passwords*; this token is 32 random bytes, so
+// brute force is already infeasible, and a slow KDF would only add tens of
+// milliseconds to every authenticated API request.
+model ApiKey {
+  id             String @id @default(cuid())
+  organizationId String
+
+  name String
+
+  // The public half, e.g. "ncom_live_7f3a9c21". Shown in the UI and logged, so
+  // a merchant can tell which key is which without ever seeing the secret.
+  prefix String @unique
+
+  // sha256(prefix + '.' + secret), hex. Unique so authentication is a single
+  // indexed lookup rather than a scan-and-compare over every key.
+  tokenHash String @unique
+
+  // Last four characters of the secret, for "…a91c" in the key list. Four
+  // characters of a 43-character token is not enough to narrow a guess.
+  last4 String
+
+  scopes ApiScope[] @default([])
+
+  lastUsedAt      DateTime?
+  lastUsedIp      String?
+  expiresAt       DateTime?
+  revokedAt       DateTime?
+  createdByUserId String?
+
+  createdAt DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy    User?        @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, createdAt])
+}
+
+// What a key is allowed to do. Read and write are separate per resource so an
+// import script and a stock-sync daemon do not both have to be able to delete
+// the catalogue.
+enum ApiScope {
+  PRODUCTS_READ
+  PRODUCTS_WRITE
+  CATEGORIES_READ
+  CATEGORIES_WRITE
+  INVENTORY_READ
+  INVENTORY_WRITE
+  ORDERS_READ
+  ORDERS_WRITE
+  WEBHOOKS_READ
+  WEBHOOKS_WRITE
+}
+
+// ── Integration: outbound webhooks ───────────────────────────────────────
+
+// Where this organisation wants change notifications delivered.
+//
+// The secret is stored encrypted rather than hashed, because unlike an API key
+// it has to be *used* on every send: the delivery is signed with it so the
+// receiver can prove the request came from us and not from anyone who learned
+// the URL. See lib/crypto.ts for the envelope.
+model WebhookEndpoint {
+  id             String @id @default(cuid())
+  organizationId String
+
+  url         String
+  description String?
+  topics      WebhookTopic[] @default([])
+
+  /// Encrypted at rest. Signing key for the X-NCOM-Signature header.
+  secret String
+
+  isActive Boolean @default(true)
+
+  // Auto-disable bookkeeping. An endpoint that has been dead for days is a
+  // queue that grows forever and a retry budget spent on nothing, so the
+  // service parks it and tells the merchant rather than retrying indefinitely.
+  consecutiveFailures Int       @default(0)
+  disabledAt          DateTime?
+  lastSuccessAt       DateTime?
+  lastFailureAt       DateTime?
+  lastErrorMessage    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  deliveries   WebhookDelivery[]
+
+  @@index([organizationId])
+}
+
+// One attempt-tracked delivery of one event to one endpoint.
+//
+// Persisted before the HTTP call, not after: a delivery that is never recorded
+// cannot be retried, and "did you send it?" is the first question in every
+// integration support thread. The row is the queue as well as the log.
+model WebhookDelivery {
+  id        String @id @default(cuid())
+  webhookId String
+
+  topic WebhookTopic
+
+  // Stable per business event, shared by every endpoint that receives it and by
+  // every retry of it. Receivers use it to deduplicate, which is what makes
+  // at-least-once delivery safe to build on.
+  eventId String
+
+  payload Json
+
+  status       WebhookDeliveryStatus @default(PENDING)
+  attempts     Int                   @default(0)
+  statusCode   Int?
+  error        String?
+  responseBody String?               @db.Text
+
+  nextAttemptAt DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime  @default(now())
+
+  webhook WebhookEndpoint @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@index([webhookId, createdAt])
+  // Drives the retry sweep: pending rows whose backoff has elapsed.
+  @@index([status, nextAttemptAt])
+}
+
+enum WebhookDeliveryStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+}
+
+// What happened. Named `resource.verb` to match the JSON `topic` field the
+// receiver reads, so the enum, the docs and the wire format never drift.
+enum WebhookTopic {
+  PRODUCT_CREATED
+  PRODUCT_UPDATED
+  PRODUCT_DELETED
+  INVENTORY_UPDATED
+  CATEGORY_CREATED
+  CATEGORY_UPDATED
+  CATEGORY_DELETED
+  ORDER_CREATED
+  ORDER_UPDATED
+  ORDER_CANCELLED
+  ORDER_FULFILLED
+  ORDER_HELD_FOR_REVIEW
+  SHIPMENT_CREATED
+  SHIPMENT_UPDATED
+  SHIPMENT_DELIVERED
+  SHIPMENT_RETURNED
+}
+
+// ── Courier automation ───────────────────────────────────────────────────
+//
+// Cash-on-delivery is the default in the markets this platform serves, which
+// makes a delivery attempt a loan: the merchant ships goods and pays the
+// courier's fee before anyone has paid them. A customer with a habit of
+// refusing parcels at the door costs real money every time, so orders are
+// screened against the courier's own delivery history for that phone number
+// before anything is handed over.
+//
+// The pipeline: order placed -> phone screened -> either auto-dispatched to the
+// courier or held for a human -> consignment created -> the courier's webhooks
+// drive every state after that, with a reconciliation poll behind them because
+// a webhook that is missed once is missed forever.
+
+enum CourierProvider {
+  STEADFAST
+  PATHAO
+}
+
+// Per-organisation courier account.
+//
+// Credentials are per tenant, never platform-wide: the merchant ships on their
+// own courier contract, the COD money settles into their account, and the fraud
+// history they screen against is the one their own account can see.
+model CourierConfig {
+  id             String @id @default(cuid())
+  organizationId String
+
+  provider    CourierProvider
+  displayName String
+  isEnabled   Boolean         @default(false)
+  /// Pathao's sandbox. Steadfast has no test environment, so this only gates
+  /// which base URL Pathao calls.
+  testMode    Boolean         @default(false)
+  /// Which courier gets an order when the merchant does not name one.
+  isDefault   Boolean         @default(false)
+  position    Int             @default(0)
+
+  /// Encrypted at rest by lib/crypto.ts, value by value. Never select this
+  /// column into anything that reaches the client or a Liquid drop.
+  ///
+  /// Steadfast: apiKey, secretKey — the portal API pair that creates parcels.
+  /// Pathao: clientId, clientSecret, username, password.
+  ///
+  /// Fraud screening credentials are deliberately NOT here. They are a
+  /// different account type entirely — merchant portal logins rather than API
+  /// keys — and a merchant needs several of them, because the portal rate
+  /// limits and locks accounts and one dead login must not stop screening. See
+  /// FraudAccount.
+  credentials Json?
+
+  /// Non-secret operating parameters — Pathao store_id, delivery_type,
+  /// item_type, default parcel weight. Plain JSON because none of it is a
+  /// secret and the merchant edits it directly.
+  settings Json?
+
+  /// Pathao's OAuth token, cached across restarts so a cold start does not
+  /// re-authenticate on the buyer's critical path. Encrypted: it is a bearer
+  /// credential with five days of life.
+  accessToken    String?
+  refreshToken   String?
+  tokenExpiresAt DateTime?
+
+  /// The unguessable path segment in this config's inbound webhook URL. The
+  /// couriers cannot send a tenant id, so the URL itself is what identifies
+  /// which organisation an incoming status update belongs to — and a guessable
+  /// URL would let anyone drive another merchant's orders to "delivered".
+  webhookToken String @unique
+
+  /// Encrypted. What the courier must present on an inbound call: Pathao's
+  /// X-PATHAO-Signature, or the bearer token Steadfast is configured with.
+  webhookSecret String?
+
+  /// Last successful credential test, and why the last one failed. Shown in the
+  /// settings UI so "it stopped working" has an answer before support is called.
+  lastVerifiedAt   DateTime?
+  lastErrorMessage String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  shipments    CourierShipment[]
+
+  @@unique([organizationId, provider])
+  @@index([organizationId])
+}
+
+// The merchant's rules for letting an order through without a human.
+//
+// One row per organisation. Thresholds are stored as integers — basis points
+// for the rate, counts for the rest — so the comparison that decides whether to
+// ship goods is exact rather than a float that lands on 69.99999%.
+model CourierSettings {
+  id             String @id @default(cuid())
+  organizationId String @unique
+
+  /// Master switch. Off means every order waits for a human, which is where a
+  /// merchant starts before they trust the thresholds.
+  autoDispatchEnabled Boolean @default(false)
+  /// Screen phone numbers at all. Independent of auto-dispatch: a merchant may
+  /// want the verdict shown on every order while still dispatching by hand.
+  fraudCheckEnabled   Boolean @default(true)
+
+  /// Minimum parcels in this customer's courier history at all, delivered or
+  /// refused. A number nobody has ever shipped to tells you nothing, whatever
+  /// its rate reads.
+  minTotalParcels    Int  @default(10)
+  /// Minimum parcels actually delivered. Separate from the total above, because
+  /// 20 parcels of which 2 arrived is plenty of history and a terrible
+  /// customer.
+  minDeliveredOrders Int  @default(10)
+  /// Minimum share of this customer's parcels that were delivered, in basis
+  /// points (7000 = 70%). Zero switches the rate check off and leaves the two
+  /// count rules to decide, which is how most merchants start.
+  minDeliveryRateBps Int  @default(0)
+  /// Confirmed fraud reports tolerated. Zero for most merchants.
+  maxFraudReports    Int  @default(0)
+  /// Cancelled parcels tolerated in absolute terms, on top of the rate — a
+  /// customer with 40 delivered and 15 refused passes a 70% rate but is still
+  /// costing money. Null disables the check.
+  maxCancelledOrders Int?
+
+  /// What to do with a phone number the courier has never seen. Most first-time
+  /// customers are simply new, so the default trusts them; a merchant burned by
+  /// throwaway numbers turns this off and reviews them by hand.
+  allowUnknownCustomers Boolean @default(true)
+
+  /// Orders over this value always get a human look, however clean the history.
+  /// Null means value is not considered.
+  manualReviewAboveCents Int?
+
+  /// Hold auto-dispatch for this long after checkout, so a customer who
+  /// immediately calls to change an address or cancel is not chasing a parcel
+  /// that already left. Zero dispatches at once.
+  dispatchDelayMinutes Int @default(0)
+
+  /// Only dispatch orders that are already paid. Off by default because the
+  /// whole point of this pipeline is cash on delivery.
+  requirePaidOrders Boolean @default(false)
+
+  /// How long a phone lookup stays good. The courier's own numbers move slowly
+  /// and every lookup is a login to their portal, so re-checking per order
+  /// would be both slow and rude.
+  fraudCacheHours Int @default(24)
+
+  /// Automatically cancel anything the screen returns FAIL for, instead of
+  /// queueing it. Off by default: a wrong auto-cancel loses a real sale, and
+  /// the merchant should see the first few before delegating that.
+  autoCancelOnFail Boolean @default(false)
+
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+// One parcel at one courier.
+//
+// Not folded into Fulfillment: a Fulfillment records that stock left the
+// building and which units, while this records a live conversation with a third
+// party that keeps changing its mind for a week afterwards. Both exist for the
+// same order, and fulfilling is what creates this.
+model CourierShipment {
+  id              String  @id @default(cuid())
+  organizationId  String
+  orderId         String
+  courierConfigId String?
+
+  provider CourierProvider
+
+  /// The courier's identifier for the parcel. Nullable until the create call
+  /// comes back — the row is written first so a failed dispatch is visible and
+  /// retryable rather than lost.
+  consignmentId   String?
+  /// Steadfast's short code, and what a customer is given to track with.
+  trackingCode    String?
+  /// What we sent as the courier's `invoice` / `merchant_order_id`. This is how
+  /// a webhook that omits the consignment id still finds its way home.
+  merchantOrderId String
+
+  status        CourierShipmentStatus @default(PENDING)
+  /// The courier's own status string, unmapped. Kept because their vocabulary
+  /// changes without notice and a status we have not mapped yet must still be
+  /// readable by a human looking at the row.
+  rawStatus     String?
+  statusMessage String?
+
+  /// What the courier was asked to collect, and what they say they collected.
+  /// The difference is the merchant's problem to chase, so both are recorded.
+  codAmountCents       Int
+  collectedAmountCents Int?
+  deliveryFeeCents     Int?
+
+  recipientName    String
+  recipientPhone   String
+  recipientAddress String
+
+  /// Exactly what was sent and exactly what came back, for the argument that
+  /// starts when a parcel goes missing. May contain PII.
+  requestPayload  Json?
+  responsePayload Json?
+
+  /// Dispatch bookkeeping. A courier API that is down must not strand an order:
+  /// the attempt is counted, the error kept, and the sweep tries again.
+  attempts      Int       @default(0)
+  lastError     String?
+  nextAttemptAt DateTime?
+
+  dispatchedAt DateTime?
+  deliveredAt  DateTime?
+  cancelledAt  DateTime?
+  /// Last time the courier told us anything, by webhook or by poll. The
+  /// reconciliation sweep uses this to find parcels that have gone quiet.
+  lastEventAt  DateTime?
+  lastPolledAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  order        Order                  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  config       CourierConfig?         @relation(fields: [courierConfigId], references: [id], onDelete: SetNull)
+  events       CourierShipmentEvent[]
+
+  // A consignment id is unique within a courier, and this is what makes an
+  // inbound webhook idempotent: the same update arriving twice finds the same
+  // row. Null until the courier assigns one, and Postgres treats nulls as
+  // distinct, so undispatched rows do not collide.
+  @@unique([provider, consignmentId])
+  @@index([organizationId, status])
+  @@index([orderId])
+  @@index([trackingCode])
+  // Drives both the dispatch retry and the reconciliation poll.
+  @@index([status, nextAttemptAt])
+  @@index([status, lastPolledAt])
+}
+
+// Canonical parcel states, mapped from each courier's own vocabulary in
+// server/courier/statusMap.ts.
+//
+// Deliberately smaller than the union of what the couriers report: a merchant
+// tracking parcels across two providers needs one ladder, not two. The
+// provider's exact wording is preserved on `rawStatus` for anyone who needs it.
+enum CourierShipmentStatus {
+  /// Row exists, courier has not been called yet or the call failed.
+  PENDING
+  /// Courier accepted the consignment and is reviewing it.
+  SUBMITTED
+  PICKUP_PENDING
+  PICKED_UP
+  IN_TRANSIT
+  OUT_FOR_DELIVERY
+  DELIVERED
+  PARTIALLY_DELIVERED
+  ON_HOLD
+  RETURN_IN_TRANSIT
+  RETURNED
+  CANCELLED
+  DELIVERY_FAILED
+  /// The courier reported something we do not map. Surfaced rather than hidden,
+  /// because silently treating an unknown status as "still in transit" is how a
+  /// returned parcel goes unnoticed for a fortnight.
+  UNKNOWN
+}
+
+// Append-only parcel timeline. This is what both the merchant's order page and
+// the customer's tracking page read.
+model CourierShipmentEvent {
+  id         String @id @default(cuid())
+  shipmentId String
+
+  status  CourierShipmentStatus
+  message String
+  source  CourierEventSource    @default(WEBHOOK)
+
+  /// The provider's untouched payload. Kept so a mapping bug can be diagnosed
+  /// from stored data rather than by waiting for the parcel to move again.
+  rawEvent Json?
+
+  /// When the courier says it happened, which is not when we heard about it —
+  /// a retried webhook can arrive hours late and must not reorder the timeline.
+  occurredAt DateTime
+  createdAt  DateTime @default(now())
+
+  shipment CourierShipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  @@index([shipmentId, occurredAt])
+}
+
+enum CourierEventSource {
+  /// Pushed by the courier.
+  WEBHOOK
+  /// Found by the reconciliation poll, because the push was missed.
+  POLL
+  /// Written by this platform — dispatched, retried, cancelled by a merchant.
+  SYSTEM
+}
+
+// A Steadfast merchant portal login used to read customer delivery history.
+//
+// Separate from CourierConfig, and deliberately plural, because these are a
+// different kind of credential doing a different job. CourierConfig holds one
+// API key pair that creates parcels; this holds the portal logins that *read*
+// other merchants' delivery outcomes for a phone number. A merchant keeps
+// several: the portal rate limits, locks accounts, and expires sessions, and a
+// screen that stops working because one login went bad is a screen that quietly
+// stops protecting the store. Lookups try each account in turn.
+model FraudAccount {
+  id             String @id @default(cuid())
+  organizationId String
+
+  email    String
+  /// Encrypted at rest by lib/crypto.ts. Unlike an API key this must be
+  /// replayable — every login to the portal re-sends it — so it is encrypted
+  /// rather than hashed.
+  password String
+  /// Merchant's own note: "main account", "backup — Rakib's".
+  label    String?
+
+  isActive Boolean @default(true)
+  /// Order accounts are tried in. The first working one answers.
+  position Int     @default(0)
+
+  /// Per-account health, recorded by testing each login individually rather
+  /// than inferring it from whether *some* account worked. One working account
+  /// masking three dead ones is exactly how a merchant discovers the problem
+  /// only when the last one dies.
+  lastTestedAt    DateTime?
+  lastTestOk      Boolean?
+  lastTestMessage String?
+  /// When this account last answered a real lookup, for spotting one that tests
+  /// fine but is never actually reached.
+  lastUsedAt      DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, email])
+  @@index([organizationId, position])
+}
+
+// Cached delivery history for a phone number.
+//
+// Cached per organisation rather than platform-wide on purpose. The numbers
+// come from the merchant's own courier account and reflect what *that* account
+// can see; sharing them across tenants would leak one merchant's customer
+// history to another and would be wrong as often as it was useful.
+model CourierFraudCheck {
+  id             String @id @default(cuid())
+  organizationId String
+
+  /// Normalised to local 11-digit form (01XXXXXXXXX) before storage, so
+  /// +8801X, 8801X and 01X are one customer rather than three.
+  phone    String
+  provider CourierProvider @default(STEADFAST)
+
+  totalOrders    Int
+  delivered      Int
+  cancelled      Int
+  frauds         Int
+  successRateBps Int
+
+  /// Raw consignment list from the provider, for the merchant who wants to see
+  /// the actual orders behind the numbers.
+  raw Json?
+
+  checkedAt DateTime @default(now())
+  /// When this lookup goes stale. Read directly rather than computed from
+  /// checkedAt, so shortening the cache window in settings takes effect on the
+  /// next check instead of retroactively expiring everything at once.
+  expiresAt DateTime
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, phone])
+  @@index([organizationId, checkedAt])
 }

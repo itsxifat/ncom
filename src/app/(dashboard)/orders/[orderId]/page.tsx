@@ -2,6 +2,13 @@ import { notFound } from 'next/navigation'
 import { getActiveOrganization } from '@/server/services/organizationService'
 import { getOrder } from '@/server/services/orderService'
 import { listLocations } from '@/server/services/shippingService'
+import {
+  getShipmentForOrder,
+  trackingUrlFor,
+} from '@/server/services/courierService'
+import { listCourierConfigs } from '@/server/services/courierConfigService'
+import { CourierPanel } from '@/components/store/courier-panel'
+import { WorkflowStateBadge } from '@/components/store/fraud-badges'
 import { formatMoney } from '@/lib/money'
 import { PageHeader } from '@/components/app/page-header'
 import { Card, CardContent } from '@/components/ui/card'
@@ -72,7 +79,12 @@ export default async function OrderDetailPage({
     notFound()
   }
 
-  const locations = await listLocations(organization.id)
+  const [locations, shipment, courierConfigs] = await Promise.all([
+    listLocations(organization.id),
+    getShipmentForOrder(organization.id, order.id),
+    listCourierConfigs(organization.id),
+  ])
+
   const currency = order.currencyCode
 
   const lineSummaries = order.lines.map((line) => ({
@@ -99,6 +111,9 @@ export default async function OrderDetailPage({
           <span className="flex flex-wrap items-center gap-2">
             <FinancialStatusBadge status={order.financialStatus} />
             <FulfillmentStatusBadge status={order.fulfillmentStatus} />
+            {/* Where the parcel is, which is a different question from whether
+                the order is paid or how much of it has shipped. */}
+            <WorkflowStateBadge state={order.workflowState} />
             {order.cancelledAt && (
               <Badge variant="destructive">Cancelled</Badge>
             )}
@@ -128,6 +143,57 @@ export default async function OrderDetailPage({
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
         <div className="flex flex-col gap-6">
+          {/* First in the column, above the items: when an order is held for
+              review this is the only thing on the page that needs a decision,
+              and burying it under a price breakdown is how held orders sit for
+              a day. */}
+          <CourierPanel
+            orderId={order.id}
+            workflowState={order.workflowState}
+            cancelled={Boolean(order.cancelledAt)}
+            fraud={{
+              verdict: order.fraudVerdict,
+              reason: order.fraudReason,
+              checkedAt: order.fraudCheckedAt?.toISOString() ?? null,
+              delivered: order.fraudDelivered,
+              cancelled: order.fraudCancelled,
+              frauds: order.fraudReports,
+              successRateBps: order.fraudSuccessRateBps,
+            }}
+            shipment={
+              shipment
+                ? {
+                    provider: shipment.provider,
+                    status: shipment.status,
+                    statusMessage: shipment.statusMessage,
+                    consignmentId: shipment.consignmentId,
+                    trackingCode: shipment.trackingCode,
+                    trackingUrl: trackingUrlFor(
+                      shipment.provider,
+                      shipment.trackingCode ?? shipment.consignmentId
+                    ),
+                    lastError: shipment.lastError,
+                    dispatchedAt: shipment.dispatchedAt?.toISOString() ?? null,
+                    deliveredAt: shipment.deliveredAt?.toISOString() ?? null,
+                    events: shipment.events.map((event) => ({
+                      id: event.id,
+                      status: event.status,
+                      message: event.message,
+                      occurredAt: event.occurredAt.toISOString(),
+                      source: event.source,
+                    })),
+                  }
+                : null
+            }
+            providers={courierConfigs
+              .filter((config) => config.isEnabled)
+              .map((config) => ({
+                provider: config.provider,
+                label: config.displayName,
+                isDefault: config.isDefault,
+              }))}
+          />
+
           <Card>
             <CardContent className="flex flex-col gap-4">
               <h2 className="font-display text-lg font-semibold tracking-tight">

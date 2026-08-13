@@ -3,6 +3,7 @@ import { ExternalLink } from 'lucide-react'
 import { getActiveOrganization } from '@/server/services/organizationService'
 import { getProduct } from '@/server/services/productService'
 import { getOrganizationSettings } from '@/server/services/organizationSettingsService'
+import { listCategoryOptions } from '@/server/services/categoryService'
 import { listStores } from '@/server/services/storeService'
 import { env } from '@/lib/env'
 import { centsToMajorString } from '@/lib/money'
@@ -25,9 +26,10 @@ export default async function EditProductPage({
     notFound()
   }
 
-  const [settings, stores] = await Promise.all([
+  const [settings, stores, categories] = await Promise.all([
     getOrganizationSettings(organization.id),
     listStores(organization.id),
+    listCategoryOptions(organization.id),
   ])
 
   const currency = settings?.currencyCode ?? 'USD'
@@ -72,6 +74,7 @@ export default async function EditProductPage({
 
       <ProductForm
         currencyCode={currency}
+        categories={categories}
         initial={{
           id: product.id,
           title: product.title,
@@ -81,6 +84,7 @@ export default async function EditProductPage({
           productType: product.productType ?? '',
           vendor: product.vendor ?? '',
           tags: product.tags,
+          categoryId: product.categoryId,
           seoTitle: product.seoTitle ?? '',
           seoDescription: product.seoDescription ?? '',
           options: product.options.map((option) => ({

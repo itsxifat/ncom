@@ -78,6 +78,13 @@ export const createProductSchema = z.object({
   productType: z.string().trim().max(80).optional(),
   vendor: z.string().trim().max(120).optional(),
   tags: z.array(z.string().trim().min(1).max(60)).max(100).default([]),
+  // Nullable rather than merely optional: clearing a product's category is a
+  // real edit, and `undefined` has to keep meaning "leave it alone" so a
+  // partial update from the API cannot silently unfile a product.
+  categoryId: z.string().min(1).nullable().optional(),
+  /** The id this product has in the merchant's own system. Makes imports idempotent. */
+  externalId: z.string().trim().max(200).nullable().optional(),
+  externalSource: z.string().trim().max(80).nullable().optional(),
   seoTitle: z.string().trim().max(200).optional(),
   seoDescription: z.string().trim().max(500).optional(),
   options: z.array(productOptionSchema).max(3).default([]),

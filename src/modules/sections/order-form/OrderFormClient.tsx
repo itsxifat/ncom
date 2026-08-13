@@ -8,12 +8,17 @@ import { SELECT_OFFER_EVENT } from '../StorefrontEnhancements'
 import type { OrderFormContent } from './index'
 import {
   fixedSelection,
+  pricedQuantities,
   quantityBounds,
   quoteOffer,
 } from '@/lib/offers/pricing'
 import { applyPromotions, promotionHints } from '@/lib/offers/promotions'
 import { formatMoney } from '@/lib/money'
-import type { OfferSelectionItem, PublicOffer } from '@/lib/offers/types'
+import type {
+  OfferLine,
+  OfferSelectionItem,
+  PublicOffer,
+} from '@/lib/offers/types'
 import { OfferPicker } from './OfferPicker'
 import { Radio, RadioGroup } from '@/components/ui/radio'
 import { FormSelect } from '@/components/ui/form-select'
@@ -249,12 +254,30 @@ export function OrderFormClient({
                   onSelect={chooseOffer}
                   style={content.offerStyle}
                   money={money}
+                  live={
+                    offer && quote && !quote.error
+                      ? {
+                          key: offer.key,
+                          priceCents: quote.goodsCents,
+                          // The merchant's own compare-at still wins when it is
+                          // the higher of the two; otherwise what the chosen
+                          // items list for is the honest strike-through.
+                          compareAtCents: Math.max(
+                            offer.compareAtCents,
+                            quote.regularCents
+                          ),
+                        }
+                      : null
+                  }
                 />
               </fieldset>
             )}
 
             {offer && (
               <OfferDetail
+                // Remounted per offer, so a size chosen in one bundle is not
+                // carried into another that may not even sell it.
+                key={offer.key}
                 offer={offer}
                 variantChoices={variantChoices}
                 onVariant={(index, variantId) =>
@@ -483,81 +506,185 @@ function OfferDetail({
 
     return (
       <div className="space-y-3">
-        {choosable.map(({ line, index }) => (
-          <div key={`${line.productId}-${index}`}>
-            <label className="mb-1.5 block text-sm font-medium">
-              {line.title}
-            </label>
-            <FormSelect
-              tone="page"
-              value={variantChoices[index] ?? ''}
-              onChange={(event) => onVariant(index, event.target.value)}
-              className="w-full rounded-xl border border-neutral-300 px-4 py-3"
-            >
-              <option value="">Choose an option</option>
-              {line.variants.map((variant) => (
-                <option
-                  key={variant.id}
-                  value={variant.id}
-                  disabled={!variant.available}
-                >
-                  {variant.title}
-                  {variant.available ? '' : ' — out of stock'}
-                </option>
-              ))}
-            </FormSelect>
-          </div>
-        ))}
+        {choosable.map(({ line, index }) => {
+          // Sizes at different prices need the price on the option, or the
+          // buyer picks Large and the total moves for no visible reason.
+          const varies =
+            new Set(line.variants.map((variant) => variant.priceCents)).size > 1
+
+          return (
+            <div key={`${line.productId}-${index}`}>
+              <label className="mb-1.5 block text-sm font-medium">
+                {line.title}
+              </label>
+              <FormSelect
+                tone="page"
+                value={variantChoices[index] ?? ''}
+                onChange={(event) => onVariant(index, event.target.value)}
+                className="w-full rounded-xl border border-neutral-300 px-4 py-3"
+              >
+                <option value="">Choose an option</option>
+                {line.variants.map((variant) => (
+                  <option
+                    key={variant.id}
+                    value={variant.id}
+                    disabled={!variant.available}
+                  >
+                    {variant.title}
+                    {varies ? ` · ${money(variant.priceCents)}` : ''}
+                    {variant.available ? '' : ' — out of stock'}
+                  </option>
+                ))}
+              </FormSelect>
+            </div>
+          )
+        })}
       </div>
     )
   }
 
+  // A mix & match offer sells the quantities its ladder prices and no others,
+  // so when those have gaps the buyer is told which ones — "choose 2–12" would
+  // invite a 5 the form then refuses at the summary.
+  const allowed = pricedQuantities(offer)
+  const gapped =
+    allowed.length > 1 &&
+    allowed.some(
+      (quantity, index) => index > 0 && quantity !== allowed[index - 1] + 1
+    )
+
   return (
     <div className="space-y-2">
       <p className="text-sm text-[color:var(--page-muted,#64748b)]">
-        {bounds.max > 0
-          ? `Choose ${bounds.min === bounds.max ? bounds.min : `${bounds.min}–${bounds.max}`} items · ${picked} chosen`
-          : `Choose at least ${bounds.min} · ${picked} chosen`}
+        {gapped
+          ? `Choose ${allowed.slice(0, -1).join(', ')} or ${allowed[allowed.length - 1]} items · ${picked} chosen`
+          : bounds.max > 0
+            ? `Choose ${bounds.min === bounds.max ? bounds.min : `${bounds.min}–${bounds.max}`} items · ${picked} chosen`
+            : `Choose at least ${bounds.min} · ${picked} chosen`}
       </p>
-      {offer.pool.map((line) =>
-        line.variants
-          .filter((variant) => variant.available)
-          .map((variant) => {
-            const quantity = poolPicks[variant.id] ?? 0
-            return (
-              <div
-                key={variant.id}
-                className="flex items-center gap-3 rounded-xl border border-neutral-200 p-2.5"
-              >
-                {line.imageUrl && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={line.imageUrl}
-                    alt=""
-                    className="h-12 w-12 flex-none rounded-lg object-cover"
-                  />
-                )}
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">{line.title}</p>
-                  <p className="text-xs text-[color:var(--page-muted,#64748b)]">
-                    {line.variants.length > 1 ? `${variant.title} · ` : ''}
-                    {offer.kind === 'ALACARTE' ? money(variant.priceCents) : ''}
-                  </p>
-                </div>
-                <Stepper
-                  value={quantity}
-                  onChange={(next) =>
-                    onPool({ ...poolPicks, [variant.id]: next })
-                  }
-                  max={
-                    bounds.max > 0
-                      ? Math.max(0, bounds.max - picked + quantity)
-                      : 99
-                  }
-                />
-              </div>
-            )
-          })
+      {offer.pool.map((line, index) => (
+        <PoolLine
+          key={`${line.productId}-${index}`}
+          line={line}
+          priced={offer.kind === 'ALACARTE'}
+          poolPicks={poolPicks}
+          onPool={onPool}
+          money={money}
+          headroom={bounds.max > 0 ? Math.max(0, bounds.max - picked) : 99}
+        />
+      ))}
+    </div>
+  )
+}
+
+/**
+ * One *product* in a pool offer, with its sizes behind a chooser.
+ *
+ * A product used to be listed once per variant, so a shirt in five sizes filled
+ * the form with five near-identical rows and the buyer had to find their size
+ * among them before they could add anything. A pool of six such products is
+ * thirty rows. Here the product appears once — which is the thing being chosen —
+ * and the size is a second, smaller decision made inside its row.
+ *
+ * Picks stay keyed by variant id, so two sizes of the same product remain two
+ * order lines and the server prices each at its own price. The chips under the
+ * row are what makes that visible: having added two Mediums and one Large, the
+ * buyer can see exactly that without changing the chooser back and forth.
+ */
+function PoolLine({
+  line,
+  priced,
+  poolPicks,
+  onPool,
+  money,
+  headroom,
+}: {
+  line: OfferLine
+  /** ALACARTE charges per piece, so the price belongs on the row. */
+  priced: boolean
+  poolPicks: Record<string, number>
+  onPool: (next: Record<string, number>) => void
+  money: (cents: number) => string
+  /** How many more pieces this offer still allows. */
+  headroom: number
+}) {
+  const sellable = line.variants.filter((variant) => variant.available)
+  const [variantId, setVariantId] = useState(() => sellable[0]?.id ?? '')
+
+  if (sellable.length === 0) return null
+
+  const variant =
+    sellable.find((candidate) => candidate.id === variantId) ?? sellable[0]
+  const quantity = poolPicks[variant.id] ?? 0
+  const chosen = sellable.filter(
+    (candidate) => (poolPicks[candidate.id] ?? 0) > 0
+  )
+
+  return (
+    <div className="rounded-xl border border-neutral-200 p-2.5">
+      <div className="flex items-center gap-3">
+        {line.imageUrl && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={line.imageUrl}
+            alt=""
+            className="h-12 w-12 flex-none rounded-lg object-cover"
+          />
+        )}
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium">{line.title}</p>
+          {priced && (
+            <p className="text-xs text-[color:var(--page-muted,#64748b)]">
+              {money(variant.priceCents)}
+            </p>
+          )}
+          {/* Before the stepper, because the size is chosen first and the
+              stepper adds whichever size is showing here. */}
+          {sellable.length > 1 && (
+            <FormSelect
+              tone="page"
+              value={variant.id}
+              onChange={(event) => setVariantId(event.target.value)}
+              aria-label={`Choose an option for ${line.title}`}
+              className="mt-1.5 w-full rounded-lg border border-neutral-300 px-2.5 py-1.5 text-sm"
+            >
+              {sellable.map((choice) => (
+                <option key={choice.id} value={choice.id}>
+                  {choice.title}
+                  {priced ? ` · ${money(choice.priceCents)}` : ''}
+                </option>
+              ))}
+            </FormSelect>
+          )}
+        </div>
+        <Stepper
+          value={quantity}
+          onChange={(next) => onPool({ ...poolPicks, [variant.id]: next })}
+          max={quantity + headroom}
+        />
+      </div>
+
+      {chosen.length > 0 && sellable.length > 1 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {chosen.map((choice) => (
+            <button
+              key={choice.id}
+              type="button"
+              onClick={() => {
+                const next = { ...poolPicks }
+                delete next[choice.id]
+                onPool(next)
+              }}
+              className="rounded-full bg-black/[0.05] px-2.5 py-1 text-xs font-medium"
+              aria-label={`Remove ${choice.title}`}
+            >
+              {choice.title} × {poolPicks[choice.id]}
+              <span className="ml-1.5 text-[color:var(--page-muted,#64748b)]">
+                ✕
+              </span>
+            </button>
+          ))}
+        </div>
       )}
     </div>
   )
