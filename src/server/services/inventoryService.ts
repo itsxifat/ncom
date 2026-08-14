@@ -679,16 +679,23 @@ export async function listInventory(
     }
   })()
 
+  // Every branch ends on v."id" because this query is paged with LIMIT/OFFSET,
+  // and OFFSET only means anything under a *total* order. Title and position are
+  // both far from unique — a catalogue with thirty products called "Hawaiian
+  // Shirt" leaves Postgres free to return tied rows in a different order per
+  // page, so a client walking the pages sees some variants twice and never sees
+  // others at all. That reads as phantom stock drift, which is exactly the kind
+  // of bug nobody suspects the paging for.
   const orderClause = (() => {
     switch (options.sort) {
       case 'available-asc':
-        return Prisma.sql`ORDER BY COALESCE(SUM(l."available"), 0) ASC, p."title" ASC, v."position" ASC`
+        return Prisma.sql`ORDER BY COALESCE(SUM(l."available"), 0) ASC, p."title" ASC, v."position" ASC, v."id" ASC`
       case 'available-desc':
-        return Prisma.sql`ORDER BY COALESCE(SUM(l."available"), 0) DESC, p."title" ASC, v."position" ASC`
+        return Prisma.sql`ORDER BY COALESCE(SUM(l."available"), 0) DESC, p."title" ASC, v."position" ASC, v."id" ASC`
       case 'updated':
-        return Prisma.sql`ORDER BY MAX(v."updatedAt") DESC, v."position" ASC`
+        return Prisma.sql`ORDER BY MAX(v."updatedAt") DESC, v."position" ASC, v."id" ASC`
       default:
-        return Prisma.sql`ORDER BY p."title" ASC, v."position" ASC`
+        return Prisma.sql`ORDER BY p."title" ASC, v."position" ASC, v."id" ASC`
     }
   })()
 

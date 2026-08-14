@@ -625,10 +625,21 @@ async function syncImages(
 /**
  * Reconciles the submitted variant list against what is stored.
  *
- * Variants are matched by id and updated in place; ones missing from the
- * submission are deleted. Deletion is safe for order history because
- * OrderLine.variantId is `onDelete: SetNull` and every descriptive field on
- * the line is a snapshot — a deleted variant leaves past orders readable.
+ * A submitted row is matched to a stored one by id, then by SKU, then by its
+ * option combination; ones matching nothing are created, and stored rows that
+ * nothing matched are deleted.
+ *
+ * The fallbacks past `id` are what make this safe for integrations. An importer
+ * syncing someone else's catalogue knows its own SKUs and sizes but has never
+ * seen our ids, so an id-only match treats every push as "all new variants" —
+ * it deletes the rows and re-creates them, and because InventoryLevel hangs off
+ * the variant, the shop's entire stock ledger goes with them. Matching on the
+ * natural keys the caller *does* know keeps the row, and therefore the stock,
+ * across a re-import.
+ *
+ * Deletion is still safe for order history because OrderLine.variantId is
+ * `onDelete: SetNull` and every descriptive field on the line is a snapshot —
+ * a deleted variant leaves past orders readable.
  */
 async function syncVariants(
   tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0],
@@ -637,14 +648,73 @@ async function syncVariants(
 ) {
   const existing = await tx.productVariant.findMany({
     where: { productId },
-    select: { id: true },
+    select: {
+      id: true,
+      sku: true,
+      option1: true,
+      option2: true,
+      option3: true,
+    },
   })
   const existingIds = new Set(existing.map((variant) => variant.id))
-  const submittedIds = new Set(
-    variants.map((variant) => variant.id).filter((id): id is string => !!id)
+
+  // NUL-joined, as assertVariantOptionsAreUnique does, so an option value that
+  // contains the separator cannot make two combinations look like one.
+  const optionKey = (variant: {
+    option1: string | null
+    option2: string | null
+    option3: string | null
+  }) =>
+    [variant.option1, variant.option2, variant.option3]
+      .map((value) => value ?? '')
+      .join(' ')
+
+  // A SKU held by two stored rows identifies neither, so it is not a key at
+  // all — drop it and let those rows fall through to the option match.
+  const bySku = new Map<string, string>()
+  const ambiguousSkus = new Set<string>()
+  for (const variant of existing) {
+    if (!variant.sku) continue
+    if (bySku.has(variant.sku)) ambiguousSkus.add(variant.sku)
+    else bySku.set(variant.sku, variant.id)
+  }
+  for (const sku of ambiguousSkus) bySku.delete(sku)
+
+  // Unique within a product by database constraint, which is what makes it a
+  // dependable last resort.
+  const byOptions = new Map(
+    existing.map((variant) => [optionKey(variant), variant.id])
   )
 
-  const toDelete = [...existingIds].filter((id) => !submittedIds.has(id))
+  // Every row is resolved before anything is written: the delete set has to be
+  // known up front, and one stored variant must not be claimed by two
+  // submitted ones.
+  const claimed = new Set<string>()
+  const matches = variants.map((variant) => {
+    const candidates = [
+      variant.id && existingIds.has(variant.id) ? variant.id : undefined,
+      variant.sku ? bySku.get(variant.sku) : undefined,
+      byOptions.get(
+        optionKey({
+          option1: variant.option1 ?? null,
+          option2: variant.option2 ?? null,
+          option3: variant.option3 ?? null,
+        })
+      ),
+    ]
+
+    for (const id of candidates) {
+      if (id && !claimed.has(id)) {
+        claimed.add(id)
+        return id
+      }
+    }
+    return null
+  })
+
+  // Before the updates, so a variant taking over an option combination freed by
+  // a deleted one does not trip the (productId, option1..3) unique constraint.
+  const toDelete = [...existingIds].filter((id) => !claimed.has(id))
   if (toDelete.length > 0) {
     await tx.productVariant.deleteMany({ where: { id: { in: toDelete } } })
   }
@@ -670,8 +740,9 @@ async function syncVariants(
       imageId: variant.imageId ?? null,
     }
 
-    if (variant.id && existingIds.has(variant.id)) {
-      await tx.productVariant.update({ where: { id: variant.id }, data })
+    const matchedId = matches[index]
+    if (matchedId) {
+      await tx.productVariant.update({ where: { id: matchedId }, data })
     } else {
       await tx.productVariant.create({ data: { ...data, productId } })
     }
