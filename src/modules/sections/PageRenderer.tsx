@@ -6,10 +6,30 @@ export interface RenderablePageSection {
   id: string
   order: number
   /** The block type, resolved against the in-code registry. */
-  type: string
+  type?: string
   content: unknown
   config: unknown
   isVisible: boolean
+  /**
+   * How a section named its block before the catalogue moved into code.
+   *
+   * A PageVersion snapshot is immutable, so every page published before that
+   * change still carries this shape — and the public site renders snapshots,
+   * not live rows. Reading it here is what stops those pages going blank until
+   * someone happens to republish them.
+   */
+  componentDefinition?: { key: string }
+}
+
+/** A section's block key, from either the current or the pre-registry shape. */
+function sectionType(section: RenderablePageSection): string | undefined {
+  return section.type ?? section.componentDefinition?.key
+}
+
+/** Block keys that were renamed when the catalogue moved into code. */
+const RENAMED_KEYS: Record<string, string> = {
+  'order-form': 'orderform',
+  text: 'richtext',
 }
 
 /**
@@ -38,7 +58,9 @@ export function PageRenderer({
       {sections
         .filter((section) => section.isVisible)
         .map((section) => {
-          const definition = getSectionDefinition(section.type)
+          const key = sectionType(section)
+          if (!key) return null
+          const definition = getSectionDefinition(RENAMED_KEYS[key] ?? key)
           if (!definition) return null
 
           const parsed = definition.schema.safeParse(section.content)

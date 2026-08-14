@@ -99,7 +99,19 @@ export function OrderFormClient({
     note: '',
   })
 
-  const offer = offers.find((candidate) => candidate.key === offerKey) ?? null
+  // Falls back to the first offer rather than to nothing. `offerKey` is seeded
+  // once, on mount, from whatever offers existed then — so a form that mounted
+  // before the merchant created their first offer would otherwise hold an
+  // `offerKey` that matches nothing and show its empty state forever, even
+  // after the offers arrived. Resolving to a real offer whenever one exists is
+  // what keeps the form honest about what the page can sell.
+  const offer = useMemo(
+    () =>
+      offers.find((candidate) => candidate.key === offerKey) ??
+      offers[0] ??
+      null,
+    [offers, offerKey]
+  )
   const isPool = offer !== null && offer.kind !== 'FIXED'
 
   // Changing offer invalidates every pick that belonged to the previous one.
