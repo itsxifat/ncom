@@ -334,7 +334,7 @@ export async function adjustInventory(
     )
   }
 
-  const level = await prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const current = await tx.inventoryLevel.findUnique({
       where: {
         locationId_variantId: {
@@ -383,12 +383,18 @@ export async function adjustInventory(
       },
     })
 
-    return updated
+    return {
+      level: updated,
+      requestedDelta: input.delta,
+      appliedDelta: applied,
+      availableBefore: before,
+      availableAfter: updated.available,
+    }
   })
 
   await notifyInventoryChanged(organizationId, input.variantId)
 
-  return level
+  return result
 }
 
 /**
@@ -501,11 +507,21 @@ export async function setVariantStock(
     select: { available: true },
   })
 
-  const target = Math.max(0, Math.round(available))
-  const delta = target - (current?.available ?? 0)
-  if (delta === 0) return { available: target }
+  const requested = Math.round(available)
+  const target = Math.max(0, requested)
+  const before = current?.available ?? 0
+  const delta = target - before
 
-  await adjustInventory(
+  if (delta === 0) {
+    return {
+      available: target,
+      availableBefore: before,
+      requested,
+      clamped: requested !== target,
+    }
+  }
+
+  const result = await adjustInventory(
     organizationId,
     {
       variantId,
@@ -518,7 +534,14 @@ export async function setVariantStock(
     actorUserId
   )
 
-  return { available: target }
+  return {
+    available: result.availableAfter,
+    availableBefore: before,
+    requested,
+    // A negative count asked for is not achievable — the caller is told what
+    // actually happened rather than being handed back the number they sent.
+    clamped: requested !== result.availableAfter,
+  }
 }
 
 /**

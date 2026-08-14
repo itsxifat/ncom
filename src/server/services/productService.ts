@@ -3,6 +3,7 @@ import { prisma } from '@/server/db/client'
 import { requireOrgAccess } from '@/server/auth/rbac'
 import { slugify, withRandomSuffix } from '@/lib/slug'
 import { emitWebhook } from '@/server/services/webhookService'
+import { importMediaFromUrl } from '@/server/services/mediaService'
 import type {
   CreateProductInput,
   ProductImageInput,
@@ -115,6 +116,17 @@ export async function listProducts(
     categoryIds?: string[]
     /** Products with no category at all, for finding the ones nobody filed. */
     uncategorized?: boolean
+    /**
+     * Only products touched since this moment.
+     *
+     * What makes incremental sync possible. Without it the only way to find
+     * recent changes is to page the entire catalogue and diff locally, which is
+     * wasteful at 400 products, unworkable at 40,000, and spends a read budget
+     * on rows that did not change.
+     */
+    updatedSince?: Date
+    /** Only products first created since this moment. */
+    createdSince?: Date
     sort?: ProductSort
     take?: number
     skip?: number
@@ -127,6 +139,12 @@ export async function listProducts(
   const where = {
     organizationId,
     ...(options.status ? { status: options.status } : {}),
+    ...(options.updatedSince
+      ? { updatedAt: { gte: options.updatedSince } }
+      : {}),
+    ...(options.createdSince
+      ? { createdAt: { gte: options.createdSince } }
+      : {}),
     ...(options.uncategorized
       ? { categoryId: null }
       : options.categoryIds && options.categoryIds.length > 0
@@ -219,6 +237,10 @@ export async function createProduct(
     await assertCategoryBelongsToOrg(organizationId, input.categoryId)
   }
 
+  // Resolved up front so a bad image id or an unreachable URL fails before any
+  // rows exist, rather than leaving a half-made product behind.
+  const images = await resolveProductImages(organizationId, input.images ?? [])
+
   const created = await prisma.product.create({
     data: {
       organizationId,
@@ -245,7 +267,7 @@ export async function createProduct(
         })),
       },
       images: {
-        create: normalizeImagePositions(input.images ?? []).map((image) => ({
+        create: normalizeImagePositions(images).map((image) => ({
           mediaId: image.mediaId,
           altText: image.altText ?? null,
           position: image.position,
@@ -371,6 +393,76 @@ function comboKey(variant: {
     .join(' / ')
 }
 
+/** A gallery entry once every `src` has become a real asset in the library. */
+type ResolvedProductImage = ProductImageInput & { mediaId: string }
+
+/**
+ * Turns whatever the caller sent for the gallery into real MediaAsset ids.
+ *
+ * Two jobs, both of which used to be missing:
+ *
+ * A `src` URL is fetched into the library. Without this an API client could not
+ * set a product image at all — `mediaId` was required and nothing outside the
+ * dashboard could mint one — so every imported catalogue arrived with no
+ * photographs.
+ *
+ * A `mediaId` is checked for existence and ownership *before* the write. An
+ * unknown id used to reach the database and fail as a foreign-key violation,
+ * which surfaced to the caller as a 500 telling them to retry something that
+ * could never succeed. It is ordinary bad input and now says so, naming the
+ * position in the array that is wrong.
+ *
+ * Runs before the transaction, deliberately: fetching a dozen images over the
+ * network inside an open transaction would hold row locks for the length of
+ * someone else's CDN.
+ */
+async function resolveProductImages(
+  organizationId: string,
+  images: ProductImageInput[]
+): Promise<ResolvedProductImage[]> {
+  if (images.length === 0) return []
+
+  const declaredIds = images
+    .map((image) => image.mediaId)
+    .filter((id): id is string => Boolean(id))
+
+  const owned = new Set(
+    declaredIds.length === 0
+      ? []
+      : (
+          await prisma.mediaAsset.findMany({
+            where: { id: { in: declaredIds }, organizationId },
+            select: { id: true },
+          })
+        ).map((asset) => asset.id)
+  )
+
+  const resolved: ResolvedProductImage[] = []
+
+  for (const [index, image] of images.entries()) {
+    if (image.mediaId) {
+      if (!owned.has(image.mediaId)) {
+        throw new Error(
+          `images.${index}.mediaId: no image with id "${image.mediaId}" in this workspace`
+        )
+      }
+      resolved.push({ ...image, mediaId: image.mediaId })
+      continue
+    }
+
+    if (!image.src) {
+      throw new Error(`images.${index}: give either mediaId or src`)
+    }
+
+    const { asset } = await importMediaFromUrl(organizationId, image.src, {
+      altText: image.altText ?? undefined,
+    })
+    resolved.push({ ...image, mediaId: asset.id })
+  }
+
+  return resolved
+}
+
 /**
  * Gallery order, renumbered from zero with no gaps.
  *
@@ -379,7 +471,7 @@ function comboKey(variant: {
  * dense and deterministic rather than whatever indices the form happened to
  * send after a few drags.
  */
-function normalizeImagePositions(images: ProductImageInput[]) {
+function normalizeImagePositions(images: ResolvedProductImage[]) {
   return [...images]
     .sort((a, b) => a.position - b.position)
     .map((image, index) => ({ ...image, position: index }))
@@ -407,6 +499,10 @@ export async function updateProduct(
     await assertCategoryBelongsToOrg(organizationId, input.categoryId)
   }
 
+  const images = input.images
+    ? await resolveProductImages(organizationId, input.images)
+    : undefined
+
   const updated = await prisma.$transaction(async (tx) => {
     if (input.options) {
       // Options are replaced wholesale rather than diffed: they are a small
@@ -427,8 +523,8 @@ export async function updateProduct(
     // Images before variants: a variant points at a ProductImage row, so those
     // rows have to exist (and the deleted ones have to be gone) before the
     // variant references are resolved.
-    if (input.images) {
-      await syncImages(tx, productId, input.images)
+    if (images) {
+      await syncImages(tx, productId, images)
     }
 
     if (input.variants) {
@@ -481,7 +577,7 @@ export async function updateProduct(
 async function syncImages(
   tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0],
   productId: string,
-  images: ProductImageInput[]
+  images: ResolvedProductImage[]
 ) {
   const ordered = normalizeImagePositions(images)
   const keep = new Set(ordered.map((image) => image.mediaId))

@@ -21,7 +21,11 @@ export async function GET() {
       }),
       prisma.organizationSettings.findUnique({
         where: { organizationId },
-        select: { currencyCode: true, weightUnit: true },
+        select: {
+          currencyCode: true,
+          weightUnit: true,
+          currencyConfiguredAt: true,
+        },
       }),
     ])
 
@@ -32,7 +36,14 @@ export async function GET() {
           name: organization.name,
           slug: organization.slug,
           currencyCode: settings?.currencyCode ?? 'USD',
-          weightUnit: settings?.weightUnit ?? 'GRAM',
+          // False while the workspace is still on the default nobody chose.
+          // Worth checking before a first import: prices are bare minor units,
+          // so a wrong currency corrupts every one of them silently.
+          currencyConfigured: Boolean(settings?.currencyConfiguredAt),
+          // A display preference for the dashboard. Variant weights are always
+          // sent and returned in grams as `weightGrams`, whatever this says.
+          weightUnit: settings?.weightUnit ?? 'KILOGRAM',
+          weightsAreAlwaysInGrams: true,
         },
         key: {
           id: key.id,

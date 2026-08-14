@@ -1,11 +1,5 @@
 import { z } from 'zod'
-import {
-  apiError,
-  apiOk,
-  readJson,
-  readPaging,
-  withApiKey,
-} from '@/server/api/context'
+import { apiOk, readJson, readPaging, withApiKey } from '@/server/api/context'
 import {
   adjustInventory,
   ensureDefaultLocation,
@@ -126,16 +120,42 @@ export async function POST(request: Request) {
 
     const defaultLocation = await ensureDefaultLocation(organizationId)
 
-    const applied: { variantId: string; available?: number; delta?: number }[] =
-      []
+    const applied: {
+      variantId: string
+      sku?: string
+      available: number
+    }[] = []
     const failed: { variantId?: string; sku?: string; error: string }[] = []
+
+    /**
+     * Rows where the stock we could move was less than the stock asked for.
+     *
+     * The docs promised a clamped delta was "reported", and it was not: a
+     * request to remove 100 units from a shelf holding 2 returned exactly the
+     * same body as a clean application, so a caller had no way to learn that 98
+     * units it believed it had removed were never there. That is the difference
+     * between two systems agreeing and two systems silently diverging.
+     */
+    const clamped: {
+      variantId: string
+      sku?: string
+      requested: number
+      applied: number
+      available: number
+    }[] = []
 
     for (const line of body.data.updates) {
       const variantId =
         line.variantId ?? (line.sku ? bySku.get(line.sku) : undefined)
 
       if (!variantId) {
-        failed.push({ sku: line.sku, error: 'No variant with that SKU' })
+        failed.push({
+          sku: line.sku,
+          variantId: line.variantId,
+          error: line.sku
+            ? 'No variant with that SKU'
+            : 'No variant with that id',
+        })
         continue
       }
 
@@ -143,7 +163,7 @@ export async function POST(request: Request) {
         const note = line.note ?? `Synced by API key “${key.name}”`
 
         if (line.delta !== undefined) {
-          await adjustInventory(
+          const result = await adjustInventory(
             organizationId,
             {
               variantId,
@@ -155,16 +175,60 @@ export async function POST(request: Request) {
             // Null actor: a key is not a person. Which key it was is in the note.
             null
           )
-          applied.push({ variantId, delta: line.delta })
+
+          applied.push({
+            variantId,
+            sku: line.sku,
+            available: result.availableAfter,
+          })
+
+          if (result.appliedDelta !== result.requestedDelta) {
+            clamped.push({
+              variantId,
+              sku: line.sku,
+              requested: result.requestedDelta,
+              applied: result.appliedDelta,
+              available: result.availableAfter,
+            })
+          }
         } else {
-          await setVariantStock(
+          const result = await setVariantStock(
             organizationId,
             variantId,
             line.available!,
             null,
             { locationId: line.locationId, note }
           )
-          applied.push({ variantId, available: line.available })
+
+          // Null means the variant does not track stock — it is infinitely
+          // available and has no count to set. Reported rather than counted as
+          // applied, because a sync that believes it wrote 40 units to a
+          // variant that ignores stock is wrong in a way it needs to see.
+          if (!result) {
+            failed.push({
+              variantId,
+              sku: line.sku,
+              error:
+                'This variant does not track inventory — switch tracking on before setting a count',
+            })
+            continue
+          }
+
+          applied.push({
+            variantId,
+            sku: line.sku,
+            available: result.available,
+          })
+
+          if (result.clamped) {
+            clamped.push({
+              variantId,
+              sku: line.sku,
+              requested: result.requested,
+              applied: result.available - result.availableBefore,
+              available: result.available,
+            })
+          }
         }
       } catch (cause) {
         failed.push({
@@ -175,14 +239,22 @@ export async function POST(request: Request) {
       }
     }
 
-    if (applied.length === 0 && failed.length > 0) {
-      return apiError('invalid_request', 'No stock updates could be applied.', {
-        errors: failed,
-      })
-    }
-
+    // Always 200, always one place for the per-row outcome.
+    //
+    // This used to move the failures to `error.errors` under a 422 when nothing
+    // applied, so a client needed two code paths to read one concept and had to
+    // know which shape it was about to get from a count it did not yet have.
+    // The batch was accepted and processed either way; whether any row inside it
+    // succeeded is what `applied` reports.
     return apiOk({
-      data: { applied: applied.length, failed: failed.length, errors: failed },
+      data: {
+        applied: applied.length,
+        failed: failed.length,
+        clamped: clamped.length,
+        results: applied,
+        errors: failed,
+        clamps: clamped,
+      },
     })
   })
 }

@@ -33,6 +33,7 @@ const NAV_SECTIONS = [
   { id: 'authentication', label: 'Authentication' },
   { id: 'conventions', label: 'Conventions' },
   { id: 'products', label: 'Products' },
+  { id: 'images', label: 'Images' },
   { id: 'import', label: 'Importing a catalogue' },
   { id: 'categories', label: 'Categories' },
   { id: 'inventory', label: 'Inventory' },
@@ -86,10 +87,19 @@ export default async function DocsPage() {
                 </li>
                 <li>
                   Push your catalogue with{' '}
-                  <Code>POST /api/v1/products/import</Code>, then register a
-                  webhook so stock stays in step.
+                  <Code>POST /api/v1/products/import</Code> — images included,
+                  by URL — then register a webhook so stock stays in step.
                 </li>
               </Ol>
+
+              <Callout title="Check currencyConfigured before your first import">
+                Prices are minor units of the workspace currency and nothing
+                downstream can detect a mismatch afterwards. If{' '}
+                <Code>currencyConfigured</Code> is <Code>false</Code>, the
+                workspace is still on a default nobody chose — set it under
+                Settings first, and send <Code>expectCurrency</Code> on the
+                import so a mismatch is refused rather than guessed.
+              </Callout>
 
               <CodeBlock
                 title="Check your key"
@@ -108,7 +118,9 @@ export default async function DocsPage() {
       "name": "Elysium",
       "slug": "elysium",
       "currencyCode": "BDT",
-      "weightUnit": "GRAM"
+      "currencyConfigured": true,
+      "weightUnit": "GRAM",
+      "weightsAreAlwaysInGrams": true
     },
     "key": {
       "id": "clx8f3m1a0001",
@@ -191,7 +203,18 @@ curl ${baseUrl}/api/v1/products \\
                   limit capped at 250.
                 </li>
                 <li>
-                  <strong>Timestamps</strong> are ISO 8601 in UTC.
+                  <strong>Weights are always grams.</strong>{' '}
+                  <Code>weightGrams</Code> means grams on every request and
+                  every response, whatever <Code>/me</Code> reports for{' '}
+                  <Code>weightUnit</Code> — that is a display preference for the
+                  dashboard and for shipping labels, and it never reinterprets a
+                  stored value. A 1.2&nbsp;kg parcel is always{' '}
+                  <Code>{'"weightGrams": 1200'}</Code>.
+                </li>
+                <li>
+                  <strong>Timestamps</strong> are ISO 8601 in UTC. Filters that
+                  take one (<Code>updatedSince</Code>) accept any ISO 8601
+                  string and reject anything else rather than ignoring it.
                 </li>
               </Ul>
 
@@ -223,6 +246,34 @@ curl ${baseUrl}/api/v1/products \\
                 everything beneath it, so asking for a department returns the
                 products in its subcategories too.
               </P>
+
+              <H3>Pulling only what changed</H3>
+              <P>
+                <Code>?updatedSince=</Code> and <Code>?createdSince=</Code> take
+                an ISO 8601 timestamp and are what make an incremental sync
+                possible — without them the only way to find recent changes is
+                to page the whole catalogue and diff it locally, which burns
+                your read budget on rows that did not move. Results are ordered
+                newest-changed first.
+              </P>
+
+              <CodeBlock
+                title="Everything touched in the last hour"
+                language="bash"
+                code={`SINCE=$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ)
+
+curl "${baseUrl}/api/v1/products?updatedSince=$SINCE&limit=250" \\
+  -H "Authorization: Bearer $NCOM_API_KEY"`}
+              />
+
+              <Callout title="Store the cursor from your own clock, not ours">
+                Take the timestamp <em>before</em> you start a pull and use it
+                as the next cursor, rather than the newest{' '}
+                <Code>updatedAt</Code> you saw. A product changed while the pull
+                was in flight would otherwise fall between the two and never be
+                seen again. Overlap by a minute — events are idempotent, so
+                re-reading a handful of rows is free.
+              </Callout>
 
               <H3>Addressing a product by your own id</H3>
               <P>
@@ -307,6 +358,127 @@ curl ${baseUrl}/api/v1/products/externalId:SKU-1042 \\
               </P>
             </Section>
 
+            <Section id="images" title="Images">
+              <P>
+                Send <Code>images[].src</Code> and we fetch the file, re-encode
+                it to WebP and store it. You do not have to upload anything
+                first — a catalogue whose photographs live on your existing CDN
+                can be moved across in one call per product.
+              </P>
+
+              <CodeBlock
+                title="Images by URL, on create or update"
+                language="bash"
+                code={`curl -X POST ${baseUrl}/api/v1/products \\
+  -H "Authorization: Bearer $NCOM_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "title": "Classic Cotton Tee",
+    "variants": [{ "priceCents": 1299 }],
+    "images": [
+      { "src": "https://cdn.yourshop.com/tee-front.jpg", "altText": "Front", "position": 0 },
+      { "src": "https://cdn.yourshop.com/tee-back.jpg",  "altText": "Back",  "position": 1 }
+    ]
+  }'`}
+              />
+
+              <P>
+                Fetches are deduplicated on the URL. Re-running an import does
+                not download the same photographs again, and the product keeps
+                pointing at the asset that is already there — so an import you
+                run nightly costs one request per image the first time and none
+                afterwards.
+              </P>
+
+              <H3>The media library directly</H3>
+              <EndpointTable
+                rows={[
+                  ['GET', '/api/v1/media', 'List assets'],
+                  [
+                    'POST',
+                    '/api/v1/media',
+                    'Add one, from a URL or an uploaded file',
+                  ],
+                ]}
+              />
+
+              <P>
+                Use this when you want the <Code>mediaId</Code> before creating
+                the product, or when the bytes are local rather than on a public
+                URL. Assets are workspace-wide, so one uploaded image can be
+                used by several products.
+              </P>
+
+              <CodeBlock
+                title="From a URL"
+                language="bash"
+                code={`curl -X POST ${baseUrl}/api/v1/media \\
+  -H "Authorization: Bearer $NCOM_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{ "src": "https://cdn.yourshop.com/tee-front.jpg", "altText": "Front" }'
+
+# 201 {"data":{"id":"clx8media0001","url":"https://cdn.ncom…/x.webp",
+#              "width":1600,"height":2000,"sourceUrl":"https://cdn.yourshop.com/tee-front.jpg"}}
+#
+# 200 instead of 201 means this URL was already in the library and
+# the existing asset was returned.`}
+              />
+
+              <CodeBlock
+                title="From a local file"
+                language="bash"
+                code={`curl -X POST ${baseUrl}/api/v1/media \\
+  -H "Authorization: Bearer $NCOM_API_KEY" \\
+  -F "file=@tee-front.jpg" \\
+  -F "altText=Front"`}
+              />
+
+              <P>
+                Then reference it by id, which behaves exactly like a{' '}
+                <Code>src</Code> did:
+              </P>
+
+              <CodeBlock
+                language="json"
+                code={`{ "images": [{ "mediaId": "clx8media0001", "position": 0 }] }`}
+              />
+
+              <H3>Rules and limits</H3>
+              <Ul>
+                <li>
+                  PNG, JPEG, WebP and GIF. Everything is re-encoded to WebP and
+                  scaled to fit 2400×2400, so upload the largest version you
+                  have.
+                </li>
+                <li>
+                  10&nbsp;MB per image. A URL that returns something bigger is
+                  refused without being downloaded in full.
+                </li>
+                <li>
+                  URLs must be public http or https. Private, loopback and
+                  link-local addresses are refused — this server does the
+                  fetching, so it will not be pointed at an internal one.
+                </li>
+                <li>
+                  <Code>position</Code> 0 is the product&rsquo;s main image: the
+                  one on cards, order lines and offer thumbnails.
+                </li>
+                <li>
+                  Image ingest has its own budget of 60 per minute, separate
+                  from the general write limit, because each one is a download,
+                  a re-encode and an upload.
+                </li>
+              </Ul>
+
+              <Callout title="Sending images replaces the gallery">
+                Like <Code>variants</Code>, an <Code>images</Code> array on{' '}
+                <Code>PATCH</Code> is the complete new gallery — anything you
+                leave out is removed from the product. Omit the key entirely to
+                leave the existing images alone. The underlying assets stay in
+                the library either way.
+              </Callout>
+            </Section>
+
             <Section id="import" title="Importing your existing catalogue">
               <P>
                 This is the endpoint to use when moving in from another system.
@@ -331,12 +503,14 @@ curl ${baseUrl}/api/v1/products/externalId:SKU-1042 \\
                 language="json"
                 code={`{
   "source": "my-old-shop",
+  "expectCurrency": "BDT",
   "products": [
     {
       "externalId": "42",
       "title": "Silk Maxi Dress",
       "status": "ACTIVE",
       "categoryId": "clx8category0002",
+      "images": [{ "src": "https://cdn.yourshop.com/42.jpg" }],
       "options": [{ "name": "Size", "position": 1, "values": ["S", "M"] }],
       "variants": [
         { "option1": "S", "priceCents": 4999, "sku": "DRS-42-S" },
@@ -346,6 +520,42 @@ curl ${baseUrl}/api/v1/products/externalId:SKU-1042 \\
   ]
 }`}
               />
+
+              <H3>Always send expectCurrency</H3>
+              <P>
+                <Code>priceCents</Code> is minor units{' '}
+                <em>of the workspace currency</em>. If the workspace prices in
+                USD and you send taka, ৳1,290 becomes $1,290.00 — the import
+                reports complete success, and nothing in the resulting numbers
+                can tell you afterwards that it happened.
+              </P>
+              <P>
+                <Code>expectCurrency</Code> is the guard. If it does not match
+                the workspace, the batch is refused with <Code>conflict</Code>{' '}
+                before a single row is written.
+              </P>
+
+              <CodeBlock
+                title="A mismatch, refused"
+                language="json"
+                code={`409 {
+  "error": {
+    "code": "conflict",
+    "message": "This workspace prices in USD, but the import declared BDT. Nothing was imported.",
+    "workspaceCurrency": "USD",
+    "declaredCurrency": "BDT"
+  }
+}`}
+              />
+
+              <P>
+                Every import response echoes <Code>currencyCode</Code> whether
+                you asserted or not, and a workspace still sitting on the
+                default currency nobody has ever chosen comes back with a{' '}
+                <Code>warnings</Code> entry. <Code>GET /api/v1/me</Code> reports
+                the same thing as <Code>currencyConfigured</Code>, which is
+                worth checking once at the top of a migration script.
+              </P>
 
               <P>
                 The response reports each row separately. One bad product does
@@ -400,6 +610,14 @@ async function post(path, body) {
   return response.json()
 }
 
+async function get(path) {
+  const response = await fetch(API + path, {
+    headers: { Authorization: \`Bearer \${KEY}\` },
+  })
+  if (!response.ok) throw new Error(\`HTTP \${response.status} on \${path}\`)
+  return response.json()
+}
+
 // Map one row from YOUR database into our product shape.
 function toProduct(row) {
   return {
@@ -409,6 +627,12 @@ function toProduct(row) {
     status: row.isPublished ? 'ACTIVE' : 'DRAFT',
     vendor: row.brand ?? undefined,
     tags: row.tags ?? [],
+    // Images travel by URL — we fetch and store them, deduplicated on the
+    // URL so a re-run costs nothing.
+    images: (row.images ?? []).map((url, index) => ({
+      src: url,
+      position: index,
+    })),
     // Prices in minor units: 12.99 becomes 1299.
     options: row.variants.length > 1
       ? [{
@@ -426,17 +650,32 @@ function toProduct(row) {
   }
 }
 
+// Fail before writing anything if the workspace is not set up as expected.
+const me = await get('/me')
+if (!me.data.organization.currencyConfigured) {
+  throw new Error(
+    'Workspace currency was never explicitly set — choose it under Settings first'
+  )
+}
+
+const CURRENCY = me.data.organization.currencyCode
+console.log('importing as', CURRENCY)
+
 const all = await loadProductsFromYourDatabase() // your code
 
 for (let i = 0; i < all.length; i += BATCH) {
   const chunk = all.slice(i, i + BATCH).map(toProduct)
   const { data } = await post('/products/import', {
     source: 'my-old-shop',
+    // Refused outright if the workspace prices in anything else.
+    expectCurrency: CURRENCY,
     products: chunk,
   })
 
   console.log(\`\${i + chunk.length}/\${all.length}\`,
     \`created \${data.created}, updated \${data.updated}, failed \${data.failed}\`)
+
+  for (const warning of data.warnings ?? []) console.warn('  ', warning)
 
   for (const problem of data.errors) {
     console.error('  failed', problem.externalId, '—', problem.error)
@@ -591,12 +830,88 @@ curl -X POST ${baseUrl}/api/v1/categories \\
                 integration did and when.
               </P>
 
-              <Callout title="Removing more than exists is clamped">
-                A delta that would push stock below zero is clamped to zero and
-                reported, rather than creating a negative count. Negative
-                availability has one legitimate meaning here — a backorder
-                backlog on a variant set to keep selling at zero — and a typo
-                should not be able to manufacture one.
+              <H3>Read the response — a 200 does not mean every row applied</H3>
+              <Callout title="This is the most important paragraph on the page">
+                The endpoint applies what it can and reports the rest. A caller
+                that treats <Code>200</Code> as success will silently lose every
+                rejected row and drift out of step without ever seeing an error.
+                Check <Code>failed</Code> and <Code>clamped</Code> on every
+                call.
+              </Callout>
+
+              <CodeBlock
+                title="Response — always 200, always this shape"
+                language="json"
+                code={`{
+  "data": {
+    "applied": 2,        // rows whose stock moved
+    "failed": 1,         // rows that could not be applied at all
+    "clamped": 1,        // rows applied, but by less than you asked for
+
+    "results": [
+      { "variantId": "clx8variant0001", "sku": "TEE-S", "available": 42 },
+      { "variantId": "clx8variant0002", "sku": "TEE-M", "available": 0 }
+    ],
+
+    "errors": [
+      { "sku": "NO-SUCH-SKU", "error": "No variant with that SKU" }
+    ],
+
+    "clamps": [
+      { "variantId": "clx8variant0002", "sku": "TEE-M",
+        "requested": -100, "applied": -2, "available": 0 }
+    ]
+  }
+}`}
+              />
+
+              <P>
+                The status code is <Code>200</Code> whatever the mix — including
+                when nothing applied at all, in which case <Code>applied</Code>{' '}
+                is <Code>0</Code> and every row is in <Code>errors</Code>. The
+                batch was accepted and processed; the per-row outcome is always
+                in the same place, so you need one code path rather than two.
+              </P>
+
+              <H3>Clamping</H3>
+              <P>
+                A delta that would push stock below zero is clamped rather than
+                creating a negative count — negative availability has one
+                legitimate meaning here, a backorder backlog on a variant set to
+                keep selling at zero, and a typo should not be able to
+                manufacture one.
+              </P>
+              <P>
+                A clamped row still counts as <Code>applied</Code>, because
+                stock did move. It also appears in <Code>clamps</Code> with what
+                you asked for and what actually happened. That entry is the
+                signal that your side believes it removed stock that was never
+                there — which is exactly when two systems begin to disagree, so
+                it is worth alerting on rather than logging.
+              </P>
+
+              <CodeBlock
+                title="Asking to remove 100 from a shelf holding 2"
+                language="json"
+                code={`{ "updates": [{ "sku": "TEE-M", "delta": -100, "reason": "DAMAGED" }] }
+
+200 {
+  "data": {
+    "applied": 1, "failed": 0, "clamped": 1,
+    "results": [{ "variantId": "clx8variant0002", "sku": "TEE-M", "available": 0 }],
+    "errors": [],
+    "clamps": [{ "variantId": "clx8variant0002", "sku": "TEE-M",
+                 "requested": -100, "applied": -2, "available": 0 }]
+  }
+}`}
+              />
+
+              <Callout title="Variants that do not track stock are reported, not silently skipped">
+                Setting a count on a variant with inventory tracking switched
+                off lands in <Code>errors</Code> rather than{' '}
+                <Code>applied</Code>. Such a variant is infinitely available and
+                has no count to hold, and a sync that believes it wrote 40 units
+                there is wrong in a way it needs to see.
               </Callout>
             </Section>
 
@@ -778,8 +1093,90 @@ curl -X POST ${baseUrl}/api/v1/categories \\
 
               <P>
                 Add endpoints in <strong>Developers → Webhooks</strong>, or over
-                the API with <Code>POST /api/v1/webhooks</Code>.
+                the API — which is what an installable integration should do, so
+                the merchant does not have to paste a URL into two dashboards to
+                finish connecting.
               </P>
+
+              <H3>Managing endpoints</H3>
+              <EndpointTable
+                rows={[
+                  [
+                    'GET',
+                    '/api/v1/webhooks',
+                    'List endpoints and their delivery counts',
+                  ],
+                  ['POST', '/api/v1/webhooks', 'Register an endpoint'],
+                  [
+                    'PATCH',
+                    '/api/v1/webhooks/{id}',
+                    'Change URL, topics, or pause it',
+                  ],
+                  ['DELETE', '/api/v1/webhooks/{id}', 'Remove an endpoint'],
+                ]}
+              />
+
+              <P>
+                Topics are given as the dotted strings from the table below —
+                the same values that arrive in the payload&rsquo;s{' '}
+                <Code>topic</Code> field, so there is only ever one vocabulary
+                to know. Requires <Code>WEBHOOKS_READ</Code> to list and{' '}
+                <Code>WEBHOOKS_WRITE</Code> to change.
+              </P>
+
+              <CodeBlock
+                title="POST /api/v1/webhooks"
+                language="bash"
+                code={`curl -X POST ${baseUrl}/api/v1/webhooks \\
+  -H "Authorization: Bearer $NCOM_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "url": "https://yourshop.com/api/ncom-webhook",
+    "description": "Main site stock sync",
+    "topics": ["inventory.updated", "product.updated", "order.created"]
+  }'`}
+              />
+
+              <CodeBlock
+                title="Response — the signing secret is here and nowhere else"
+                language="json"
+                code={`201 {
+  "data": {
+    "id": "clx8hook0001",
+    "url": "https://yourshop.com/api/ncom-webhook",
+    "topics": ["inventory.updated", "product.updated", "order.created"],
+    "secret": "whsec_9f2c1a7b4d8e0f31a6c5"
+  }
+}`}
+              />
+
+              <Callout title="Store the secret when you create the endpoint">
+                <Code>secret</Code> is returned only in this response. It is
+                stored encrypted so it can sign every delivery, but it is never
+                returned again by <Code>GET /api/v1/webhooks</Code> or shown a
+                second time in the dashboard. If you lose it, rotate it from{' '}
+                <strong>Developers → Webhooks</strong> — the old one stops
+                working immediately, so update your receiver first.
+              </Callout>
+
+              <CodeBlock
+                title="Listing, and pausing one"
+                language="bash"
+                code={`curl ${baseUrl}/api/v1/webhooks \\
+  -H "Authorization: Bearer $NCOM_API_KEY"
+
+# 200 {"data":[{"id":"clx8hook0001","url":"…","topics":["inventory.updated"],
+#               "isActive":true,
+#               "deliveries":{"succeeded":412,"failed":0,"pending":0},
+#               "lastSuccessAt":"2026-08-14T09:12:04.221Z"}]}
+#
+# Note there is no "secret" field — it is write-only.
+
+curl -X PATCH ${baseUrl}/api/v1/webhooks/clx8hook0001 \\
+  -H "Authorization: Bearer $NCOM_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{ "isActive": false }'`}
+              />
 
               <H3>Events</H3>
               <Table
@@ -886,9 +1283,13 @@ app.post('/api/ncom-webhook',
     // Reject replays of a captured request.
     if (Math.abs(Date.now() / 1000 - timestamp) > 300) return res.sendStatus(400)
 
+    // Fed as bytes, not through a template string. Interpolating req.body
+    // stringifies the Buffer implicitly, which happens to work for UTF-8 JSON
+    // and stops working the moment a payload carries anything else — the kind
+    // of bug that appears months later on one product with an unusual title.
     const expected = crypto
       .createHmac('sha256', SECRET)
-      .update(\`\${timestamp}.\${req.body}\`)
+      .update(Buffer.concat([Buffer.from(\`\${timestamp}.\`), req.body]))
       .digest('hex')
 
     const a = Buffer.from(expected, 'hex')
@@ -1152,12 +1553,33 @@ async function reportSale(lines) {
 }`}
               />
 
+              <P>
+                Every response under <Code>/api/v1</Code> is JSON, including a
+                mistyped path — that returns the same <Code>not_found</Code>
+                envelope rather than an HTML page, so a typo surfaces as the 404
+                it is instead of a JSON parse error that looks like the
+                transport broke.
+              </P>
+
+              <CodeBlock
+                title="A path that does not exist"
+                language="json"
+                code={`404 {
+  "error": {
+    "code": "not_found",
+    "message": "No such endpoint: GET /api/v1/prodcuts. See the API reference at /docs."
+  }
+}`}
+              />
+
               <H3>Rate limits</H3>
               <P>
                 Per key, per minute: 600 reads and 120 writes, counted
-                separately so a busy poller cannot starve its own writes. A 429
-                carries <Code>Retry-After</Code> in seconds — wait that long
-                rather than retrying immediately.
+                separately so a busy poller cannot starve its own writes. Image
+                ingest has its own budget of 60 per minute on top of that, since
+                each one is a download, a re-encode and an upload rather than a
+                row write. A 429 carries <Code>Retry-After</Code> in seconds —
+                wait that long rather than retrying immediately.
               </P>
 
               <div className="border-border/60 mt-10 rounded-xl border p-6">

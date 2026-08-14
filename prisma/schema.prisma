@@ -698,7 +698,15 @@ model MediaAsset {
   width          Int?
   height         Int?
   altText        String?
-  createdAt      DateTime @default(now())
+
+  // Where the bytes came from, when they were pulled from somewhere else
+  // rather than uploaded by a person. This is what makes an import idempotent
+  // for images: re-running a catalogue import finds the asset already here
+  // instead of re-downloading and re-encoding 370 photos and leaving 370
+  // duplicates behind.
+  sourceUrl String?
+
+  createdAt DateTime @default(now())
 
   organization        Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   store               Store?         @relation(fields: [storeId], references: [id], onDelete: SetNull)
@@ -709,6 +717,7 @@ model MediaAsset {
   categories          Category[]
 
   @@index([organizationId])
+  @@index([organizationId, sourceUrl])
 }
 
 // ── Analytics ──────────────────────────────────────────────────────────
@@ -1398,6 +1407,15 @@ model OrganizationSettings {
 
   currencyCode String     @default("USD") // ISO 4217
   weightUnit   WeightUnit @default(KILOGRAM)
+
+  // Set the first time a human explicitly saves the store's currency.
+  //
+  // The default is a guess, and prices are stored as bare minor units, so a
+  // merchant pushing taka into a workspace still sitting on USD imports ৳1,290
+  // as $1,290.00 with every call reporting success. Nothing in the numbers can
+  // detect that afterwards — the only moment it is knowable is now, so this
+  // records whether anyone has ever actually chosen.
+  currencyConfiguredAt DateTime?
 
   // When true, catalog prices are treated as tax-inclusive: tax is backed out
   // of the line total for display/reporting rather than added on top. This

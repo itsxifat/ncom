@@ -56,12 +56,28 @@ export type VariantInput = z.infer<typeof variantSchema>
  * single image is needed — the product card, the offer thumbnail, the order
  * line. Reordering is therefore a merchandising decision, not a cosmetic one.
  */
-export const productImageSchema = z.object({
-  id: z.string().optional(),
-  mediaId: z.string().min(1),
-  altText: z.string().trim().max(300).optional().nullable(),
-  position: z.number().int().min(0).max(250).default(0),
-})
+export const productImageSchema = z
+  .object({
+    id: z.string().optional(),
+    /** An asset already in the library. Omit it and give `src` instead. */
+    mediaId: z.string().min(1).optional(),
+    /**
+     * A URL to pull into the library.
+     *
+     * The reason this exists: a product in someone else's system has its
+     * photographs on someone else's CDN, and requiring a `mediaId` first meant
+     * an API client had no way to set an image at all — every imported
+     * catalogue arrived with no artwork. The fetch is server-side and
+     * deduplicated on the URL, so re-running an import does not re-download it.
+     */
+    src: z.string().trim().min(1).max(2000).optional(),
+    altText: z.string().trim().max(300).optional().nullable(),
+    position: z.number().int().min(0).max(250).default(0),
+  })
+  .refine((image) => Boolean(image.mediaId ?? image.src), {
+    message: 'Give either mediaId (an existing asset) or src (a URL to import)',
+    path: ['mediaId'],
+  })
 
 export type ProductImageInput = z.infer<typeof productImageSchema>
 

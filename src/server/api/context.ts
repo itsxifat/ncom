@@ -30,6 +30,16 @@ export interface ApiContext {
   organizationId: string
   key: ApiKeyIdentity
   ip: string
+  /**
+   * An extra budget for an endpoint that costs far more than an ordinary
+   * write — image ingest re-encodes and uploads to a CDN. Returns a ready 429
+   * response when the caller is over, or null to carry on.
+   */
+  rateLimit: (
+    bucket: string,
+    limit: number,
+    windowSeconds: number
+  ) => Promise<Response | null>
 }
 
 export type ApiErrorCode =
@@ -64,6 +74,21 @@ export function apiError(
 
 export function apiOk(data: unknown, status = 200) {
   return NextResponse.json(data, { status })
+}
+
+function tooManyRequests(retryAfterSeconds?: number) {
+  return NextResponse.json(
+    {
+      error: {
+        code: 'rate_limited',
+        message: 'Too many requests. Slow down and retry.',
+      },
+    },
+    {
+      status: 429,
+      headers: { 'Retry-After': String(retryAfterSeconds ?? 60) },
+    }
+  )
 }
 
 /**
@@ -132,18 +157,20 @@ export async function withApiKey(
   )
 
   if (!limit.allowed) {
-    return NextResponse.json(
-      {
-        error: {
-          code: 'rate_limited',
-          message: 'Too many requests. Slow down and retry.',
-        },
-      },
-      {
-        status: 429,
-        headers: { 'Retry-After': String(limit.retryAfterSeconds ?? 60) },
-      }
+    return tooManyRequests(limit.retryAfterSeconds)
+  }
+
+  const perEndpointLimit = async (
+    bucket: string,
+    max: number,
+    windowSeconds: number
+  ) => {
+    const result = await checkRateLimit(
+      `api:${key.id}:${bucket}`,
+      max,
+      windowSeconds
     )
+    return result.allowed ? null : tooManyRequests(result.retryAfterSeconds)
   }
 
   try {
@@ -158,7 +185,13 @@ export async function withApiKey(
         organizationId: key.organizationId,
         role: 'ADMIN',
       },
-      () => handler({ organizationId: key.organizationId, key, ip })
+      () =>
+        handler({
+          organizationId: key.organizationId,
+          key,
+          ip,
+          rateLimit: perEndpointLimit,
+        })
     )
   } catch (cause) {
     // Service-layer errors are merchant-facing sentences ("Category not

@@ -1,6 +1,7 @@
 import { z } from 'zod'
-import { apiOk, readJson, withApiKey } from '@/server/api/context'
+import { apiError, apiOk, readJson, withApiKey } from '@/server/api/context'
 import { upsertProductByExternalId } from '@/server/services/productService'
+import { getCurrencyContext } from '@/server/services/organizationSettingsService'
 import { createProductSchema } from '@/lib/validation/product'
 
 /**
@@ -57,12 +58,48 @@ const importSchema = z.object({
     .max(MAX_BATCH, `Send at most ${MAX_BATCH} products per request`),
   /** Recorded on each row, so a merchant can see where a product came from. */
   source: z.string().trim().max(80).optional(),
+  /**
+   * The currency the caller believes these prices are in.
+   *
+   * Optional but strongly recommended, and the only guard that exists against
+   * the worst silent failure in this API: `priceCents` is minor units *of the
+   * workspace currency*, so importing taka prices into a workspace still on its
+   * default USD turns ৳1,290 into $1,290.00 — with every response reporting
+   * complete success, and nothing in the resulting numbers able to reveal it
+   * afterwards. Asserting it here is the last moment the mistake is knowable.
+   */
+  expectCurrency: z
+    .string()
+    .trim()
+    .length(3, 'Use a three-letter ISO 4217 code, e.g. BDT')
+    .toUpperCase()
+    .optional(),
 })
 
 export async function POST(request: Request) {
   return withApiKey('PRODUCTS_WRITE', async ({ organizationId }) => {
     const body = await readJson(request, importSchema)
     if (!body.ok) return body.response
+
+    const currency = await getCurrencyContext(organizationId)
+
+    // Refused before any write. A mismatch means every price in the batch would
+    // land at the wrong magnitude, and a half-imported catalogue of wrong
+    // prices is worse than none.
+    if (
+      body.data.expectCurrency &&
+      body.data.expectCurrency !== currency.currencyCode
+    ) {
+      return apiError(
+        'conflict',
+        `This workspace prices in ${currency.currencyCode}, but the import declared ${body.data.expectCurrency}. ` +
+          `Nothing was imported. Change the workspace currency under Settings, or send prices in ${currency.currencyCode}.`,
+        {
+          workspaceCurrency: currency.currencyCode,
+          declaredCurrency: body.data.expectCurrency,
+        }
+      )
+    }
 
     const created: string[] = []
     const updated: string[] = []
@@ -124,6 +161,17 @@ export async function POST(request: Request) {
         createdIds: created,
         updatedIds: updated,
         errors: failed,
+        // Echoed on every response so a caller that did not assert can still
+        // check what it just wrote prices in, rather than finding out from a
+        // customer.
+        currencyCode: currency.currencyCode,
+        warnings:
+          !currency.currencyConfigured && !body.data.expectCurrency
+            ? [
+                `This workspace is still on the default currency (${currency.currencyCode}) — nobody has explicitly chosen one. ` +
+                  `Prices were imported as ${currency.currencyCode} minor units. Set the currency under Settings, or send \`expectCurrency\` to have this refused instead of guessed.`,
+              ]
+            : [],
       },
     })
   })

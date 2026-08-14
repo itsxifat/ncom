@@ -6,7 +6,10 @@ import { requireOrgAccess, requireHumanOrgAccess } from '@/server/auth/rbac'
 import { requireQuota } from '@/server/services/entitlementService'
 import { uploadToCdn, deleteFromCdn } from '@/server/storage'
 import { slugify } from '@/lib/slug'
-import type { UploadMetadataInput } from '@/lib/validation/media'
+import {
+  MAX_MEDIA_UPLOAD_BYTES,
+  type UploadMetadataInput,
+} from '@/lib/validation/media'
 
 const MAX_DIMENSION = 2400
 const WEBP_QUALITY = 82
@@ -42,13 +45,22 @@ function cdnFileName(organizationId: string, fileName: string) {
   return `${organizationId}-${base}.webp`
 }
 
+/**
+ * Stores bytes as a MediaAsset.
+ *
+ * Deliberately `requireOrgAccess` rather than `requireHumanOrgAccess`: an API
+ * key importing a catalogue has to be able to bring the photographs with it,
+ * and uploading an image is content creation rather than an act that has to be
+ * attributed to a person for the record. `uploadedById` is simply null for a
+ * machine actor instead of borrowing the name of whoever created the key.
+ */
 export async function uploadMediaAsset(
   organizationId: string,
   data: Buffer,
   fileName: string,
-  input: UploadMetadataInput
+  input: UploadMetadataInput & { sourceUrl?: string | null }
 ) {
-  const { session } = await requireHumanOrgAccess(organizationId, 'EDITOR')
+  const { session } = await requireOrgAccess(organizationId, 'EDITOR')
 
   const optimized = await optimize(data)
 
@@ -68,7 +80,7 @@ export async function uploadMediaAsset(
     data: {
       organizationId,
       storeId: input.storeId,
-      uploadedById: session.user.id,
+      uploadedById: session?.user.id ?? null,
       fileName,
       mimeType: 'image/webp',
       sizeBytes: optimized.info.size,
@@ -77,8 +89,165 @@ export async function uploadMediaAsset(
       width: optimized.info.width,
       height: optimized.info.height,
       altText: input.altText,
+      sourceUrl: input.sourceUrl ?? null,
     },
   })
+}
+
+/**
+ * Pulls an image from a URL into the media library.
+ *
+ * This is what makes a catalogue import able to carry its artwork. Products
+ * reference a `mediaId`, and until now nothing outside the dashboard could
+ * produce one — so every API-driven migration arrived with no photographs,
+ * which is not a migration.
+ *
+ * Idempotent on the source URL. A re-run of an import must not re-download the
+ * same 370 photos, re-encode them, pay for the storage twice and leave the
+ * product pointing at a second copy.
+ */
+export async function importMediaFromUrl(
+  organizationId: string,
+  sourceUrl: string,
+  options: { altText?: string; storeId?: string } = {}
+) {
+  await requireOrgAccess(organizationId, 'EDITOR')
+
+  const url = assertFetchableImageUrl(sourceUrl)
+
+  const existing = await prisma.mediaAsset.findFirst({
+    where: { organizationId, sourceUrl: url },
+    orderBy: { createdAt: 'desc' },
+  })
+  // Reported rather than inferred from the row's age: a caller re-running an
+  // import wants to know whether this cost a download, and a timestamp
+  // comparison would call a fresh dedup hit a creation.
+  if (existing) return { asset: existing, reused: true }
+
+  let response: Response
+  try {
+    response = await fetch(url, {
+      redirect: 'follow',
+      signal: AbortSignal.timeout(IMAGE_FETCH_TIMEOUT_MS),
+      headers: { Accept: 'image/*' },
+    })
+  } catch (cause) {
+    throw new Error(
+      cause instanceof Error && cause.name === 'TimeoutError'
+        ? `Timed out fetching ${url}`
+        : `Could not fetch ${url}`
+    )
+  }
+
+  if (!response.ok) {
+    throw new Error(`Could not fetch ${url} — it returned ${response.status}`)
+  }
+
+  const contentType = (response.headers.get('content-type') ?? '')
+    .split(';')[0]!
+    .trim()
+    .toLowerCase()
+
+  if (contentType && !contentType.startsWith('image/')) {
+    throw new Error(
+      `${url} is ${contentType}, not an image. Check the URL points at the file, not a page about it.`
+    )
+  }
+
+  // Checked before reading the body as well as after: a declared length lets a
+  // huge file be refused without transferring it, but the header is the
+  // sender's claim, so the bytes in hand are checked too.
+  const declared = Number(response.headers.get('content-length'))
+  if (Number.isFinite(declared) && declared > MAX_MEDIA_UPLOAD_BYTES) {
+    throw new Error(`${url} is larger than the 10MB limit`)
+  }
+
+  const data = Buffer.from(await response.arrayBuffer())
+  if (data.byteLength === 0) throw new Error(`${url} returned an empty file`)
+  if (data.byteLength > MAX_MEDIA_UPLOAD_BYTES) {
+    throw new Error(`${url} is larger than the 10MB limit`)
+  }
+
+  const fileName = fileNameFromUrl(url)
+
+  try {
+    const asset = await uploadMediaAsset(organizationId, data, fileName, {
+      altText: options.altText,
+      storeId: options.storeId,
+      sourceUrl: url,
+    })
+    return { asset, reused: false }
+  } catch (cause) {
+    // sharp throws on anything it cannot decode. That is bad input — a broken
+    // file, an HTML error page served with an image content-type — and the
+    // caller needs to know which URL, not a decoder's internal message.
+    if (
+      cause instanceof Error &&
+      /input|decode|unsupported|format/i.test(cause.message)
+    ) {
+      throw new Error(`${url} could not be read as an image`)
+    }
+    throw cause
+  }
+}
+
+/** Long enough for a slow origin, short enough that 250 of them cannot hang a request. */
+const IMAGE_FETCH_TIMEOUT_MS = 15_000
+
+function fileNameFromUrl(url: string): string {
+  try {
+    const path = new URL(url).pathname
+    const last = path.split('/').filter(Boolean).pop()
+    return (last && decodeURIComponent(last).slice(0, 200)) || 'image'
+  } catch {
+    return 'image'
+  }
+}
+
+/**
+ * Refuses URLs we should not be fetching on a merchant's behalf.
+ *
+ * The URL comes from an API caller and this server is what dials it, which is
+ * the textbook SSRF shape: without a check, `POST /media { src:
+ * "http://169.254.169.254/latest/meta-data/" }` turns the image importer into a
+ * way to read cloud credentials. Loopback, link-local and private ranges are
+ * refused, and only http/https are allowed — `file://` would otherwise read
+ * from disk.
+ *
+ * This is a literal-address check, not DNS resolution: a hostname that resolves
+ * to a private address still passes. Egress policy at the network layer is the
+ * real backstop; this stops the direct attempts and the honest mistakes.
+ */
+export function assertFetchableImageUrl(raw: string): string {
+  let url: URL
+  try {
+    url = new URL(raw.trim())
+  } catch {
+    throw new Error(`"${raw}" is not a valid URL`)
+  }
+
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+    throw new Error('Image URLs must be http or https')
+  }
+
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '')
+
+  if (
+    host === 'localhost' ||
+    host.endsWith('.localhost') ||
+    host === '::1' ||
+    host === '0.0.0.0' ||
+    /^127\./.test(host) ||
+    /^10\./.test(host) ||
+    /^192\.168\./.test(host) ||
+    /^169\.254\./.test(host) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
+    /^f[cd][0-9a-f]{2}:/i.test(host)
+  ) {
+    throw new Error('That address is not reachable from the public internet')
+  }
+
+  return url.toString()
 }
 
 /**

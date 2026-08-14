@@ -64,8 +64,41 @@ export async function updateOrganizationSettings(
 
   return prisma.organizationSettings.update({
     where: { id: settings.id },
-    data: input,
+    data: {
+      ...input,
+      // Records that someone actually chose, as distinct from the row still
+      // carrying its default. Prices are stored as bare minor units, so a
+      // merchant pushing taka into a workspace left on USD imports ৳1,290 as
+      // $1,290.00 with every call reporting success — and nothing in the
+      // numbers afterwards can tell that happened. This flag is what lets the
+      // import endpoint warn while it still matters.
+      ...(input.currencyCode ? { currencyConfiguredAt: new Date() } : {}),
+    },
   })
+}
+
+/**
+ * The workspace's money and weight conventions, for callers that have to agree
+ * with them before writing prices.
+ */
+export async function getCurrencyContext(organizationId: string) {
+  const settings = await prisma.organizationSettings.findUnique({
+    where: { organizationId },
+    select: {
+      currencyCode: true,
+      weightUnit: true,
+      currencyConfiguredAt: true,
+    },
+  })
+
+  return {
+    currencyCode: settings?.currencyCode ?? 'USD',
+    weightUnit: settings?.weightUnit ?? 'KILOGRAM',
+    /** False while the workspace is still on the default nobody picked. */
+    currencyConfigured:
+      settings?.currencyConfiguredAt !== null &&
+      settings?.currencyConfiguredAt !== undefined,
+  }
 }
 
 /**
