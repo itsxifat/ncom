@@ -24,6 +24,48 @@ const LIFETIME_EXPIRES = 253402300799
 
 const REQUEST_TIMEOUT_MS = 30_000
 
+/** Attempts per upload, including the first. */
+const MAX_UPLOAD_ATTEMPTS = 4
+
+/**
+ * Longest we wait between upload attempts.
+ *
+ * EnCDN rate-limits uploads, and a catalogue import is exactly the shape of
+ * traffic that trips it: a few hundred images pushed back to back. A rejection
+ * here is not an image problem — `resolveProductImages` runs before the product
+ * write, so a throttled upload fails the *whole product*, and the caller sees a
+ * catalogue that imported with half its artwork missing and no obvious reason.
+ * Waiting a few seconds is strictly better than losing the product.
+ *
+ * Capped rather than unbounded because this runs inside a request: honouring a
+ * `Retry-After` of several minutes would hang the batch until the proxy times
+ * it out, which loses the rows that already succeeded. If the wait is longer
+ * than this, the upload gives up and says so.
+ */
+const MAX_RETRY_WAIT_MS = 15_000
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+/**
+ * How long to wait before retrying, or null if we should not.
+ *
+ * Prefers the server's `Retry-After` over a guess — it knows when its window
+ * rolls over and we do not.
+ */
+function retryDelayMs(response: Response, attempt: number): number | null {
+  if (response.status !== 429 && response.status < 500) return null
+
+  const header = response.headers.get('retry-after')
+  const seconds = Number(header)
+  const advised =
+    Number.isFinite(seconds) && seconds >= 0 ? seconds * 1_000 : null
+
+  // Exponential fallback for a server that throttles without advising: 1s, 2s, 4s.
+  const wait = advised ?? 2 ** (attempt - 1) * 1_000
+
+  return wait <= MAX_RETRY_WAIT_MS ? wait : null
+}
+
 /** EnCDN filenames are `<uuid>.<ext>`; anything else can't be one of ours. */
 const CDN_FILENAME = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/
 
@@ -80,25 +122,37 @@ export async function uploadToCdn(
   fileName: string,
   contentType: string
 ): Promise<CdnUpload> {
-  const form = new FormData()
-  // The Blob's `type` becomes the part's Content-Type header. EnCDN
-  // rejects the upload outright without it (`Invalid file type`), so this
-  // is load-bearing, not incidental.
-  form.append(
-    'file',
-    new Blob([new Uint8Array(body)], { type: contentType }),
-    fileName
-  )
+  let response: Response
 
-  const response = await fetch(`${baseUrl}/api/media/upload`, {
-    method: 'POST',
-    headers: authHeaders(),
-    body: form,
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-  })
+  for (let attempt = 1; ; attempt++) {
+    // Rebuilt per attempt: a FormData body is a stream, and the first send
+    // consumes it — reusing it would upload an empty file on the retry.
+    const form = new FormData()
+    // The Blob's `type` becomes the part's Content-Type header. EnCDN
+    // rejects the upload outright without it (`Invalid file type`), so this
+    // is load-bearing, not incidental.
+    form.append(
+      'file',
+      new Blob([new Uint8Array(body)], { type: contentType }),
+      fileName
+    )
 
-  if (!response.ok) {
-    throw new Error(await readError(response, 'Upload to the CDN failed'))
+    response = await fetch(`${baseUrl}/api/media/upload`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: form,
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    })
+
+    if (response.ok) break
+
+    const wait =
+      attempt < MAX_UPLOAD_ATTEMPTS ? retryDelayMs(response, attempt) : null
+    if (wait === null) {
+      throw new Error(await readError(response, 'Upload to the CDN failed'))
+    }
+
+    await sleep(wait)
   }
 
   const { media } = await response.json()
