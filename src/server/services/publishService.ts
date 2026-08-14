@@ -3,7 +3,6 @@ import { prisma } from '@/server/db/client'
 import { requireOrgAccess, requireHumanOrgAccess } from '@/server/auth/rbac'
 import { redis } from '@/server/redis/client'
 import type { PageTheme } from '@/modules/sections/types'
-import { compilePageSections } from './sectionCompiler'
 import { resolveSiteHandle } from './siteHandleService'
 
 const PROJECT_CACHE_TTL_SECONDS = 300
@@ -17,9 +16,9 @@ interface PageSnapshotSection {
   content: unknown
   config: unknown
   isVisible: boolean
-  componentDefinition: { key: string }
+  /** A block key from modules/sections/registry.ts. */
+  type: string
   /**
-   * Pre-rendered HTML for Liquid sections, compiled here at publish time.
    *
    * Compiling on publish rather than on request means the public render path
    * never executes an untrusted template: a request to a live storefront reads
@@ -52,10 +51,7 @@ export async function publishPage(
   const page = await prisma.page.findFirst({
     where: { id: pageId, storeId, store: { organizationId } },
     include: {
-      sections: {
-        orderBy: { order: 'asc' },
-        include: { componentDefinition: true },
-      },
+      sections: { orderBy: { order: 'asc' } },
       store: { include: { theme: true } },
       ogImage: true,
     },
@@ -63,13 +59,17 @@ export async function publishPage(
   if (!page) throw new Error('Page not found')
   if (!page.store.theme) throw new Error('Store theme not found')
 
-  // One shared compiler for publish and preview, so what a merchant previews
-  // is what visitors get. `includeErrors: false` — a live storefront renders a
-  // broken section as nothing rather than showing a shopper a template error.
-  const sections = await compilePageSections(storeId, page.sections, {
-    includeErrors: false,
-    pageId: page.id,
-  })
+  // A snapshot is just the rows: every block is a React component resolved
+  // from the in-code registry at render time, so there is nothing to compile
+  // and no build step between what the merchant edits and what ships.
+  const sections: PageSnapshotSection[] = page.sections.map((section) => ({
+    id: section.id,
+    order: section.order,
+    type: section.type,
+    content: section.content,
+    config: section.config,
+    isVisible: section.isVisible,
+  }))
 
   const snapshot: PageSnapshot = {
     title: page.title,

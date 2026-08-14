@@ -14,8 +14,7 @@ export interface SectionRendererProps<T> {
   theme: PageTheme
   /**
    * The PageSection id. Passed so a section can scope styles or scripts to its
-   * own instance — the custom-code section uses it to stop one block's CSS
-   * leaking onto the rest of the page.
+   * own instance.
    */
   sectionId?: string
   /**
@@ -27,9 +26,9 @@ export interface SectionRendererProps<T> {
   /**
    * What this page sells, resolved from the database.
    *
-   * Undefined in contexts with no real page behind them — the template gallery
-   * preview renders a design, not a shop. A section that needs to sell must
-   * handle its absence rather than assuming a page is always there.
+   * Undefined in contexts with no real page behind them. A section that needs
+   * to sell must handle its absence rather than assuming a page is always
+   * there.
    */
   commerce?: StorefrontCommerce
 }
@@ -37,11 +36,11 @@ export interface SectionRendererProps<T> {
 /**
  * The live commerce context of one landing page.
  *
- * Resolved once per render and handed to every section, so the order form, the
- * bundle picker and the sticky bar all quote the same prices from the same
- * read. Sections receiving this must still treat it as display data: the
- * authority on what anything costs is the order route, which recomputes
- * everything from the database when the buyer submits.
+ * Resolved once per render and handed to every section, so the order form and
+ * every other selling surface quote the same prices from the same read.
+ * Sections receiving this must still treat it as display data: the authority on
+ * what anything costs is the order route, which recomputes everything from the
+ * database when the buyer submits.
  */
 export interface StorefrontCommerce {
   pageId: string
@@ -56,48 +55,61 @@ export interface SectionDefinition<T = unknown> {
   key: string
   name: string
   category: string
+  /** One line for the block palette, explaining what the block is for. */
+  description?: string
+  /**
+   * Blocks a page must always contain exactly one of. The order form is the
+   * only one: a landing page with no way to buy is not a landing page, and two
+   * order forms means two carts on one funnel.
+   */
+  singleton?: boolean
   schema: ZodType<T>
   defaultContent: T
   editorFields: FieldConfig[]
   Renderer: ComponentType<SectionRendererProps<T>>
 }
 
-import { textSection } from './text'
+import { heroSection } from './hero'
+import { richtextSection } from './richtext'
 import { imageSection } from './image'
+import { ctaSection } from './cta'
+import { gallerySection } from './gallery'
+import { featuresSection } from './features'
 import { videoSection } from './video'
+import { countdownSection } from './countdown'
+import { testimonialsSection } from './testimonials'
+import { trustSection } from './trust'
 import { faqSection } from './faq'
-import { footerSection } from './footer'
-import { customCodeSection } from './custom-code'
-import { orderFormSection } from './order-form'
+import { orderformSection } from './orderform'
+import { dividerSection } from './divider'
 
 /**
- * The React section library.
+ * The block library.
  *
- * Deliberately small. This platform builds cash-on-delivery landing pages, and
- * every section a merchant can reach has to either sell, prove or explain —
- * so the commerce sections live in `lib/liquid/builtin-sections` (Liquid,
- * because only Liquid sections are handed the catalogue) and what remains here
- * is the handful that Liquid cannot do:
+ * Deliberately small and entirely React. This platform builds cash-on-delivery
+ * landing pages, and every block a merchant can reach has to either sell, prove
+ * or explain. There is no template language behind any of it: a block is a
+ * schema, a set of defaults, a field list and a component, all in TypeScript,
+ * which is what makes the palette, the inspector, the canvas and the published
+ * page four views of one definition rather than four things to keep in sync.
  *
- *   - order-form and custom-code need React interactivity;
- *   - text, image, video, faq and footer are plain content primitives with no
- *     catalogue access to gain from being Liquid.
- *
- * Anything that duplicated a Liquid commerce section (testimonials → reviews,
- * pricing → bundle-offer, gallery → gallery-strip, features → guarantee) or was
- * brochure-ware from the pre-pivot website builder (navbar, hero, image-text,
- * services, cards, statistics, cta, contact, newsletter) has been removed. A
- * landing page has nothing to click but the order form; a nav bar full of exits
- * is a bug on an ad funnel, not a feature.
+ * Adding a block means adding a module here and nothing else — no migration,
+ * because a section stores its `type` key and a JSON `content` blob.
  */
 export const sectionRegistry = {
-  text: textSection,
+  hero: heroSection,
+  richtext: richtextSection,
   image: imageSection,
+  cta: ctaSection,
+  gallery: gallerySection,
+  features: featuresSection,
   video: videoSection,
+  countdown: countdownSection,
+  testimonials: testimonialsSection,
+  trust: trustSection,
   faq: faqSection,
-  footer: footerSection,
-  'custom-code': customCodeSection,
-  'order-form': orderFormSection,
+  orderform: orderformSection,
+  divider: dividerSection,
   // Each entry is a SectionDefinition<T> for its own content type; a
   // uniform type parameter here is structurally impossible (Renderer's
   // prop position is contravariant), so this is the standard escape hatch
@@ -116,7 +128,7 @@ export const sectionRegistry = {
  *
  * This turns that into an immediate, named error. A section needing
  * interactivity keeps its definition here and puts the client half in a
- * separate `'use client'` file — see order-form for the pattern.
+ * separate `'use client'` file — see order form and countdown for the pattern.
  */
 for (const [key, definition] of Object.entries(sectionRegistry)) {
   if (!definition?.schema || !definition?.Renderer) {
@@ -130,8 +142,26 @@ for (const [key, definition] of Object.entries(sectionRegistry)) {
 
 export type SectionKey = keyof typeof sectionRegistry
 
+export const SECTION_KEYS = Object.keys(sectionRegistry) as SectionKey[]
+
+/** Block types a page must always contain exactly one of. */
+export const SINGLETON_SECTION_KEYS = SECTION_KEYS.filter(
+  (key) => sectionRegistry[key].singleton
+)
+
 export function getSectionDefinition(
   key: string
 ): SectionDefinition | undefined {
   return sectionRegistry[key as SectionKey] as SectionDefinition | undefined
+}
+
+export function isSectionKey(key: string): key is SectionKey {
+  return Object.prototype.hasOwnProperty.call(sectionRegistry, key)
+}
+
+/** A fresh copy of a block's defaults, safe to mutate. */
+export function sectionDefaults(key: string): Record<string, unknown> {
+  const definition = getSectionDefinition(key)
+  if (!definition) return {}
+  return structuredClone(definition.defaultContent) as Record<string, unknown>
 }

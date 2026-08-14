@@ -102,50 +102,6 @@ export async function getCurrencyContext(organizationId: string) {
 }
 
 /**
- * Publishes a storefront template, copying draft `source` to
- * `publishedSource`.
- *
- * The draft/published split mirrors Page/PageVersion: editing theme code must
- * never change a live storefront until the merchant says so.
- */
-export async function publishStorefrontTemplate(
-  organizationId: string,
-  templateId: string
-) {
-  await requireOrgAccess(organizationId, 'EDITOR')
-
-  const template = await prisma.storefrontTemplate.findFirst({
-    // Theme code belongs to a store, so ownership is proved through it.
-    where: { id: templateId, store: { organizationId } },
-    select: { id: true, source: true },
-  })
-  if (!template) throw new Error('Template not found')
-
-  return prisma.storefrontTemplate.update({
-    where: { id: templateId },
-    data: { publishedSource: template.source, publishedAt: new Date() },
-  })
-}
-
-export async function publishLiquidSnippet(
-  organizationId: string,
-  snippetId: string
-) {
-  await requireOrgAccess(organizationId, 'EDITOR')
-
-  const snippet = await prisma.liquidSnippet.findFirst({
-    where: { id: snippetId, store: { organizationId } },
-    select: { id: true, source: true },
-  })
-  if (!snippet) throw new Error('Snippet not found')
-
-  return prisma.liquidSnippet.update({
-    where: { id: snippetId },
-    data: { publishedSource: snippet.source },
-  })
-}
-
-/**
  * Headline numbers for the store overview.
  *
  * Revenue counts captured money (`paidTotalCents`) minus refunds rather than

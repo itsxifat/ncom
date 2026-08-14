@@ -8,7 +8,6 @@ import {
 import { slugify, withRandomSuffix } from '@/lib/slug'
 import { RESERVED_SUBDOMAINS } from '@/lib/reserved-subdomains'
 import { DEFAULT_THEME } from '@/lib/default-theme'
-import { DEFAULT_STOREFRONT_TEMPLATES } from '@/lib/liquid/default-templates'
 import type {
   CreateStoreInput,
   UpdateStoreInput,
@@ -16,7 +15,6 @@ import type {
 import type { UpdateThemeInput } from '@/lib/validation/theme'
 import type { PageTheme } from '@/modules/sections/types'
 import type { UpdateIntegrationInput } from '@/lib/validation/integration'
-import type { StorefrontTemplateType } from '@/generated/prisma/enums'
 
 async function uniqueSubdomain(base: string): Promise<string> {
   let baseSlug = slugify(base) || 'site'
@@ -220,7 +218,6 @@ async function provisionStore(input: {
       input.name,
       input.currencyCode
     )
-    await provisionStorefrontCode(tx, store.id)
 
     return store
   })
@@ -282,21 +279,6 @@ export async function provisionCommerce(
       testMode: false,
     },
   })
-}
-
-/**
- * Seeds a new store's theme code.
- *
- * Separate from provisionCommerce because these are per *site*: two storefronts
- * sharing one catalogue still each need their own product and cart templates,
- * and each should be free to diverge.
- */
-export async function provisionStorefrontCode(tx: Tx, storeId: string) {
-  for (const [type, source] of Object.entries(DEFAULT_STOREFRONT_TEMPLATES)) {
-    await tx.storefrontTemplate.create({
-      data: { storeId, type: type as StorefrontTemplateType, source },
-    })
-  }
 }
 
 /**
@@ -424,7 +406,7 @@ export async function duplicateStore(organizationId: string, storeId: string) {
         await tx.pageSection.createMany({
           data: page.sections.map((section) => ({
             pageId: newPage.id,
-            componentDefinitionId: section.componentDefinitionId,
+            type: section.type,
             order: section.order,
             content: section.content as object,
             config: section.config as object,

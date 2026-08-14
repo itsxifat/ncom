@@ -44,6 +44,15 @@ export function themeToCssProperties(theme: PageTheme): CSSProperties {
     '--page-section-spacing':
       SPACE_UNIT_VALUES[theme.sectionSpacing ?? 'comfortable'] ?? '1',
     '--page-logo-width': `${theme.logoWidth ?? 140}px`,
+
+    // The landing-page block aliases. Every block reads `--lp-accent` /
+    // `--lp-text` rather than a `--page-*` token, which is what lets a block's
+    // markup be re-skinned by the page theme alone and keeps it byte-identical
+    // to the reference implementation it was ported from. They are aliases, not
+    // a second source of truth: the theme row remains the only place a merchant
+    // sets these.
+    '--lp-accent': theme.primaryColor,
+    '--lp-text': theme.textColor,
   } as CSSProperties
 }
 

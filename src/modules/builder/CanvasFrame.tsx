@@ -13,11 +13,10 @@ export interface CanvasUpdateMessage {
   theme: PageTheme
   sections: {
     id: string
-    sectionKey: string
+    type: string
     content: unknown
     config: unknown
     isVisible: boolean
-    html?: string
   }[]
 }
 
@@ -52,11 +51,10 @@ export function CanvasClient({
         event.data.sections.map((s) => ({
           id: s.id,
           order: 0,
+          type: s.type,
           content: s.content,
           config: s.config,
           isVisible: s.isVisible,
-          componentDefinition: { key: s.sectionKey },
-          html: s.html,
         }))
       )
     }

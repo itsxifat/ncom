@@ -161,10 +161,7 @@ export async function getPageWithSections(
   const page = await prisma.page.findFirst({
     where: { id: pageId, storeId },
     include: {
-      sections: {
-        orderBy: { order: 'asc' },
-        include: { componentDefinition: true },
-      },
+      sections: { orderBy: { order: 'asc' } },
       store: { include: { theme: true } },
     },
   })
@@ -200,10 +197,7 @@ export async function getPageByPreviewToken(token: string) {
   const page = await prisma.page.findUnique({
     where: { previewToken: token },
     include: {
-      sections: {
-        orderBy: { order: 'asc' },
-        include: { componentDefinition: true },
-      },
+      sections: { orderBy: { order: 'asc' } },
       store: { include: { theme: true } },
     },
   })
@@ -214,7 +208,8 @@ export async function getPageByPreviewToken(token: string) {
 
 export interface SectionSaveInput {
   id: string
-  componentDefinitionId: string
+  /** A block key from modules/sections/registry.ts. */
+  type: string
   order: number
   content: object
   config: object
@@ -262,7 +257,7 @@ export async function savePageSections(
         const created = await tx.pageSection.create({
           data: {
             pageId,
-            componentDefinitionId: section.componentDefinitionId,
+            type: section.type,
             order: section.order,
             content: section.content,
             config: section.config,

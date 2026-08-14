@@ -4,8 +4,8 @@ import type { PageTheme, SectionConfig } from '../sections/types'
 
 export interface BuilderSection {
   id: string
-  componentDefinitionId: string
-  sectionKey: string
+  /** A block key from modules/sections/registry.ts. */
+  type: string
   order: number
   content: Record<string, unknown>
   config: SectionConfig

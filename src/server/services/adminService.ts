@@ -13,14 +13,12 @@ export async function getPlatformOverview() {
     organizationCount,
     storeCount,
     publishedPageCount,
-    templateCount,
     mediaAssetCount,
   ] = await Promise.all([
     prisma.user.count(),
     prisma.organization.count(),
     prisma.store.count(),
     prisma.page.count({ where: { status: 'PUBLISHED' } }),
-    prisma.template.count(),
     prisma.mediaAsset.count(),
   ])
 
@@ -29,7 +27,6 @@ export async function getPlatformOverview() {
     organizationCount,
     storeCount,
     publishedPageCount,
-    templateCount,
     mediaAssetCount,
   }
 }
@@ -170,35 +167,6 @@ export async function forceUnpublishPage(pageId: string) {
 
   await logAudit(session.user.id, 'force-unpublish', 'Page', pageId)
   return page
-}
-
-// ── Component definitions ──────────────────────────────────────────────
-
-export async function listComponentDefinitions() {
-  await requirePlatformAdmin()
-
-  return prisma.componentDefinition.findMany({
-    orderBy: [{ category: 'asc' }, { sortOrder: 'asc' }],
-  })
-}
-
-export async function toggleComponentDefinitionActive(id: string) {
-  const session = await requirePlatformAdmin()
-
-  const definition = await prisma.componentDefinition.findUnique({
-    where: { id },
-  })
-  if (!definition) throw new Error('Component not found')
-
-  const updated = await prisma.componentDefinition.update({
-    where: { id },
-    data: { isActive: !definition.isActive },
-  })
-
-  await logAudit(session.user.id, 'update', 'ComponentDefinition', id, {
-    isActive: updated.isActive,
-  })
-  return updated
 }
 
 // ── Media (platform-wide) ───────────────────────────────────────────────

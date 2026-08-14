@@ -4,11 +4,12 @@
 // Store owns its pages, its theme, and its whole commerce graph, and is
 // reachable at its own subdomain.
 //
-// Two parallel object graphs share the ComponentDefinition vocabulary but never share rows:
-//   - Definition side (admin-owned, reusable):  Template -> TemplateSection
-//   - Instance side (tenant-owned, per-page):    Page -> PageSection
-// Picking a template clones its TemplateSection rows into new PageSection rows; after that,
-// editing a page never touches the template it came from.
+// A page is composed of PageSection rows. Each carries a `type` — a block key
+// from modules/sections/registry.ts — plus its own JSON content and design
+// config. The block catalogue lives in code rather than in a table, so adding a
+// block is a TypeScript module and never a migration, and the palette, the
+// inspector, the canvas and the published page are four views of one
+// definition.
 //
 // Draft vs. published: live editing operates on normalized PageSection rows. Publishing
 // snapshots the current sections + SEO + theme into an immutable PageVersion.snapshot JSON
@@ -115,7 +116,6 @@ model Organization {
   invitations          OrgInvitation[]
   stores               Store[]
   mediaAssets          MediaAsset[]
-  componentDefinitions ComponentDefinition[]
 
   // Commerce lives here, not on Store. One catalogue, one inventory, one order
   // book, one set of payment/shipping/tax settings — reused by every storefront
@@ -216,11 +216,6 @@ model Store {
   // Extra hostnames this store answers on. The subdomain above is always
   // available; these are the tenant's own domains and are quota'd by plan.
   customDomains CustomDomain[]
-
-  // Storefront code for the data-driven routes (product/collection/cart), which
-  // are presentation and therefore belong to the site, not the catalogue.
-  storefrontTemplates StorefrontTemplate[]
-  liquidSnippets      LiquidSnippet[]
 
   // Attribution only. Carts and orders are owned by the organisation; these
   // record which storefront the sale came through, so a merchant running three
@@ -547,19 +542,25 @@ model PageDiscountRule {
   @@index([checkoutId, position])
 }
 
+// One block on a page.
+//
+// `type` is a block key from modules/sections/registry.ts — the catalogue lives
+// in code, not in a table, so adding a block is a module and no migration.
+// `content` is that block's own zod-validated shape and `config` is the
+// per-section design overrides; both are JSON because their shape belongs to
+// the block, and a section saved before a field existed still parses.
 model PageSection {
-  id                    String   @id @default(cuid())
-  pageId                String
-  componentDefinitionId String
-  order                 Int
-  content               Json
-  config                Json
-  isVisible             Boolean  @default(true)
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  id        String   @id @default(cuid())
+  pageId    String
+  type      String
+  order     Int
+  content   Json
+  config    Json
+  isVisible Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  page                Page                @relation(fields: [pageId], references: [id], onDelete: Cascade)
-  componentDefinition ComponentDefinition @relation(fields: [componentDefinitionId], references: [id], onDelete: Restrict)
+  page Page @relation(fields: [pageId], references: [id], onDelete: Cascade)
 
   @@index([pageId, order])
 }
@@ -578,109 +579,6 @@ model PageVersion {
   createdBy        User? @relation(fields: [createdById], references: [id], onDelete: SetNull)
 
   @@index([pageId, createdAt])
-}
-
-// ── Templates & Components ────────────────────────────────────────────────
-
-model TemplateCategory {
-  id        String  @id @default(cuid())
-  name      String
-  slug      String  @unique
-  sortOrder Int     @default(0)
-  isActive  Boolean @default(true)
-
-  templates Template[]
-}
-
-model Template {
-  id               String         @id @default(cuid())
-  name             String
-  slug             String         @unique
-  description      String?
-  categoryId       String?
-  status           TemplateStatus @default(DRAFT)
-  thumbnailMediaId String?
-  defaultTheme     Json
-  // A template is either composed from TemplateSection rows (built in the
-  // visual editor) or supplied as one Liquid document uploaded by a platform
-  // admin. `liquidSource` being non-null selects the second kind: applying it
-  // to a page creates a single Liquid section whose {% schema %} block drives
-  // the Inspector, so a pasted theme is still editable in the builder rather
-  // than being an opaque blob.
-  liquidSource     String?        @db.Text
-  // Gated by the plan's `premiumTemplates` entitlement. Applying one on a plan
-  // without that entitlement is refused in templateService, not just hidden.
-  isPremium        Boolean        @default(false)
-  createdById      String?
-  version          Int            @default(1)
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
-
-  category TemplateCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  sections TemplateSection[]
-}
-
-enum TemplateStatus {
-  DRAFT
-  PUBLISHED
-  ARCHIVED
-}
-
-model TemplateSection {
-  id                    String  @id @default(cuid())
-  templateId            String
-  componentDefinitionId String
-  order                 Int
-  defaultContent        Json
-  defaultConfig         Json
-  isVisible             Boolean @default(true)
-  isRequired            Boolean @default(false)
-
-  template            Template            @relation(fields: [templateId], references: [id], onDelete: Cascade)
-  componentDefinition ComponentDefinition @relation(fields: [componentDefinitionId], references: [id], onDelete: Restrict)
-
-  @@index([templateId, order])
-}
-
-// A section type available in the builder.
-//
-// Two render modes share this table:
-//   REACT  — `key` must match an entry in modules/sections/registry.ts; the
-//            registry owns the schema, defaults, editor fields and renderer,
-//            and the row here is just catalog metadata for the palette.
-//   LIQUID — user-authored. `liquidSource` is the template and `schemaJson`
-//            is its {% schema %} block, which compiles to the same
-//            FieldConfig[] the React sections declare by hand. Nothing about
-//            these rows is trusted: the source is rendered in a sandbox.
-//
-// `ownerOrganizationId` scopes a custom section to the org that wrote it;
-// null means platform-global (all built-ins, plus anything an admin promotes
-// out of an org and into the shared catalog).
-model ComponentDefinition {
-  id                  String            @id @default(cuid())
-  key                 String            @unique
-  name                String
-  category            String
-  description         String?
-  thumbnailMediaId    String?
-  defaultContent      Json
-  isActive            Boolean           @default(true)
-  sortOrder           Int               @default(0)
-  renderMode          SectionRenderMode @default(REACT)
-  liquidSource        String?
-  schemaJson          Json?
-  ownerOrganizationId String?
-
-  templateSections  TemplateSection[]
-  pageSections      PageSection[]
-  ownerOrganization Organization?     @relation(fields: [ownerOrganizationId], references: [id], onDelete: Cascade)
-
-  @@index([ownerOrganizationId])
-}
-
-enum SectionRenderMode {
-  REACT
-  LIQUID
 }
 
 // ── Media ───────────────────────────────────────────────────────────────
@@ -1569,7 +1467,7 @@ enum ProductStatus {
 }
 
 // A product's variant axes ("Size", "Color"). Capped at 3 by convention to
-// match variant.option1/2/3 below and Liquid's `product.options` contract.
+// match variant.option1/2/3 below.
 model ProductOption {
   id        String   @id @default(cuid())
   productId String
@@ -1585,7 +1483,7 @@ model ProductOption {
 // option1/2/3 are denormalized rather than a variant↔optionValue join table.
 // It caps variants at 3 axes, but it makes the hot storefront query (find the
 // variant for a chosen combination) a single indexed lookup instead of a
-// relational intersection, and it is the shape Liquid templates already expect.
+// relational intersection.
 model ProductVariant {
   id        String @id @default(cuid())
   productId String
@@ -2201,7 +2099,7 @@ model PaymentProviderConfig {
   position    Int             @default(0)
 
   // Encrypted at rest by lib/crypto.ts — never select this column into
-  // anything that reaches the client or a Liquid drop.
+  // anything that reaches the client.
   credentials  Json?
   // Shown to the shopper for offline methods (bank details, COD terms).
   instructions String? @db.Text
@@ -2496,65 +2394,6 @@ model TaxRate {
   @@index([organizationId])
 }
 
-// ── Liquid theme layer ───────────────────────────────────────────────────
-
-// The Liquid templates that render storefront routes which have no Page row of
-// their own (a product page is generated from data, not composed in the
-// builder). `source` is untrusted tenant input, rendered in the sandbox in
-// lib/liquid/engine.ts and compiled to HTML at publish time.
-model StorefrontTemplate {
-  id      String @id @default(cuid())
-  storeId String
-
-  type   StorefrontTemplateType
-  source String                 @db.Text
-
-  // Publish pipeline, mirroring Page/PageVersion: `source` is the draft,
-  // `compiledHtml` is what the public renderer serves.
-  publishedSource String?   @db.Text
-  publishedAt     DateTime?
-
-  updatedAt DateTime @updatedAt
-  createdAt DateTime @default(now())
-
-  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
-
-  @@unique([storeId, type])
-}
-
-enum StorefrontTemplateType {
-  PRODUCT
-  COLLECTION
-  COLLECTION_LIST
-  CART
-  SEARCH
-  CUSTOMER_ACCOUNT
-  CUSTOMER_LOGIN
-  ORDER_STATUS
-  NOT_FOUND
-}
-
-// Reusable Liquid partials, addressed by `{% render 'name' %}`. The engine's
-// filesystem is restricted to this table scoped to the current store, which
-// is what stops a template from reading anything off disk or from another
-// tenant.
-model LiquidSnippet {
-  id      String @id @default(cuid())
-  storeId String
-
-  name   String
-  source String @db.Text
-
-  publishedSource String? @db.Text
-
-  updatedAt DateTime @updatedAt
-  createdAt DateTime @default(now())
-
-  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
-
-  @@unique([storeId, name])
-}
-
 // ── Integration: API keys ────────────────────────────────────────────────
 
 // A machine credential for the public REST API.
@@ -2758,7 +2597,7 @@ model CourierConfig {
   position    Int             @default(0)
 
   /// Encrypted at rest by lib/crypto.ts, value by value. Never select this
-  /// column into anything that reaches the client or a Liquid drop.
+  /// column into anything that reaches the client.
   ///
   /// Steadfast: apiKey, secretKey — the portal API pair that creates parcels.
   /// Pathao: clientId, clientSecret, username, password.

@@ -1,11 +1,7 @@
 'use client'
 
 import { useActionState } from 'react'
-import Link from 'next/link'
-import {
-  createPageAction,
-  createPageFromTemplateAction,
-} from '@/app/(dashboard)/stores/actions'
+import { createPageAction } from '@/app/(dashboard)/stores/actions'
 import {
   Card,
   CardContent,
@@ -23,19 +19,11 @@ import {
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 
-export function NewPageForm({
-  storeId,
-  templateId,
-  templateName,
-}: {
-  storeId: string
-  templateId?: string
-  templateName?: string
-}) {
-  const boundAction = templateId
-    ? createPageFromTemplateAction.bind(null, storeId, templateId)
-    : createPageAction.bind(null, storeId)
-  const [state, action, pending] = useActionState(boundAction, undefined)
+export function NewPageForm({ storeId }: { storeId: string }) {
+  const [state, action, pending] = useActionState(
+    createPageAction.bind(null, storeId),
+    undefined
+  )
 
   return (
     <div className="mx-auto w-full max-w-lg py-4 sm:py-10">
@@ -45,22 +33,8 @@ export function NewPageForm({
             New page
           </CardTitle>
           <CardDescription>
-            {templateName ? (
-              <>
-                Starting from the <strong>{templateName}</strong> template.
-              </>
-            ) : (
-              <>
-                Add a blank page, or{' '}
-                <Link
-                  href={`/templates?forStore=${storeId}`}
-                  className="text-foreground underline"
-                >
-                  start from a template
-                </Link>
-                .
-              </>
-            )}
+            Add a blank page. Every page starts with a hero, a few selling
+            points and an order form.
           </CardDescription>
         </CardHeader>
         <CardContent>

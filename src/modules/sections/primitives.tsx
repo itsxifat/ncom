@@ -50,24 +50,39 @@ export function SectionWrapper({
   config,
   className,
   children,
+  defaultPadding = true,
 }: {
   config?: SectionConfig
   className?: string
   children: React.ReactNode
+  /**
+   * Whether an unconfigured section gets the theme's standard vertical rhythm.
+   *
+   * The landing-page blocks carry their own spacing as part of their design, so
+   * they pass `false` and stay pixel-identical to the reference implementation
+   * until a merchant actually sets padding in the Design tab. An explicit
+   * `paddingTop`/`paddingBottom` still wins either way — this only decides what
+   * "unset" means.
+   */
+  defaultPadding?: boolean
 }) {
   const hasBackgroundImage = Boolean(config?.backgroundImageUrl)
   const overlay = config?.backgroundOverlay ?? 0
+
+  const fallbackPadding = defaultPadding
+    ? 'calc(var(--page-space-unit) * 4rem)'
+    : undefined
 
   const style: React.CSSProperties = {
     // Padding falls back to the theme's spacing unit when not overridden.
     paddingTop:
       config?.paddingTop !== undefined
         ? `${config.paddingTop}rem`
-        : 'calc(var(--page-space-unit) * 4rem)',
+        : fallbackPadding,
     paddingBottom:
       config?.paddingBottom !== undefined
         ? `${config.paddingBottom}rem`
-        : 'calc(var(--page-space-unit) * 4rem)',
+        : fallbackPadding,
   }
 
   if (config?.backgroundVariant === 'custom' && config.backgroundColor) {

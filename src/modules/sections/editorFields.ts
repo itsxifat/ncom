@@ -14,9 +14,6 @@ export type FieldConfig =
   | { type: 'select'; name: string; label: string; options: string[] }
   | { type: 'stringArray'; name: string; label: string }
   | { type: 'array'; name: string; label: string; itemFields: FieldConfig[] }
-  // `color` and `number` exist for Liquid sections, whose {% schema %} blocks
-  // carry Shopify's `color`/`range`/`number` setting types (see
-  // lib/liquid/schema.ts). Built-in React sections are free to use them too.
   | { type: 'color'; name: string; label: string }
   // Stores a family name from the catalogue in `lib/fonts.ts`, which is the
   // only set of faces this app can serve — a font a section names but nothing

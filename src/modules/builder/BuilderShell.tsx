@@ -16,9 +16,7 @@ import { useBuilderStore, type BuilderSection, type Breakpoint } from './store'
 import { useAutosave, type SectionSavePayload } from './useAutosave'
 import { Canvas } from './Canvas'
 import { OutlinePanel } from './OutlinePanel'
-import { SectionPalette, type BuilderLiquidSection } from './SectionPalette'
-import { ImportLiquidDialog } from './ImportLiquidDialog'
-import type { ImportState } from '@/app/(dashboard)/stores/[storeId]/pages/[pageId]/edit/import-actions'
+import { SectionPalette } from './SectionPalette'
 import { InspectorPanel } from './InspectorPanel'
 import { OffersPanel, type OffersPanelProps } from './OffersPanel'
 import {
@@ -47,13 +45,9 @@ export function BuilderShell({
   title,
   theme,
   initialSections,
-  componentDefinitionIds,
-  liquidSections = [],
   products = [],
   catalog,
   offers,
-  renderSection,
-  importAction,
   canvasSrc,
   onSave,
 }: {
@@ -62,9 +56,6 @@ export function BuilderShell({
   title: string
   theme: PageTheme
   initialSections: BuilderSection[]
-  componentDefinitionIds: Record<string, string>
-  /** Custom Liquid sections available to this organisation. */
-  liquidSections?: BuilderLiquidSection[]
   /** Sellable variants, for sections that take orders. Empty for templates,
    *  which are designed without a store behind them. */
   products?: SellableVariant[]
@@ -76,30 +67,13 @@ export function BuilderShell({
    * Offers tab is hidden entirely there rather than shown empty.
    */
   offers?: OffersPanelProps
-  /** Compiles a Liquid or custom-code section to HTML for the canvas. */
-  renderSection?: (input: {
-    sectionId: string
-    componentDefinitionId: string
-    content: Record<string, unknown>
-  }) => Promise<{ ok: true; html: string } | { ok: false; error: string }>
-  /** Builds this page's layers from a pasted Liquid document. */
-  importAction?: (prev: ImportState, formData: FormData) => Promise<ImportState>
   canvasSrc: string
   onSave: (
     sections: SectionSavePayload[]
   ) => Promise<{ idMapping: Record<string, string> }>
 }) {
-  // Which sections must be compiled on the server before the canvas can show
-  // them: every custom Liquid section, plus the built-in custom-code block.
-  const serverRenderedIds = new Set(
-    [
-      ...liquidSections.map((section) => section.componentDefinitionId),
-      componentDefinitionIds['custom-code'],
-    ].filter((id): id is string => Boolean(id))
-  )
-
-  // Commerce sections quote the page's offers, so the canvas has to recompile
-  // when they change even though no section's own content did.
+  // The order form quotes the page's offers, so the canvas has to reload when
+  // they change even though no block's own content did.
   const [offersRevision, setOffersRevision] = useState(0)
 
   const setSections = useBuilderStore((s) => s.setSections)
@@ -118,13 +92,6 @@ export function BuilderShell({
     setTheme(theme)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entityId])
-
-  const inspectorLiquidSections = Object.fromEntries(
-    liquidSections.map((section) => [
-      section.componentDefinitionId,
-      { name: section.name, editorFields: section.editorFields },
-    ])
-  )
 
   return (
     <ProductCatalogProvider
@@ -191,20 +158,11 @@ export function BuilderShell({
         <div className="grid flex-1 grid-cols-[16rem_1fr_20rem] overflow-hidden">
           <aside className="flex flex-col gap-3 overflow-y-auto border-r p-3">
             <OutlinePanel />
-            <SectionPalette
-              componentDefinitionIds={componentDefinitionIds}
-              liquidSections={liquidSections}
-            />
-            {importAction && <ImportLiquidDialog action={importAction} />}
+            <SectionPalette />
           </aside>
 
           <main className="overflow-hidden">
-            <Canvas
-              canvasSrc={canvasSrc}
-              renderSection={renderSection}
-              serverRenderedIds={serverRenderedIds}
-              offersRevision={offersRevision}
-            />
+            <Canvas canvasSrc={canvasSrc} offersRevision={offersRevision} />
           </main>
 
           <aside className="flex flex-col overflow-hidden border-l">
@@ -221,7 +179,7 @@ export function BuilderShell({
                   value="section"
                   className="min-h-0 flex-1 overflow-y-auto p-3"
                 >
-                  <InspectorPanel liquidSections={inspectorLiquidSections} />
+                  <InspectorPanel />
                 </TabsContent>
                 <TabsContent
                   value="offers"
@@ -237,7 +195,7 @@ export function BuilderShell({
               </Tabs>
             ) : (
               <div className="flex-1 overflow-y-auto p-3">
-                <InspectorPanel liquidSections={inspectorLiquidSections} />
+                <InspectorPanel />
               </div>
             )}
           </aside>

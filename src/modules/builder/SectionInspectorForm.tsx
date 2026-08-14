@@ -27,7 +27,7 @@ import { formatMoneyAmount } from '@/lib/money'
 /**
  * The blank value a newly appended array item starts with, per field type.
  * Types must seed with their own empty value rather than `''` — a number field
- * seeded with a string produces NaN the first time Liquid does arithmetic on
+ * seeded with a string produces NaN the first time anything does arithmetic on
  * it, and a boolean seeded with `''` renders as unchecked but serialises as a
  * string.
  */
@@ -240,7 +240,7 @@ function FieldRenderer({
           max={field.max}
           step={field.step}
           // valueAsNumber keeps the stored content numeric; without it a
-          // number input round-trips as a string and breaks Liquid's
+          // number input round-trips as a string and breaks the block's
           // arithmetic filters on the value.
           {...register(name, { valueAsNumber: true })}
         />
@@ -469,8 +469,8 @@ export function SectionInspectorForm<T extends Record<string, unknown>>({
 /**
  * Renders a list of FieldConfig into inputs.
  *
- * Shared by the registry-driven inspector above and the Liquid one, so a
- * section authored in Liquid gets exactly the same controls as a built-in.
+ * Shared by every field kind the registry declares, so each block gets the
+ * same controls without a bespoke editor per type.
  */
 export function FieldsRenderer({
   fields,

@@ -11,10 +11,6 @@ import {
   updateStoreIntegration,
 } from '@/server/services/storeService'
 import { createPage, deletePage } from '@/server/services/pageService'
-import {
-  createStoreFromTemplate,
-  createPageFromTemplate,
-} from '@/server/services/templateService'
 import { publishPage, unpublishPage } from '@/server/services/publishService'
 import {
   createStoreSchema,
@@ -43,37 +39,6 @@ export async function createStoreAction(
   let store
   try {
     store = await createStore(organization.id, parsed.data)
-  } catch (error) {
-    return {
-      error: error instanceof Error ? error.message : 'Something went wrong',
-    }
-  }
-
-  revalidatePath('/stores')
-  redirect(`/stores/${store.id}`)
-}
-
-export async function createStoreFromTemplateAction(
-  templateId: string,
-  _prevState: FormActionState,
-  formData: FormData
-): Promise<FormActionState> {
-  const parsed = createStoreSchema.safeParse({
-    name: formData.get('name'),
-    subdomain: formData.get('subdomain') || undefined,
-  })
-  if (!parsed.success) {
-    return { error: parsed.error.issues[0]?.message ?? 'Invalid input' }
-  }
-
-  const { organization } = await getActiveOrganization()
-
-  let store
-  try {
-    store = await createStoreFromTemplate(organization.id, {
-      ...parsed.data,
-      templateId,
-    })
   } catch (error) {
     return {
       error: error instanceof Error ? error.message : 'Something went wrong',
@@ -170,37 +135,6 @@ export async function createPageAction(
 
   try {
     await createPage(organization.id, storeId, parsed.data)
-  } catch (error) {
-    return {
-      error: error instanceof Error ? error.message : 'Something went wrong',
-    }
-  }
-
-  revalidatePath(`/stores/${storeId}`)
-  redirect(`/stores/${storeId}`)
-}
-
-export async function createPageFromTemplateAction(
-  storeId: string,
-  templateId: string,
-  _prevState: FormActionState,
-  formData: FormData
-): Promise<FormActionState> {
-  const parsed = createPageSchema.safeParse({
-    title: formData.get('title'),
-    slug: formData.get('slug') || undefined,
-  })
-  if (!parsed.success) {
-    return { error: parsed.error.issues[0]?.message ?? 'Invalid input' }
-  }
-
-  const { organization } = await getActiveOrganization()
-
-  try {
-    await createPageFromTemplate(organization.id, storeId, {
-      ...parsed.data,
-      templateId,
-    })
   } catch (error) {
     return {
       error: error instanceof Error ? error.message : 'Something went wrong',

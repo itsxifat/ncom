@@ -7,7 +7,8 @@ export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
 
 export interface SectionSavePayload {
   id: string
-  componentDefinitionId: string
+  /** A block key from modules/sections/registry.ts. */
+  type: string
   order: number
   content: object
   config: object
@@ -40,7 +41,7 @@ export function useAutosave(
       const { idMapping } = await save(
         currentSections.map((s) => ({
           id: s.id,
-          componentDefinitionId: s.componentDefinitionId,
+          type: s.type,
           order: s.order,
           content: s.content,
           config: s.config,

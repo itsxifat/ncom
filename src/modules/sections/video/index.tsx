@@ -1,67 +1,46 @@
 import { z } from 'zod'
 import type { SectionDefinition, SectionRendererProps } from '../registry'
-import { SectionContainer, SectionWrapper, PageHeading } from '../primitives'
+import { SectionWrapper } from '../primitives'
+import { BlockHeading, BlockSection, youtubeId } from '../blockPrimitives'
 
 export const videoContentSchema = z.object({
-  heading: z.string().max(150).optional(),
-  videoUrl: z.string().min(1),
-  posterUrl: z.string().optional(),
+  title: z.string().max(200).default(''),
+  url: z.string().max(500).default(''),
+  caption: z.string().max(200).default(''),
 })
 
 export type VideoContent = z.infer<typeof videoContentSchema>
 
-export const videoDefaultContent: VideoContent = {
-  heading: 'See it in action',
-  videoUrl: '',
-}
-
-function toEmbedUrl(url: string): string | null {
-  const youtube = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]+)/)
-  if (youtube) return `https://www.youtube.com/embed/${youtube[1]}`
-
-  const vimeo = url.match(/vimeo\.com\/(\d+)/)
-  if (vimeo) return `https://player.vimeo.com/video/${vimeo[1]}`
-
-  return null
-}
+export const videoDefaultContent: VideoContent = videoContentSchema.parse({})
 
 function VideoRenderer({
   content,
   config,
 }: SectionRendererProps<VideoContent>) {
-  if (!content.videoUrl) return null
-
-  const embedUrl = toEmbedUrl(content.videoUrl)
+  const id = youtubeId(content.url)
+  if (!id) return null
 
   return (
-    <SectionWrapper config={config}>
-      <SectionContainer>
-        {content.heading && (
-          <PageHeading className="max-w-xl text-3xl">
-            {content.heading}
-          </PageHeading>
-        )}
-        <div
-          style={{ borderRadius: 'var(--page-radius)' }}
-          className="mt-8 aspect-video w-full overflow-hidden bg-black"
-        >
-          {embedUrl ? (
-            <iframe
-              src={embedUrl}
-              className="h-full w-full"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-              allowFullScreen
-            />
-          ) : (
-            <video
-              src={content.videoUrl}
-              poster={content.posterUrl}
-              controls
-              className="h-full w-full"
-            />
-          )}
+    <SectionWrapper config={config} defaultPadding={false}>
+      <BlockSection className="py-10">
+        <BlockHeading className="mb-6 text-center">
+          {content.title}
+        </BlockHeading>
+        <div className="relative aspect-video overflow-hidden rounded-2xl bg-black">
+          <iframe
+            src={`https://www.youtube-nocookie.com/embed/${id}`}
+            title={content.title || 'Video'}
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowFullScreen
+            className="absolute inset-0 h-full w-full"
+          />
         </div>
-      </SectionContainer>
+        {content.caption && (
+          <p className="mt-3 text-center text-[12px] text-[color:var(--lp-text)]/50">
+            {content.caption}
+          </p>
+        )}
+      </BlockSection>
     </SectionWrapper>
   )
 }
@@ -70,16 +49,13 @@ export const videoSection: SectionDefinition<VideoContent> = {
   key: 'video',
   name: 'Video',
   category: 'Content',
+  description: 'An embedded YouTube video.',
   schema: videoContentSchema,
   defaultContent: videoDefaultContent,
   editorFields: [
-    { type: 'text', name: 'heading', label: 'Heading' },
-    {
-      type: 'text',
-      name: 'videoUrl',
-      label: 'Video URL (YouTube, Vimeo, or file)',
-    },
-    { type: 'image', name: 'posterUrl', label: 'Poster image' },
+    { type: 'text', name: 'title', label: 'Heading' },
+    { type: 'text', name: 'url', label: 'YouTube URL' },
+    { type: 'text', name: 'caption', label: 'Caption' },
   ],
   Renderer: VideoRenderer,
 }

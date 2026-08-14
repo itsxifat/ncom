@@ -4,7 +4,7 @@
  * These are set on the tenant's own hostname, not on NCOM's. They are
  * deliberately `httpOnly` and `sameSite: 'lax'`: the cart token is a bearer
  * credential — whoever holds it can read and modify that cart — so tenant
- * JavaScript (which merchants can inject via custom code and Liquid) must not
+ * JavaScript running on a tenant storefront must not
  * be able to read it, and it must not ride along on cross-site requests.
  */
 

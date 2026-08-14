@@ -38,7 +38,7 @@ function OutlineRow({ section }: { section: BuilderSection }) {
     (s) => s.toggleSectionVisibility
   )
 
-  const definition = getSectionDefinition(section.sectionKey)
+  const definition = getSectionDefinition(section.type)
   const isSelected = selectedSectionId === section.id
 
   return (
@@ -67,7 +67,7 @@ function OutlineRow({ section }: { section: BuilderSection }) {
           !section.isVisible && 'opacity-50'
         )}
       >
-        {definition?.name ?? section.sectionKey}
+        {definition?.name ?? section.type}
       </button>
       <Button
         type="button"

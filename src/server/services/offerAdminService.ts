@@ -16,13 +16,11 @@ import type {
  * Every mutation here ends in `refreshPublishedSnapshot`, and that is the point
  * of the module rather than an afterthought.
  *
- * A page's Liquid sections are compiled to HTML at publish time — that is what
- * makes a storefront fast — so a bundle card's price is baked into the snapshot
- * while the order form reads its offers live. Change an offer without
- * recompiling and the two disagree: the card advertises the old price, the form
- * charges the new one, and the buyer is right to be angry. Republishing on
- * every offer change is a few hundred milliseconds of work that removes an
- * entire class of "the price on the page was wrong" support ticket.
+ * The public site serves a PageVersion snapshot, not live rows, so a page
+ * published before an offer changed keeps quoting the old terms until it is
+ * republished. Republishing on every offer change is a few hundred
+ * milliseconds of work that removes an entire class of "the price on the page
+ * was wrong" support ticket.
  */
 
 async function assertPageInOrg(
@@ -39,7 +37,7 @@ async function assertPageInOrg(
 }
 
 /**
- * Recompiles the live snapshot so published Liquid matches the offers.
+ * Re-snapshots the live page so what is published matches the offers.
  *
  * A draft page has no snapshot to refresh, and a failure here must not lose the
  * merchant's edit — the offer is already saved by the time this runs, so the

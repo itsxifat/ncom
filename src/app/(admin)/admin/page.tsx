@@ -41,12 +41,6 @@ export default async function AdminOverviewPage() {
       tone: 'default' as const,
     },
     {
-      label: 'Templates',
-      value: overview.templateCount,
-      icon: <LayoutTemplate />,
-      tone: 'default' as const,
-    },
-    {
       label: 'Media assets',
       value: overview.mediaAssetCount,
       icon: <ImageIcon />,

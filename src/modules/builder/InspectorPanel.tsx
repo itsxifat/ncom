@@ -6,7 +6,6 @@ import { getSectionDefinition } from '../sections/registry'
 import type { SectionDefinition } from '../sections/registry'
 import { SectionInspectorForm } from './SectionInspectorForm'
 import { SectionDesignPanel } from './SectionDesignPanel'
-import { LiquidSectionInspector } from './LiquidSectionInspector'
 import { cn } from '@/lib/utils'
 
 /**
@@ -17,23 +16,12 @@ import { cn } from '@/lib/utils'
  * single scroll of thirty fields where the text you wanted to change was
  * buried under padding controls.
  *
- * Design is identical for every section type (it edits the section wrapper),
- * while Content comes from the section's own schema: the React registry for
- * built-ins, or a compiled {% schema %} block for Liquid sections.
+ * Design is identical for every block type (it edits the section wrapper),
+ * while Content comes from the block's own field list in the registry.
  */
 type Tab = 'content' | 'design'
 
-export function InspectorPanel({
-  /**
-   * Editor fields for Liquid sections, keyed by ComponentDefinition id.
-   * Built-in React sections carry their own fields in the registry; Liquid
-   * ones have theirs compiled from the schema block and passed in from the
-   * server, because the registry has no knowledge of them.
-   */
-  liquidSections = {},
-}: {
-  liquidSections?: Record<string, { name: string; editorFields: unknown[] }>
-}) {
+export function InspectorPanel() {
   const [tab, setTab] = useState<Tab>('content')
 
   const selectedSectionId = useBuilderStore((s) => s.selectedSectionId)
@@ -51,8 +39,7 @@ export function InspectorPanel({
     )
   }
 
-  const definition = getSectionDefinition(section.sectionKey)
-  const liquid = liquidSections[section.componentDefinitionId]
+  const definition = getSectionDefinition(section.type)
 
   return (
     <div className="flex flex-col gap-3">
@@ -77,17 +64,9 @@ export function InspectorPanel({
           value={section.content}
           onChange={(content) => updateSectionContent(section.id, content)}
         />
-      ) : liquid ? (
-        <LiquidSectionInspector
-          key={section.id}
-          name={liquid.name}
-          editorFields={liquid.editorFields}
-          value={section.content}
-          onChange={(content) => updateSectionContent(section.id, content)}
-        />
       ) : (
         <p className="text-muted-foreground px-2 py-8 text-center text-sm">
-          Unknown section type “{section.sectionKey}”.
+          Unknown section type “{section.type}”.
         </p>
       )}
     </div>

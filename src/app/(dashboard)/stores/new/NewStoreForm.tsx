@@ -1,10 +1,7 @@
 'use client'
 
 import { useActionState } from 'react'
-import {
-  createStoreAction,
-  createStoreFromTemplateAction,
-} from '@/app/(dashboard)/stores/actions'
+import { createStoreAction } from '@/app/(dashboard)/stores/actions'
 import {
   Card,
   CardContent,
@@ -44,19 +41,12 @@ const CURRENCIES = [
 import { Button } from '@/components/ui/button'
 
 export function NewStoreForm({
-  templateId,
-  templateName,
   rootDomain,
 }: {
-  templateId?: string
-  templateName?: string
   /** `env.ROOT_DOMAIN`, passed in because `env` is server-only. */
   rootDomain: string
 }) {
-  const boundAction = templateId
-    ? createStoreFromTemplateAction.bind(null, templateId)
-    : createStoreAction
-  const [state, action, pending] = useActionState(boundAction, undefined)
+  const [state, action, pending] = useActionState(createStoreAction, undefined)
 
   return (
     <div className="mx-auto w-full max-w-lg py-4 sm:py-10">
@@ -66,16 +56,7 @@ export function NewStoreForm({
             New store
           </CardTitle>
           <CardDescription>
-            {templateName ? (
-              <>
-                Starting from the <strong>{templateName}</strong> template.
-              </>
-            ) : (
-              <>
-                Give your landing page store a name. You can pick a template
-                once it&apos;s created.
-              </>
-            )}
+            Give your landing page store a name.
           </CardDescription>
         </CardHeader>
         <CardContent>
