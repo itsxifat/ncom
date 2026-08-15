@@ -27,6 +27,14 @@ const STRIPE_SCRIPT_SRC = 'https://js.stripe.com'
 const STRIPE_CONNECT_SRC = 'https://api.stripe.com https://maps.googleapis.com'
 const STRIPE_FRAME_SRC = 'https://js.stripe.com https://hooks.stripe.com'
 
+// The `video` block (modules/sections/video) embeds a YouTube player. Only the
+// -nocookie host is allowed, which is the exact host that block builds its src
+// from — the privacy-preserving domain that skips tracking cookies until the
+// viewer actually hits play. Framing is all that is granted: the player's own
+// scripts and XHRs live inside that cross-origin document, under YouTube's
+// policy rather than this one, so no script-src/connect-src entry is needed.
+const YOUTUBE_FRAME_SRC = 'https://www.youtube-nocookie.com'
+
 const cspHeader = `
   default-src 'self';
   script-src 'self' 'unsafe-inline' ${ANALYTICS_SCRIPT_SRC} ${STRIPE_SCRIPT_SRC}${isDev ? " 'unsafe-eval'" : ''};
@@ -34,7 +42,7 @@ const cspHeader = `
   img-src 'self' blob: data: https:;
   font-src 'self' data:;
   connect-src 'self' ${ANALYTICS_CONNECT_SRC} ${STRIPE_CONNECT_SRC}${isDev ? ' ws://localhost:* http://localhost:*' : ''};
-  frame-src 'self' ${STRIPE_FRAME_SRC};
+  frame-src 'self' ${STRIPE_FRAME_SRC} ${YOUTUBE_FRAME_SRC};
   object-src 'none';
   base-uri 'self';
   form-action 'self';
