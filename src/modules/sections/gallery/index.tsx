@@ -77,7 +77,8 @@ export const gallerySection: SectionDefinition<GalleryContent> = {
       type: 'array',
       name: 'images',
       label: 'Images',
-      itemFields: [{ type: 'image', name: 'image', label: 'Image' }],
+      // Tiles render in an `aspect-square` box with object-cover.
+      itemFields: [{ type: 'image', name: 'image', label: 'Image', aspect: 1 }],
     },
   ],
   Renderer: GalleryRenderer,

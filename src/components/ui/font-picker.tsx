@@ -1,32 +1,38 @@
 'use client'
 
+import { useMemo } from 'react'
 import { Combobox } from '@base-ui/react/combobox'
-import { Check, ChevronsUpDown, Search } from 'lucide-react'
+import { Check, ChevronsUpDown, Search, TriangleAlert } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
-import { FONT_GROUPS, findFont, fontStack, type FontScript } from '@/lib/fonts'
+import {
+  FONT_OPTIONS,
+  detectScript,
+  findFont,
+  fontGroupsForScript,
+  fontStack,
+  type FontScript,
+} from '@/lib/fonts'
 
 /**
- * A line of text set in each font so the list shows what a face looks like,
- * not just what it is called. Chosen per script — a Bangla family has no
- * glyphs for an English sentence and would render the whole row from a
- * fallback, which is exactly the thing this control exists to prevent.
+ * The fallback line each font is set in, when there is no real text to use.
+ * Chosen per script — a Bangla family has no glyphs for an English sentence
+ * and would render the whole row from a fallback face, which is exactly the
+ * thing this control exists to prevent.
  */
 const SPECIMEN: Record<FontScript, string> = {
   latin: 'Handpicked for your store — 1,290',
   bangla: 'আপনার দোকানের জন্য বাছাই করা — ১,২৯০',
 }
 
-/** Base UI groups items as `{ value: heading, items: [...] }`. */
-const GROUPED_FONTS = FONT_GROUPS.map((group) => ({
-  value: group.label,
-  items: group.fonts.map((font) => font.name),
-}))
+const FONT_COUNT = FONT_OPTIONS.length
 
-const FONT_COUNT = GROUPED_FONTS.reduce(
-  (total, group) => total + group.items.length,
-  0
-)
+/** Long copy makes every row the same illegible width; one line is the preview. */
+function specimenFor(sampleText: string | undefined, script: FontScript) {
+  const trimmed = sampleText?.trim().replace(/\s+/g, ' ')
+  if (!trimmed) return SPECIMEN[script]
+  return trimmed.length > 48 ? `${trimmed.slice(0, 48)}…` : trimmed
+}
 
 /**
  * Picks a storefront typeface from the fonts this app can actually serve.
@@ -48,6 +54,7 @@ export function FontPicker({
   onValueChange,
   disabled,
   className,
+  sampleText,
 }: {
   id?: string
   /** Posts the chosen family name with the surrounding form. */
@@ -57,10 +64,45 @@ export function FontPicker({
   onValueChange?: (font: string) => void
   disabled?: boolean
   className?: string
+  /**
+   * The merchant's own words from the section being edited.
+   *
+   * Two jobs. It decides which script the list leads with, so a Bangla
+   * headline is not shopped for among 65 Latin faces that cannot set it. And
+   * it becomes the specimen every row is set in, so the preview answers "what
+   * does *my* headline look like in this?" rather than "what does a stock
+   * pangram look like?" — which is the only version of the question a merchant
+   * is actually asking.
+   */
+  sampleText?: string
 }) {
+  const script = detectScript(sampleText)
+  const groups = useMemo(() => fontGroupsForScript(script), [script])
+  const specimen = specimenFor(sampleText, script)
+
+  /** Base UI groups items as `{ value: heading, items: [...] }`. */
+  const items = useMemo(
+    () =>
+      groups.map((group) => ({
+        value: group.label,
+        items: group.fonts.map((font) => font.name),
+      })),
+    [groups]
+  )
+
+  const unsupported = useMemo(
+    () =>
+      new Set(
+        groups
+          .filter((group) => !group.rendersScript)
+          .flatMap((group) => group.fonts.map((font) => font.name))
+      ),
+    [groups]
+  )
+
   return (
     <Combobox.Root
-      items={GROUPED_FONTS}
+      items={items}
       name={name}
       value={value}
       defaultValue={defaultValue}
@@ -127,11 +169,23 @@ export function FontPicker({
                   items={group.items}
                   className="mb-1 last:mb-0"
                 >
-                  <Combobox.GroupLabel className="text-muted-foreground px-2 py-1.5 text-[11px] font-medium tracking-wide uppercase">
+                  <Combobox.GroupLabel className="text-muted-foreground flex items-center gap-1.5 px-2 py-1.5 text-[11px] font-medium tracking-wide uppercase">
                     {group.value}
+                    {unsupported.has(group.items[0] ?? '') && (
+                      <span className="text-amber-600 normal-case dark:text-amber-500">
+                        · no Bangla glyphs
+                      </span>
+                    )}
                   </Combobox.GroupLabel>
                   <Combobox.Collection>
-                    {(font: string) => <FontRow key={font} name={font} />}
+                    {(font: string) => (
+                      <FontRow
+                        key={font}
+                        name={font}
+                        specimen={specimen}
+                        unsupported={unsupported.has(font)}
+                      />
+                    )}
                   </Combobox.Collection>
                 </Combobox.Group>
               )}
@@ -143,7 +197,16 @@ export function FontPicker({
   )
 }
 
-function FontRow({ name }: { name: string }) {
+function FontRow({
+  name,
+  specimen,
+  unsupported,
+}: {
+  name: string
+  specimen: string
+  /** True when this face has no glyphs for the script the merchant is typing. */
+  unsupported: boolean
+}) {
   const option = findFont(name)
   const family = option?.stack
 
@@ -157,16 +220,22 @@ function FontRow({ name }: { name: string }) {
       </Combobox.ItemIndicator>
       <span className="col-start-2 min-w-0">
         <span
-          className="block truncate text-[15px] leading-tight"
+          className="flex items-center gap-1.5 text-[15px] leading-tight"
           style={{ fontFamily: family }}
         >
-          {name}
+          <span className="min-w-0 truncate">{name}</span>
+          {unsupported && (
+            <TriangleAlert className="size-3 shrink-0 text-amber-600 dark:text-amber-500" />
+          )}
         </span>
         <span
           className="text-muted-foreground block truncate text-xs leading-snug"
+          // The specimen is the merchant's own text where there is any, so a
+          // face that cannot set it visibly falls back here rather than
+          // looking fine until the page is published.
           style={{ fontFamily: family }}
         >
-          {SPECIMEN[option?.script ?? 'latin']}
+          {specimen}
         </span>
       </span>
     </Combobox.Item>

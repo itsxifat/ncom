@@ -182,6 +182,7 @@ function FieldRenderer({
             <ImagePicker
               value={(controllerField.value as string) ?? ''}
               onChange={controllerField.onChange}
+              aspect={field.aspect}
             />
           </Field>
         )}

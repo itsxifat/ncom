@@ -113,7 +113,8 @@ export const testimonialsSection: SectionDefinition<TestimonialsContent> = {
           label: 'Stars',
           options: ['5', '4', '3', '2', '1'],
         },
-        { type: 'image', name: 'image', label: 'Photo' },
+        // Rendered as a round avatar, so the frame is square.
+        { type: 'image', name: 'image', label: 'Photo', aspect: 1 },
       ],
     },
   ],

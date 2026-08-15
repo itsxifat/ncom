@@ -61,6 +61,17 @@ export interface SectionConfig {
   // ── Typography & colour ─────────────────────────────────────────────
   textColor?: string
   headingColor?: string
+  /**
+   * Per-section typeface overrides, as family names from `lib/fonts.ts`.
+   *
+   * Unset means the page theme's font, per the inheritance contract above.
+   * Stored as the family name rather than a resolved `font-family` stack for
+   * the same reason the theme does: the stack is derived at render time, so a
+   * section keeps naming the face the merchant picked even if the catalogue is
+   * reordered, and an unrecognised name can never become raw CSS.
+   */
+  headingFont?: string
+  bodyFont?: string
 
   // ── Borders ─────────────────────────────────────────────────────────
   borderRadius?: number

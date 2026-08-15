@@ -1,9 +1,10 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { ImagePlus, Loader2, UploadCloud } from 'lucide-react'
+import { Crop, ImagePlus, Loader2, UploadCloud } from 'lucide-react'
 import { uploadMediaFile, type MediaAssetDTO } from '@/lib/media-upload'
 import { listAvailableMediaAction } from './media-actions'
+import { ImageCropper } from './ImageCropper'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -18,16 +19,31 @@ import { cn } from '@/lib/utils'
 export function ImagePicker({
   value,
   onChange,
+  aspect,
 }: {
   value: string
   onChange: (url: string) => void
+  /**
+   * The shape of the frame this image renders in, when the block fixes one.
+   * Passed through to the cropper so the crop box matches what will actually
+   * be visible on the page.
+   */
+  aspect?: number
 }) {
   const [open, setOpen] = useState(false)
+  const [cropping, setCropping] = useState<string | null>(null)
 
   return (
     <div className="flex items-center gap-2">
       {value ? (
-        <div className="bg-muted relative size-14 shrink-0 overflow-hidden rounded-md border">
+        <div
+          className="bg-muted relative size-14 shrink-0 overflow-hidden rounded-md border"
+          // Previewed in the frame's own shape, so the thumbnail shows the
+          // same crop the page will — the whole point of the control below.
+          style={
+            aspect ? { aspectRatio: String(aspect), height: 'auto' } : undefined
+          }
+        >
           {/* eslint-disable-next-line @next/next/no-img-element -- arbitrary user-supplied/CDN URLs aren't in next/image's remote allowlist */}
           <img src={value} alt="" className="size-full object-cover" />
         </div>
@@ -37,14 +53,26 @@ export function ImagePicker({
         </div>
       )}
       <div className="flex flex-1 flex-col items-start gap-1">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => setOpen(true)}
-        >
-          {value ? 'Change image' : 'Choose image'}
-        </Button>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setOpen(true)}
+          >
+            {value ? 'Change image' : 'Choose image'}
+          </Button>
+          {value && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setCropping(value)}
+            >
+              <Crop className="size-3.5" /> Crop
+            </Button>
+          )}
+        </div>
         {value && (
           <button
             type="button"
@@ -59,8 +87,30 @@ export function ImagePicker({
         open={open}
         onOpenChange={setOpen}
         onSelect={(url) => {
-          onChange(url)
           setOpen(false)
+          // A newly chosen image goes straight to the cropper when the frame
+          // has a fixed shape: that is the moment the merchant knows which
+          // part matters, and the alternative is finding out on the published
+          // page that the subject was cropped out.
+          if (aspect) setCropping(url)
+          else onChange(url)
+        }}
+      />
+      <ImageCropper
+        open={cropping !== null}
+        src={cropping ?? ''}
+        aspect={aspect}
+        onOpenChange={(next) => {
+          if (!next) {
+            // Cancelling a crop still keeps the image that was just chosen —
+            // "I don't want to crop" is not "I don't want this picture".
+            if (cropping) onChange(cropping)
+            setCropping(null)
+          }
+        }}
+        onCropped={(url) => {
+          onChange(url)
+          setCropping(null)
         }}
       />
     </div>

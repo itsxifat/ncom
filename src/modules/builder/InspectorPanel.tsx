@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useBuilderStore } from './store'
 import { getSectionDefinition } from '../sections/registry'
 import type { SectionDefinition } from '../sections/registry'
+import { collectText } from '../sections/editorFields'
 import { SectionInspectorForm } from './SectionInspectorForm'
 import { SectionDesignPanel } from './SectionDesignPanel'
 import { cn } from '@/lib/utils'
@@ -56,6 +57,11 @@ export function InspectorPanel() {
         <SectionDesignPanel
           config={section.config}
           onChange={(config) => updateSectionConfig(section.id, config)}
+          sampleText={
+            definition
+              ? collectText(definition.editorFields, section.content)
+              : undefined
+          }
         />
       ) : definition ? (
         <SectionInspectorForm

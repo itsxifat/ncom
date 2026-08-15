@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { FormSelect } from '@/components/ui/form-select'
+import { FontPicker } from '@/components/ui/font-picker'
 
 /**
  * Design controls shared by every section.
@@ -23,9 +24,15 @@ import { FormSelect } from '@/components/ui/form-select'
 export function SectionDesignPanel({
   config,
   onChange,
+  sampleText,
 }: {
   config: SectionConfig
   onChange: (config: SectionConfig) => void
+  /**
+   * The text this section actually contains, so the font pickers can lead with
+   * the script the merchant is writing in and preview their own words.
+   */
+  sampleText?: string
 }) {
   function set<K extends keyof SectionConfig>(key: K, value: SectionConfig[K]) {
     onChange({ ...config, [key]: value })
@@ -216,6 +223,45 @@ export function SectionDesignPanel({
               onChange={(event) => setNumber('maxWidth', event.target.value)}
             />
           </Field>
+        )}
+      </Group>
+
+      <Group title="Typography">
+        <Field>
+          <FieldLabel>Heading font</FieldLabel>
+          <FontPicker
+            value={config.headingFont ?? ''}
+            onValueChange={(font) => set('headingFont', font || undefined)}
+            sampleText={sampleText}
+          />
+          <FieldDescription>
+            Leave unset to use the page theme&apos;s heading font.
+          </FieldDescription>
+        </Field>
+
+        <Field>
+          <FieldLabel>Body font</FieldLabel>
+          <FontPicker
+            value={config.bodyFont ?? ''}
+            onValueChange={(font) => set('bodyFont', font || undefined)}
+            sampleText={sampleText}
+          />
+        </Field>
+
+        {(config.headingFont || config.bodyFont) && (
+          <button
+            type="button"
+            className="text-muted-foreground hover:text-foreground self-start text-xs underline underline-offset-2"
+            onClick={() =>
+              onChange({
+                ...config,
+                headingFont: undefined,
+                bodyFont: undefined,
+              })
+            }
+          >
+            Reset to theme fonts
+          </button>
         )}
       </Group>
 

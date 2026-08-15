@@ -25,6 +25,31 @@ export const uploadMetadataSchema = z.object({
 
 export type UploadMetadataInput = z.infer<typeof uploadMetadataSchema>
 
+/**
+ * The region of an image to keep, as fractions of its own width and height
+ * rather than pixels.
+ *
+ * Fractions because the browser hands this over from a crop box drawn on a
+ * scaled-down preview, and it is the server that knows the real dimensions.
+ * Sending pixels would mean trusting the client's idea of how big the image is,
+ * and being wrong by the preview's scale factor.
+ */
+export const cropRectSchema = z
+  .object({
+    x: z.number().min(0).max(1),
+    y: z.number().min(0).max(1),
+    width: z.number().min(0.01).max(1),
+    height: z.number().min(0.01).max(1),
+  })
+  .refine((rect) => rect.x + rect.width <= 1.0001, {
+    message: 'Crop extends past the right edge',
+  })
+  .refine((rect) => rect.y + rect.height <= 1.0001, {
+    message: 'Crop extends past the bottom edge',
+  })
+
+export type CropRectInput = z.infer<typeof cropRectSchema>
+
 export type ParsedUploadFile = {
   data: Buffer
   fileName: string

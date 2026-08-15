@@ -1,4 +1,5 @@
 import { cn } from '@/lib/utils'
+import { fontStack } from '@/lib/fonts'
 import type { SectionConfig } from './types'
 
 export function SectionContainer({
@@ -90,6 +91,27 @@ export function SectionWrapper({
   }
 
   if (config?.textColor) style.color = config.textColor
+
+  // Typeface overrides work by redefining the same two variables the theme
+  // sets, one level further down the tree. Every block already paints from
+  // `--page-font-heading` / `--page-font-body`, so overriding them here reaches
+  // all of them through inheritance — there is nothing to add to a block, and a
+  // block added later gets this for free. Unset stays unset, so the value keeps
+  // cascading from the theme.
+  if (config?.headingFont) {
+    ;(style as Record<string, string>)['--page-font-heading'] = fontStack(
+      config.headingFont
+    )
+  }
+  if (config?.bodyFont) {
+    const stack = fontStack(config.bodyFont)
+    ;(style as Record<string, string>)['--page-font-body'] = stack
+    // The body variable is applied as `font-family` on the theme provider, far
+    // above this section, so redefining the variable alone would not repaint
+    // this section's own text — only descendants that name the variable again.
+    style.fontFamily = stack
+  }
+
   if (config?.borderRadius !== undefined) {
     style.borderRadius = `${config.borderRadius}px`
     // A radius with no clipping does nothing visible on a section that has a

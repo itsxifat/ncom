@@ -1,41 +1,79 @@
 import {
+  Alfa_Slab_One,
+  Alkatra,
+  Anek_Bangla,
   Anton,
+  Archivo,
+  Archivo_Black,
   Atma,
   Baloo_Da_2,
+  Barlow,
   Bebas_Neue,
+  Bitter,
   Caveat,
   Cormorant_Garamond,
+  Crimson_Pro,
   DM_Sans,
   DM_Serif_Display,
   Dancing_Script,
   EB_Garamond,
   Figtree,
+  Fira_Code,
+  Fraunces,
   Galada,
   Great_Vibes,
   Hind_Siliguri,
+  IBM_Plex_Mono,
+  Indie_Flower,
+  Instrument_Serif,
   Inter,
   JetBrains_Mono,
+  Kalam,
+  Karla,
   Lato,
   Libre_Baskerville,
   Lora,
   Manrope,
   Merriweather,
+  Mina,
   Montserrat,
+  Mulish,
+  Newsreader,
   Noto_Sans_Bengali,
+  Noto_Serif_Bengali,
   Nunito,
+  Onest,
   Open_Sans,
   Oswald,
+  Outfit,
   Pacifico,
+  Permanent_Marker,
   Playfair_Display,
   Plus_Jakarta_Sans,
   Poppins,
+  Public_Sans,
+  Quicksand,
+  Raleway,
+  Righteous,
   Roboto,
   Roboto_Mono,
+  Rubik,
+  Sacramento,
+  Satisfy,
+  Shadows_Into_Light,
+  Sora,
+  Source_Code_Pro,
   Source_Serif_4,
   Space_Grotesk,
   Space_Mono,
+  Spectral,
+  Syne,
+  Teko,
   Tiro_Bangla,
+  Unbounded,
+  Urbanist,
   Work_Sans,
+  Zilla_Slab,
 } from 'next/font/google'
 
 /**
@@ -51,11 +89,11 @@ import {
  *
  * Two options are set the same way on all of them and both matter:
  *
- * - `preload: false`, because this module declares three dozen families and a
- *   page uses at most two. The default would emit a preload link for every one
- *   on every route that imports this file. The actual font file is still
- *   fetched the moment something is painted with it, which is all the picker
- *   and a storefront ever need.
+ * - `preload: false`, because this module declares seventy-five families and a
+ *   page uses at most two per section. The default would emit a preload link
+ *   for every one on every route that imports this file. The actual font file
+ *   is still fetched the moment something is painted with it, which is all the
+ *   picker and a storefront ever need.
  * - `display: 'swap'`, so text is readable in the fallback while the real face
  *   downloads rather than invisible.
  *
@@ -102,6 +140,35 @@ const workSans = Work_Sans({
   preload: false,
 })
 const figtree = Figtree({ subsets: ['latin'], display: 'swap', preload: false })
+const rubik = Rubik({ subsets: ['latin'], display: 'swap', preload: false })
+const karla = Karla({ subsets: ['latin'], display: 'swap', preload: false })
+const mulish = Mulish({ subsets: ['latin'], display: 'swap', preload: false })
+const outfit = Outfit({ subsets: ['latin'], display: 'swap', preload: false })
+const sora = Sora({ subsets: ['latin'], display: 'swap', preload: false })
+const urbanist = Urbanist({
+  subsets: ['latin'],
+  display: 'swap',
+  preload: false,
+})
+const barlow = Barlow({
+  subsets: ['latin'],
+  weight: ['400', '500', '600', '700'],
+  display: 'swap',
+  preload: false,
+})
+const raleway = Raleway({ subsets: ['latin'], display: 'swap', preload: false })
+const quicksand = Quicksand({
+  subsets: ['latin'],
+  display: 'swap',
+  preload: false,
+})
+const publicSans = Public_Sans({
+  subsets: ['latin'],
+  display: 'swap',
+  preload: false,
+})
+const archivo = Archivo({ subsets: ['latin'], display: 'swap', preload: false })
+const onest = Onest({ subsets: ['latin'], display: 'swap', preload: false })
 
 const playfairDisplay = Playfair_Display({
   subsets: ['latin'],
@@ -140,6 +207,40 @@ const cormorantGaramond = Cormorant_Garamond({
   display: 'swap',
   preload: false,
 })
+const fraunces = Fraunces({
+  subsets: ['latin'],
+  display: 'swap',
+  preload: false,
+})
+const bitter = Bitter({ subsets: ['latin'], display: 'swap', preload: false })
+const crimsonPro = Crimson_Pro({
+  subsets: ['latin'],
+  display: 'swap',
+  preload: false,
+})
+const spectral = Spectral({
+  subsets: ['latin'],
+  weight: ['400', '600', '700'],
+  display: 'swap',
+  preload: false,
+})
+const newsreader = Newsreader({
+  subsets: ['latin'],
+  display: 'swap',
+  preload: false,
+})
+const zillaSlab = Zilla_Slab({
+  subsets: ['latin'],
+  weight: ['400', '500', '600', '700'],
+  display: 'swap',
+  preload: false,
+})
+const instrumentSerif = Instrument_Serif({
+  subsets: ['latin'],
+  weight: '400',
+  display: 'swap',
+  preload: false,
+})
 
 const bebasNeue = Bebas_Neue({
   subsets: ['latin'],
@@ -159,6 +260,31 @@ const spaceGrotesk = Space_Grotesk({
   display: 'swap',
   preload: false,
 })
+const archivoBlack = Archivo_Black({
+  subsets: ['latin'],
+  weight: '400',
+  display: 'swap',
+  preload: false,
+})
+const righteous = Righteous({
+  subsets: ['latin'],
+  weight: '400',
+  display: 'swap',
+  preload: false,
+})
+const alfaSlabOne = Alfa_Slab_One({
+  subsets: ['latin'],
+  weight: '400',
+  display: 'swap',
+  preload: false,
+})
+const teko = Teko({ subsets: ['latin'], display: 'swap', preload: false })
+const unbounded = Unbounded({
+  subsets: ['latin'],
+  display: 'swap',
+  preload: false,
+})
+const syne = Syne({ subsets: ['latin'], display: 'swap', preload: false })
 
 const dancingScript = Dancing_Script({
   subsets: ['latin'],
@@ -178,6 +304,42 @@ const greatVibes = Great_Vibes({
   display: 'swap',
   preload: false,
 })
+const satisfy = Satisfy({
+  subsets: ['latin'],
+  weight: '400',
+  display: 'swap',
+  preload: false,
+})
+const sacramento = Sacramento({
+  subsets: ['latin'],
+  weight: '400',
+  display: 'swap',
+  preload: false,
+})
+const kalam = Kalam({
+  subsets: ['latin'],
+  weight: ['400', '700'],
+  display: 'swap',
+  preload: false,
+})
+const shadowsIntoLight = Shadows_Into_Light({
+  subsets: ['latin'],
+  weight: '400',
+  display: 'swap',
+  preload: false,
+})
+const indieFlower = Indie_Flower({
+  subsets: ['latin'],
+  weight: '400',
+  display: 'swap',
+  preload: false,
+})
+const permanentMarker = Permanent_Marker({
+  subsets: ['latin'],
+  weight: '400',
+  display: 'swap',
+  preload: false,
+})
 
 const jetbrainsMono = JetBrains_Mono({
   subsets: ['latin'],
@@ -192,6 +354,22 @@ const robotoMono = Roboto_Mono({
 const spaceMono = Space_Mono({
   subsets: ['latin'],
   weight: ['400', '700'],
+  display: 'swap',
+  preload: false,
+})
+const ibmPlexMono = IBM_Plex_Mono({
+  subsets: ['latin'],
+  weight: ['400', '500', '600'],
+  display: 'swap',
+  preload: false,
+})
+const firaCode = Fira_Code({
+  subsets: ['latin'],
+  display: 'swap',
+  preload: false,
+})
+const sourceCodePro = Source_Code_Pro({
+  subsets: ['latin'],
   display: 'swap',
   preload: false,
 })
@@ -230,6 +408,27 @@ const tiroBangla = Tiro_Bangla({
 const galada = Galada({
   subsets: ['bengali', 'latin'],
   weight: '400',
+  display: 'swap',
+  preload: false,
+})
+const anekBangla = Anek_Bangla({
+  subsets: ['bengali', 'latin'],
+  display: 'swap',
+  preload: false,
+})
+const notoSerifBengali = Noto_Serif_Bengali({
+  subsets: ['bengali', 'latin'],
+  display: 'swap',
+  preload: false,
+})
+const mina = Mina({
+  subsets: ['bengali', 'latin'],
+  weight: ['400', '700'],
+  display: 'swap',
+  preload: false,
+})
+const alkatra = Alkatra({
+  subsets: ['bengali', 'latin'],
   display: 'swap',
   preload: false,
 })
@@ -306,6 +505,18 @@ export const FONT_GROUPS: FontGroup[] = [
     ['Nunito', nunito],
     ['Work Sans', workSans],
     ['Figtree', figtree],
+    ['Rubik', rubik],
+    ['Karla', karla],
+    ['Mulish', mulish],
+    ['Outfit', outfit],
+    ['Sora', sora],
+    ['Urbanist', urbanist],
+    ['Barlow', barlow],
+    ['Raleway', raleway],
+    ['Quicksand', quicksand],
+    ['Public Sans', publicSans],
+    ['Archivo', archivo],
+    ['Onest', onest],
   ]),
   group('Serif', 'serif', 'latin', [
     ['Playfair Display', playfairDisplay],
@@ -316,31 +527,64 @@ export const FONT_GROUPS: FontGroup[] = [
     ['EB Garamond', ebGaramond],
     ['Libre Baskerville', libreBaskerville],
     ['Cormorant Garamond', cormorantGaramond],
+    ['Fraunces', fraunces],
+    ['Bitter', bitter],
+    ['Crimson Pro', crimsonPro],
+    ['Spectral', spectral],
+    ['Newsreader', newsreader],
+    ['Zilla Slab', zillaSlab],
+    ['Instrument Serif', instrumentSerif],
   ]),
   group('Display', 'sans', 'latin', [
     ['Bebas Neue', bebasNeue],
     ['Anton', anton],
     ['Oswald', oswald],
     ['Space Grotesk', spaceGrotesk],
+    ['Archivo Black', archivoBlack],
+    ['Righteous', righteous],
+    ['Alfa Slab One', alfaSlabOne],
+    ['Teko', teko],
+    ['Unbounded', unbounded],
+    ['Syne', syne],
   ]),
   group('Handwriting', 'cursive', 'latin', [
     ['Dancing Script', dancingScript],
     ['Caveat', caveat],
     ['Pacifico', pacifico],
     ['Great Vibes', greatVibes],
+    ['Satisfy', satisfy],
+    ['Sacramento', sacramento],
+    ['Kalam', kalam],
+    ['Shadows Into Light', shadowsIntoLight],
+    ['Indie Flower', indieFlower],
+    ['Permanent Marker', permanentMarker],
   ]),
   group('Monospace', 'mono', 'latin', [
     ['JetBrains Mono', jetbrainsMono],
     ['Roboto Mono', robotoMono],
     ['Space Mono', spaceMono],
+    ['IBM Plex Mono', ibmPlexMono],
+    ['Fira Code', firaCode],
+    ['Source Code Pro', sourceCodePro],
   ]),
-  group('Bangla', 'sans', 'bangla', [
+  // Split by shape like the Latin groups rather than lumped into one "Bangla"
+  // list, so each family gets the generic fallback that matches it — a serif
+  // Bengali face dropping to `sans-serif` mid-download is a visible jump.
+  group('Bangla sans', 'sans', 'bangla', [
     ['Hind Siliguri', hindSiliguri],
     ['Noto Sans Bengali', notoSansBengali],
+    ['Anek Bangla', anekBangla],
     ['Baloo Da 2', balooDa],
+    ['Mina', mina],
     ['Atma', atma],
+  ]),
+  group('Bangla serif', 'serif', 'bangla', [
+    ['Noto Serif Bengali', notoSerifBengali],
     ['Tiro Bangla', tiroBangla],
+  ]),
+  group('Bangla display', 'sans', 'bangla', [
     ['Galada', galada],
+    ['Alkatra', alkatra],
   ]),
 ]
 
@@ -356,6 +600,54 @@ export function findFont(
   name: string | null | undefined
 ): FontOption | undefined {
   return name ? BY_NAME.get(name.trim().toLowerCase()) : undefined
+}
+
+/**
+ * The Unicode block Bengali script lives in.
+ *
+ * Written as escapes rather than as the literal characters so the range stays
+ * readable and reviewable — the literal form is a pair of glyphs most editors
+ * render identically to nothing in particular, and a stray edit to it would be
+ * invisible in a diff.
+ */
+const BENGALI = /[\u0980-\u09FF]/
+
+/**
+ * Which script a merchant is actually typing, so the picker can lead with
+ * fonts that can render it.
+ *
+ * A single Bengali character is enough to answer "bangla", and that is
+ * deliberate rather than a threshold worth tuning. The question this answers is
+ * not "which language is this page in" but "can a Latin-only face set this
+ * text" — and the answer to that is no as soon as one Bengali glyph appears.
+ * Mixed Bangla/English copy is the normal case on a Bangladeshi landing page,
+ * and every family in the Bangla groups carries the `latin` subset too, so
+ * leading with them is right for mixed text as well as pure Bangla.
+ */
+export function detectScript(
+  ...texts: (string | null | undefined)[]
+): FontScript {
+  return texts.some((text) => text && BENGALI.test(text)) ? 'bangla' : 'latin'
+}
+
+/**
+ * The catalogue ordered for the script being typed, groups that can render it
+ * first.
+ *
+ * Nothing is hidden. A merchant who wants a Latin display face for a Bangla
+ * headline is allowed to have one — they just should not have to scroll past
+ * 65 families that cannot set their text to find the ten that can, and should
+ * not pick one by mistake. `rendersScript` is what the picker warns on.
+ */
+export function fontGroupsForScript(
+  script: FontScript
+): (FontGroup & { rendersScript: boolean })[] {
+  return FONT_GROUPS.map((entry) => ({
+    ...entry,
+    // Bangla families all carry the `latin` subset, so they render Latin text
+    // fine; the reverse is not true, which is the whole asymmetry here.
+    rendersScript: script === 'latin' || entry.fonts[0]?.script === 'bangla',
+  })).sort((a, b) => Number(b.rendersScript) - Number(a.rendersScript))
 }
 
 /**

@@ -8,6 +8,7 @@ import { uploadToCdn, deleteFromCdn } from '@/server/storage'
 import { slugify } from '@/lib/slug'
 import {
   MAX_MEDIA_UPLOAD_BYTES,
+  type CropRectInput,
   type UploadMetadataInput,
 } from '@/lib/validation/media'
 
@@ -189,6 +190,109 @@ export async function importMediaFromUrl(
     }
     throw cause
   }
+}
+
+/**
+ * Crops an existing asset and stores the result as a new one.
+ *
+ * The original is left alone. A merchant putting a 3:4 photograph into a 1:1
+ * frame on one page has almost certainly used that same photograph elsewhere,
+ * and editing in place would silently re-crop every other use of it — so this
+ * adds a sibling rather than mutating what is already published.
+ *
+ * The crop is done here rather than on a canvas in the browser for three
+ * reasons: the source is served from the CDN, so a canvas would need CORS
+ * headers we do not control and would taint and refuse to export without them;
+ * sharp works from the full-resolution original instead of the scaled preview
+ * the crop box was drawn on; and the result goes through the same `optimize`
+ * and quota path as every other upload rather than around it.
+ */
+export async function cropMediaAsset(
+  organizationId: string,
+  sourceUrl: string,
+  rect: CropRectInput,
+  options: { storeId?: string } = {}
+) {
+  await requireOrgAccess(organizationId, 'EDITOR')
+
+  // The URL must already be an asset of this organization. That is the
+  // authorization check and the SSRF guard in one: this server is what dials
+  // the URL, so letting an arbitrary one through would make the cropper a way
+  // to fetch anything the box can reach. `assertFetchableImageUrl` still runs
+  // underneath for the ranges it covers.
+  const source = await prisma.mediaAsset.findFirst({
+    where: { organizationId, url: sourceUrl },
+  })
+  if (!source) {
+    throw new Error('That image is not in your media library')
+  }
+
+  const url = assertFetchableImageUrl(source.url)
+
+  let response: Response
+  try {
+    response = await fetch(url, {
+      redirect: 'follow',
+      signal: AbortSignal.timeout(IMAGE_FETCH_TIMEOUT_MS),
+      headers: { Accept: 'image/*' },
+    })
+  } catch (cause) {
+    throw new Error(
+      cause instanceof Error && cause.name === 'TimeoutError'
+        ? 'Timed out fetching the image to crop'
+        : 'Could not fetch the image to crop'
+    )
+  }
+  if (!response.ok) {
+    throw new Error(`Could not fetch the image to crop (${response.status})`)
+  }
+
+  const original = Buffer.from(await response.arrayBuffer())
+  const metadata = await sharp(original, {
+    limitInputPixels: 40_000_000,
+  }).metadata()
+
+  // `rotate()` in `optimize` bakes EXIF orientation in, so a stored asset's
+  // metadata dimensions are already the ones the merchant saw in the picker.
+  const width = metadata.width ?? 0
+  const height = metadata.height ?? 0
+  if (!width || !height) {
+    throw new Error('Could not read the image dimensions')
+  }
+
+  // Rounded to whole pixels and clamped inside the image: sharp throws if an
+  // extract region runs even one pixel past the edge, and the fractions come
+  // from a float layout calculation that can land on 1.0000000000000002.
+  const left = Math.min(Math.round(rect.x * width), width - 1)
+  const top = Math.min(Math.round(rect.y * height), height - 1)
+  const cropWidth = Math.max(
+    1,
+    Math.min(Math.round(rect.width * width), width - left)
+  )
+  const cropHeight = Math.max(
+    1,
+    Math.min(Math.round(rect.height * height), height - top)
+  )
+
+  const cropped = await sharp(original, { limitInputPixels: 40_000_000 })
+    .extract({ left, top, width: cropWidth, height: cropHeight })
+    .toBuffer()
+
+  return uploadMediaAsset(
+    organizationId,
+    cropped,
+    croppedFileName(source.fileName),
+    {
+      storeId: options.storeId ?? source.storeId ?? undefined,
+      altText: source.altText ?? undefined,
+    }
+  )
+}
+
+/** Keeps the original's name recognisable in the library, marked as a crop. */
+function croppedFileName(fileName: string) {
+  const base = fileName.replace(/\.[^./]+$/, '').slice(0, 180)
+  return `${base || 'image'}-cropped`
 }
 
 /** Long enough for a slow origin, short enough that 250 of them cannot hang a request. */
