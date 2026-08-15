@@ -287,6 +287,62 @@ Also outstanding: `CanvasFrame`'s `message` handler does not check
 `event.origin`, which must be tightened before the builder canvas renders
 tenant Liquid.
 
+## Server-side conversion tracking
+
+A storefront that reports sales only from the browser reports a fraction of
+them: ad blockers, tracking protection and abandoned tabs all silently remove
+conversions, and an ad platform that cannot see a conversion cannot optimise
+towards it. Every storefront event is therefore also sent from the server, from
+`server/services/trackingService.ts`.
+
+**Setup is two fields per platform**, under _Store → Settings → Integrations_:
+
+| Platform                 | Needs                       | Where it comes from                                      |
+| ------------------------ | --------------------------- | -------------------------------------------------------- |
+| Meta Conversions API     | Pixel ID + access token     | Events Manager → your pixel → Settings → Conversions API |
+| GA4 Measurement Protocol | Measurement ID + API secret | Admin → Data streams → Measurement Protocol API secrets  |
+
+The token is the on-switch: with an id alone the browser tag behaves exactly as
+it always has, and adding the secret turns on server-side reporting. Both
+secrets are encrypted at rest with `AUTH_SECRET` (`lib/crypto.ts`) and are never
+sent back to the browser. **Send test event** posts to both platforms and shows
+what they said.
+
+### Nothing is counted twice
+
+The rule differs per platform because the platforms differ in what they can
+deduplicate:
+
+- **Meta** receives both copies, sharing one `event_id`, and collapses them.
+  This is Meta's own recommended setup: the browser contributes cookies the
+  server cannot see, the server contributes a verified order an ad blocker
+  cannot suppress.
+- **GA4** receives one copy, from the server only, because GA4 deduplicates
+  nothing — two copies would be two conversions in the revenue report. `gtag`
+  still loads (it owns the `_ga` cookies that let a server-reported sale join
+  the session that produced it) but runs with `send_page_view: false`.
+
+Beneath both, `TrackingDelivery` has a unique `(destination, dedupeKey)` index
+keyed on the order id, so a double-tapped submit button, a replayed cart or an
+overlapping retry sweep cannot queue a second send at all. The platforms' own
+deduplication is the fallback, not the mechanism.
+
+### Attribution
+
+`proxy.ts` captures `fbclid` into a first-party `_fbc` cookie on the landing
+request, and mints `_fbp` and a GA-shaped fallback client id. This is the only
+point in the lifecycle that can do it — a Server Component cannot set cookies,
+and `fbclid` is present on exactly one request. Without it, a purchase from an
+ad click is unattributable, which defeats the point. Customer details from the
+order (phone, name, city) are normalised and SHA-256 hashed for Meta's matching;
+no plaintext buyer detail is ever stored in the queue or the delivery log.
+
+Purchases are queued, retried and logged; page views are best-effort and are
+not. A lost page view is noise, a lost purchase is the number the merchant makes
+decisions with — and a row per page view per destination would be the largest
+table in the database within a month. Retries need the
+`/api/cron/tracking-retries` sweep (see `.env.example`).
+
 ## Deployment checklist
 
 - Run `pnpm exec prisma migrate deploy` (not `migrate dev`) against the

@@ -11,7 +11,9 @@ import { SettingsSection } from '@/components/app/settings-section'
 import { StoreDetailsForm } from '@/components/dashboard/store-details-form'
 import { DomainManager } from '@/components/dashboard/domain-manager'
 import { IntegrationForm } from '@/components/dashboard/integration-form'
+import { TrackingDeliveryList } from '@/components/dashboard/tracking-delivery-list'
 import { PageShell } from '@/components/app/page-shell'
+import { recentTrackingDeliveries } from '@/server/services/trackingService'
 
 /**
  * A store owns its address and its tracking, and nothing else.
@@ -37,6 +39,7 @@ export default async function StoreSettingsPage({
   }
 
   const integration = await getStoreIntegration(organization.id, storeId)
+  const deliveries = await recentTrackingDeliveries(organization.id, store.id)
 
   // Domains are quota'd per workspace, not per store, so the remaining count has
   // to come from the whole organisation — a tenant with one domain left should
@@ -102,8 +105,20 @@ export default async function StoreSettingsPage({
           gtmContainerId={integration?.gtmContainerId ?? null}
           metaPixelId={integration?.metaPixelId ?? null}
           customHeadScript={integration?.customHeadScript ?? null}
+          metaTestEventCode={integration?.metaTestEventCode ?? null}
+          hasMetaAccessToken={integration?.hasMetaAccessToken ?? false}
+          hasGa4ApiSecret={integration?.hasGa4ApiSecret ?? false}
         />
       </SettingsSection>
+
+      {deliveries.length > 0 && (
+        <SettingsSection
+          title="Recent conversions"
+          description="The last sales this server reported to Meta and Google. Page views are sent too, but are not logged here."
+        >
+          <TrackingDeliveryList deliveries={deliveries} />
+        </SettingsSection>
+      )}
 
       <SettingsSection
         title="Workspace settings"

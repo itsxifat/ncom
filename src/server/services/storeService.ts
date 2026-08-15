@@ -8,6 +8,8 @@ import {
 import { slugify, withRandomSuffix } from '@/lib/slug'
 import { RESERVED_SUBDOMAINS } from '@/lib/reserved-subdomains'
 import { DEFAULT_THEME } from '@/lib/default-theme'
+import { encryptSecret } from '@/lib/crypto'
+import { UNCHANGED_SECRET } from '@/lib/validation/integration'
 import type {
   CreateStoreInput,
   UpdateStoreInput,
@@ -88,6 +90,14 @@ export async function updateStoreTheme(
   })
 }
 
+/**
+ * The store's integration settings for the settings screen.
+ *
+ * The two encrypted credentials are reported as booleans and never returned,
+ * not even to the merchant who typed them. There is no reason for a Server
+ * Component to hold a decrypted access token in order to render "configured",
+ * and a value that is never sent to a page cannot leak through one.
+ */
 export async function getStoreIntegration(
   organizationId: string,
   storeId: string
@@ -100,7 +110,27 @@ export async function getStoreIntegration(
   })
   if (!store) throw new Error('Store not found')
 
-  return prisma.storeIntegrationConfig.findUnique({ where: { storeId } })
+  const config = await prisma.storeIntegrationConfig.findUnique({
+    where: { storeId },
+    select: {
+      gaMeasurementId: true,
+      gtmContainerId: true,
+      metaPixelId: true,
+      customHeadScript: true,
+      metaTestEventCode: true,
+      metaAccessToken: true,
+      ga4ApiSecret: true,
+      updatedAt: true,
+    },
+  })
+  if (!config) return null
+
+  const { metaAccessToken, ga4ApiSecret, ...rest } = config
+  return {
+    ...rest,
+    hasMetaAccessToken: Boolean(metaAccessToken),
+    hasGa4ApiSecret: Boolean(ga4ApiSecret),
+  }
 }
 
 export async function updateStoreIntegration(
@@ -129,6 +159,17 @@ export async function updateStoreIntegration(
   if (input.metaPixelId) {
     await requireFeature(organizationId, 'META_PIXEL')
   }
+  // Server-side reporting is part of the same line on the price sheet as the
+  // tag it pairs with, so it is gated by the same key rather than a new one.
+  // Only a *newly typed* credential is checked: the masked placeholder and an
+  // empty box both mean the merchant is not switching anything on, and a
+  // downgraded tenant must still be able to clear what they can no longer use.
+  if (isNewSecret(input.metaAccessToken)) {
+    await requireFeature(organizationId, 'META_PIXEL')
+  }
+  if (isNewSecret(input.ga4ApiSecret)) {
+    await requireFeature(organizationId, 'GOOGLE_ANALYTICS')
+  }
   // A custom head script is how every one of the above could be added by hand,
   // so it sits behind the broadest of them rather than being ungated.
   if (input.customHeadScript) {
@@ -140,13 +181,60 @@ export async function updateStoreIntegration(
     gtmContainerId: input.gtmContainerId || null,
     metaPixelId: input.metaPixelId || null,
     customHeadScript: input.customHeadScript || null,
+    metaTestEventCode: input.metaTestEventCode || null,
+  }
+
+  // Secrets are folded in separately because "absent from the form" and
+  // "cleared by the merchant" are different intentions and the same empty
+  // string. See `secretUpdate`.
+  const secrets = {
+    metaAccessToken: secretUpdate(input.metaAccessToken),
+    ga4ApiSecret: secretUpdate(input.ga4ApiSecret),
   }
 
   return prisma.storeIntegrationConfig.upsert({
     where: { storeId },
-    create: { storeId, ...data },
-    update: data,
+    create: {
+      storeId,
+      ...data,
+      metaAccessToken: secrets.metaAccessToken ?? null,
+      ga4ApiSecret: secrets.ga4ApiSecret ?? null,
+    },
+    update: {
+      ...data,
+      // `undefined` leaves the stored ciphertext untouched, which is what an
+      // untouched masked field has to mean — saving the pixel id must not
+      // silently wipe the token that makes it work.
+      ...(secrets.metaAccessToken === undefined
+        ? {}
+        : { metaAccessToken: secrets.metaAccessToken }),
+      ...(secrets.ga4ApiSecret === undefined
+        ? {}
+        : { ga4ApiSecret: secrets.ga4ApiSecret }),
+    },
   })
+}
+
+/**
+ * Turns a submitted secret field into a database value.
+ *
+ * Three outcomes, and the distinction between them is the whole point:
+ * `undefined` keeps what is stored (the merchant did not touch the masked
+ * field), `null` clears it (they emptied it on purpose, which is how
+ * server-side tracking is switched off), and a string replaces it.
+ */
+function secretUpdate(
+  submitted: string | undefined
+): string | null | undefined {
+  if (!isNewSecret(submitted)) {
+    return submitted === '' ? null : undefined
+  }
+  return encryptSecret(submitted)
+}
+
+/** Whether the merchant actually typed a new credential into this field. */
+function isNewSecret(submitted: string | undefined): submitted is string {
+  return Boolean(submitted) && submitted !== UNCHANGED_SECRET
 }
 
 export async function createStore(

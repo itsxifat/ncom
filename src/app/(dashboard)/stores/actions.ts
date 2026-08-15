@@ -7,9 +7,12 @@ import {
   createStore,
   deleteStore,
   duplicateStore,
+  getStore,
   updateStore,
   updateStoreIntegration,
 } from '@/server/services/storeService'
+import { sendTrackingTestEvent } from '@/server/services/trackingService'
+import { env } from '@/lib/env'
 import { createPage, deletePage } from '@/server/services/pageService'
 import { publishPage, unpublishPage } from '@/server/services/publishService'
 import {
@@ -77,6 +80,18 @@ export async function updateStoreAction(
   return { error: undefined }
 }
 
+/**
+ * Reads a masked credential field.
+ *
+ * Absent from the payload entirely means the form did not render it, so there
+ * is nothing to say about it; present-but-empty means the merchant cleared it.
+ * The two must not collapse into one value — see `updateStoreIntegration`.
+ */
+function readSecretField(formData: FormData, name: string): string | undefined {
+  const value = formData.get(name)
+  return value === null ? undefined : String(value)
+}
+
 export async function updateStoreIntegrationAction(
   storeId: string,
   _prevState: FormActionState,
@@ -87,6 +102,13 @@ export async function updateStoreIntegrationAction(
     gtmContainerId: formData.get('gtmContainerId') || undefined,
     metaPixelId: formData.get('metaPixelId') || undefined,
     customHeadScript: formData.get('customHeadScript') || undefined,
+    metaTestEventCode: formData.get('metaTestEventCode') || undefined,
+    // Not coalesced to `undefined` like the others: an empty secret box is a
+    // merchant switching server-side tracking off, and it has to survive as an
+    // empty string for `updateStoreIntegration` to tell that apart from a field
+    // they simply did not touch.
+    metaAccessToken: readSecretField(formData, 'metaAccessToken'),
+    ga4ApiSecret: readSecretField(formData, 'ga4ApiSecret'),
   })
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? 'Invalid input' }
@@ -104,6 +126,49 @@ export async function updateStoreIntegrationAction(
 
   revalidatePath(`/stores/${storeId}/settings`)
   return { error: undefined }
+}
+
+export type TrackingTestState =
+  | { results: { destination: 'meta' | 'ga4'; ok: boolean; message: string }[] }
+  | { error: string }
+  | undefined
+
+/**
+ * Sends a throwaway event to whichever destinations this store has configured
+ * and reports what each said.
+ *
+ * Worth an action of its own because neither platform will tell a merchant they
+ * got it wrong during normal operation: Meta accepts a well-formed event
+ * against a pixel that is not theirs, and GA4 answers 204 to everything it is
+ * ever sent, valid or not. Without this button, a mistyped API secret looks
+ * exactly like a working setup until a month of empty reports comes back.
+ */
+export async function sendTrackingTestEventAction(
+  storeId: string
+): Promise<TrackingTestState> {
+  const { organization } = await getActiveOrganization()
+
+  try {
+    const store = await getStore(organization.id, storeId)
+    const results = await sendTrackingTestEvent(
+      organization.id,
+      store.id,
+      `https://${store.subdomain}.${env.ROOT_DOMAIN}/`
+    )
+
+    if (results.length === 0) {
+      return {
+        error:
+          'Nothing to test yet — add a Meta access token or a GA4 API secret first.',
+      }
+    }
+
+    return { results }
+  } catch (error) {
+    return {
+      error: error instanceof Error ? error.message : 'Something went wrong',
+    }
+  }
 }
 
 export async function deleteStoreAction(storeId: string) {

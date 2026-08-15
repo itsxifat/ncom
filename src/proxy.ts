@@ -1,12 +1,9 @@
 import NextAuth from 'next-auth'
-import {
-  NextResponse,
-  type NextRequest,
-  type NextFetchEvent,
-} from 'next/server'
+import type { NextRequest, NextFetchEvent } from 'next/server'
 import { authConfig } from '@/server/auth/auth.config'
 import { tenantSubdomain } from '@/lib/tenant-host'
 import { encodeDomainHandle, isCandidateCustomDomain } from '@/lib/site-handle'
+import { rewriteWithAttribution } from '@/lib/tracking/request-attribution'
 
 // Next.js 16 renamed `middleware.ts` -> `proxy.ts` (always Node.js runtime).
 const { auth } = NextAuth(authConfig)
@@ -43,7 +40,10 @@ function extractTenantSubdomain(host: string): string | null {
  * from `AUTH_URL` instead.
  *
  * Tenant subdomains are rewritten straight to the public site renderer,
- * bypassing auth entirely (those pages are public). Everything else keeps
+ * bypassing auth entirely (those pages are public) — through
+ * `rewriteWithAttribution`, which is also the only point in the lifecycle that
+ * can capture an ad click's `fbclid` into a cookie, since a Server Component
+ * cannot set one. Everything else keeps
  * going through NextAuth's own request handling — calling `auth(req, event)`
  * directly (rather than the `auth((req) => ...)` wrapper form) takes the
  * exact same code path Next.js takes when `auth` is used as the bare
@@ -66,7 +66,7 @@ export default function proxy(request: NextRequest, event: NextFetchEvent) {
   ) {
     const url = request.nextUrl.clone()
     url.pathname = `/sites/${encodeDomainHandle(host.split(':')[0]!)}${request.nextUrl.pathname}`
-    return NextResponse.rewrite(url)
+    return rewriteWithAttribution(request, url)
   }
 
   // API routes are global: they live at /api/* for every host and identify the
@@ -82,7 +82,7 @@ export default function proxy(request: NextRequest, event: NextFetchEvent) {
   if (subdomain && !request.nextUrl.pathname.startsWith('/api/')) {
     const url = request.nextUrl.clone()
     url.pathname = `/sites/${subdomain}${request.nextUrl.pathname}`
-    return NextResponse.rewrite(url)
+    return rewriteWithAttribution(request, url)
   }
 
   return authMiddleware(request, event)

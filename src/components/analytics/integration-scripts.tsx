@@ -1,19 +1,72 @@
 import Script from 'next/script'
 
+/**
+ * The tenant's own tags, and how they coexist with the server-side half.
+ *
+ * When a store also reports from the server (see
+ * server/services/trackingService.ts), these tags stop being the source of
+ * truth and become one of two halves — and the two halves are kept from
+ * counting the same event twice in two different ways, because the platforms
+ * differ in what they can deduplicate:
+ *
+ *   Meta gets both copies, each carrying the same `eventID`, and collapses
+ *   them. Sending both is Meta's own recommendation: the browser contributes
+ *   cookies the server cannot see, the server contributes a verified order that
+ *   an ad blocker cannot suppress.
+ *
+ *   GA4 gets one copy, from the server only, because GA4 deduplicates nothing
+ *   and two copies would be two conversions in the revenue report. `gtag` is
+ *   still loaded — it owns the `_ga` cookies that let a server-reported sale
+ *   join the session that produced it — but `send_page_view` is turned off so
+ *   it reports nothing itself.
+ *
+ * Renders only on the public tenant site — never the dashboard.
+ */
+
+export interface ServerTrackingHints {
+  /** Meta Conversions API is live, so the pixel's events need dedup ids. */
+  meta: boolean
+  /** GA4 Measurement Protocol is live, so gtag must stop sending page views. */
+  ga4: boolean
+  /** Shared with the server's copy of this render's PageView. */
+  pageViewEventId: string
+  /** Null when the page has nothing to sell, so ViewContent would be a lie. */
+  viewContentEventId: string | null
+}
+
 export interface IntegrationScriptsConfig {
   gaMeasurementId: string | null
   gtmContainerId: string | null
   metaPixelId: string | null
   customHeadScript: string | null
+  /** Null when this store reports from the browser only, as before. */
+  serverTracking: ServerTrackingHints | null
 }
 
-/** Renders only on the public tenant site — never the dashboard. */
 export function IntegrationScripts({
   gaMeasurementId,
   gtmContainerId,
   metaPixelId,
   customHeadScript,
+  serverTracking,
 }: IntegrationScriptsConfig) {
+  // Only suppressed when something is definitely taking over. A store with a
+  // measurement id but no API secret keeps the behaviour it has always had.
+  const gaConfigOptions = serverTracking?.ga4
+    ? ", { 'send_page_view': false }"
+    : ''
+
+  const metaPageView = serverTracking?.meta
+    ? `fbq('track', 'PageView', {}, { eventID: ${JSON.stringify(serverTracking.pageViewEventId)} });`
+    : `fbq('track', 'PageView');`
+
+  // Only paired with the server's copy. Firing it browser-only would start
+  // sending a new event type to stores that never asked for one.
+  const metaViewContent =
+    serverTracking?.meta && serverTracking.viewContentEventId
+      ? `fbq('track', 'ViewContent', {}, { eventID: ${JSON.stringify(serverTracking.viewContentEventId)} });`
+      : ''
+
   return (
     <>
       {gaMeasurementId && (
@@ -26,7 +79,7 @@ export function IntegrationScripts({
             {`window.dataLayer = window.dataLayer || [];
               function gtag(){dataLayer.push(arguments);}
               gtag('js', new Date());
-              gtag('config', '${gaMeasurementId}');`}
+              gtag('config', '${gaMeasurementId}'${gaConfigOptions});`}
           </Script>
         </>
       )}
@@ -47,7 +100,8 @@ export function IntegrationScripts({
             t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window, document,'script',
             'https://connect.facebook.net/en_US/fbevents.js');
             fbq('init', '${metaPixelId}');
-            fbq('track', 'PageView');`}
+            ${metaPageView}
+            ${metaViewContent}`}
         </Script>
       )}
       {customHeadScript && (

@@ -1,9 +1,16 @@
+import { randomUUID } from 'node:crypto'
 import { notFound } from 'next/navigation'
 import { after } from 'next/server'
-import { headers } from 'next/headers'
+import { cookies, headers } from 'next/headers'
 import type { Metadata } from 'next'
 import { getPublishedPageForRender } from '@/server/services/publishService'
 import { recordPageView } from '@/server/services/analyticsService'
+import {
+  readTrackingIdentity,
+  trackPageEvents,
+  trackingConfigFrom,
+  type PageOfferSnapshot,
+} from '@/server/services/trackingService'
 import { getStorefrontCommerce } from '@/server/services/offerService'
 import { isOverTrafficAllowance } from '@/server/services/entitlementService'
 import {
@@ -101,6 +108,47 @@ export default async function PublicSitePage({
     store.organizationId
   )
 
+  // Server-side tracking, resolved here rather than in the `after()` below:
+  // that callback cannot read `headers()` or `cookies()` from a Server
+  // Component, so everything the events need is captured now and closed over.
+  // The credentials ride along on the integration row already loaded for the
+  // browser tags, so this costs no extra query per page view.
+  const trackingConfig = trackingConfigFrom(store.id, integration)
+  const cookieStore = trackingConfig ? await cookies() : null
+
+  const pageUrl = `${process.env.NODE_ENV === 'production' ? 'https' : 'http'}://${headerList.get('host') ?? `${subdomain}.${env.ROOT_DOMAIN}`}/${(path ?? []).join('/')}`
+
+  // One id per event per render, shared with the browser tag rendered below so
+  // Meta collapses its copy and ours into a single event.
+  const trackingEventIds = {
+    pageView: randomUUID(),
+    viewContent: randomUUID(),
+  }
+
+  const trackedOffer = offerSnapshot(commerce)
+
+  if (trackingConfig && cookieStore) {
+    const identity = readTrackingIdentity({
+      headers: headerList,
+      cookies: cookieStore,
+      measurementId: trackingConfig.ga4?.measurementId ?? null,
+      ip: ip === 'unknown' ? null : ip,
+      userAgent: userAgent || null,
+    })
+
+    after(async () => {
+      await trackPageEvents({
+        config: trackingConfig,
+        identity,
+        sourceUrl: pageUrl,
+        pageTitle: snapshot.seoTitle || snapshot.title,
+        referrer,
+        offer: trackedOffer,
+        metaEventIds: trackingEventIds,
+      })
+    })
+  }
+
   after(async () => {
     await recordPageView({
       pageId: page.id,
@@ -129,6 +177,18 @@ export default async function PublicSitePage({
           gtmContainerId={integration.gtmContainerId}
           metaPixelId={integration.metaPixelId}
           customHeadScript={integration.customHeadScript}
+          // Only the booleans and the event ids cross into the browser. The
+          // access token and API secret on `integration` stay on the server.
+          serverTracking={
+            trackingConfig && {
+              meta: Boolean(trackingConfig.meta),
+              ga4: Boolean(trackingConfig.ga4),
+              pageViewEventId: trackingEventIds.pageView,
+              viewContentEventId: trackedOffer
+                ? trackingEventIds.viewContent
+                : null,
+            }
+          }
         />
       )}
       <PageRenderer
@@ -139,4 +199,42 @@ export default async function PublicSitePage({
       />
     </>
   )
+}
+
+/**
+ * What this page is selling, for the product-view event.
+ *
+ * The default offer, because that is the one the page leads with and the one a
+ * visitor is looking at before they touch anything. Returns null when the page
+ * sells nothing, so a content page does not report a product view of nothing.
+ */
+function offerSnapshot(
+  commerce: Awaited<ReturnType<typeof getStorefrontCommerce>>
+): PageOfferSnapshot | null {
+  const offer =
+    commerce.offers.find((candidate) => candidate.isDefault) ??
+    commerce.offers[0]
+  if (!offer) return null
+
+  // A FIXED offer's own lines, or the pool a buyer would pick from. Each
+  // product contributes its first variant: the event describes what the page
+  // shows, and the page shows one price per product until a choice is made.
+  const lines = offer.items.length > 0 ? offer.items : offer.pool
+
+  return {
+    currencyCode: commerce.currencyCode,
+    headlinePriceCents: offer.headlinePriceCents,
+    items: lines.flatMap((line) => {
+      const variant = line.variants[0]
+      if (!variant) return []
+      return [
+        {
+          id: variant.id,
+          name: line.title,
+          quantity: line.quantity || 1,
+          priceCents: variant.priceCents,
+        },
+      ]
+    }),
+  }
 }

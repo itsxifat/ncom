@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server'
-import { headers } from 'next/headers'
+import { cookies, headers } from 'next/headers'
 import { z } from 'zod'
 import { offerOrderSchema } from '@/lib/validation/offerOrder'
 import { placeOfferOrder } from '@/server/services/offerOrderService'
 import { getStoreForSeoRoutes } from '@/server/services/publishService'
+import { queuePurchaseConversion } from '@/server/services/trackingService'
 import { checkRateLimit, getClientIp } from '@/lib/rate-limit'
 import { tenantSubdomain } from '@/lib/tenant-host'
 import { env } from '@/lib/env'
@@ -111,6 +112,9 @@ export async function POST(request: Request) {
       store.id,
       parsed.data
     )
+
+    const tracking = await reportConversion(store.id, result.orderId, ip)
+
     return NextResponse.json({
       ok: true,
       orderNumber: result.orderNumber,
@@ -118,6 +122,9 @@ export async function POST(request: Request) {
       currencyCode: result.currencyCode,
       offerLabel: result.offerLabel,
       quantity: result.quantity,
+      // What the browser's Meta pixel should repeat, if there is one. Null when
+      // the store reports from the browser only, or not at all.
+      tracking,
     })
   } catch (cause) {
     // Checkout failures here are the buyer's business — "out of stock", "we do
@@ -128,6 +135,42 @@ export async function POST(request: Request) {
     console.error(`Offer order failed for store ${store.id}:`, cause)
     return NextResponse.json({ error: message }, { status: 400 })
   }
+}
+
+/**
+ * Reports the sale to the store's ad platforms, and tells the browser what to
+ * repeat.
+ *
+ * Runs after the order exists, and never in a way that can affect it: a
+ * merchant losing a sale because Meta was slow would be a far worse bug than
+ * the missing conversion. `queuePurchaseConversion` swallows its own failures
+ * for that reason, and this only adds the request-shaped context it cannot
+ * gather for itself.
+ *
+ * The page URL comes from the `Referer` header rather than the request body.
+ * The order form posts here from the landing page, so the browser sends it
+ * automatically, and taking it from the body instead would let a scraped form
+ * write any URL it liked into the merchant's ad reporting.
+ */
+async function reportConversion(storeId: string, orderId: string, ip: string) {
+  const [headerList, cookieStore] = await Promise.all([headers(), cookies()])
+  const referer = headerList.get('referer')
+
+  return queuePurchaseConversion({
+    storeId,
+    orderId,
+    sourceUrl: referer ?? `https://${headerList.get('host') ?? ''}`,
+    request: {
+      headers: headerList,
+      // No proxy-set headers on this request: `/api/*` is deliberately excluded
+      // from the storefront rewrite, so the cookies that rewrite planted on the
+      // landing view are the whole story here — which is exactly what they were
+      // planted for.
+      cookies: cookieStore,
+      ip: ip === 'unknown' ? null : ip,
+      userAgent: headerList.get('user-agent'),
+    },
+  })
 }
 
 /**

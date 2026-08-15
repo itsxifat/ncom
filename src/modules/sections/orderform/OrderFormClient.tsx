@@ -22,6 +22,7 @@ import {
   quoteOffer,
 } from '@/lib/offers/pricing'
 import { applyPromotions, promotionHints } from '@/lib/offers/promotions'
+import { mirrorPurchaseToPixel } from '@/lib/tracking/browser'
 import { formatMoney } from '@/lib/money'
 import type {
   OfferLine,
@@ -199,6 +200,19 @@ export function OrderFormClient({
         })
         return
       }
+
+      // The server has already reported this sale to Meta; this is the pixel's
+      // deduplicated copy of it, carrying the same event id and the same
+      // figures the server sent. If the pixel is blocked — or was never
+      // configured — nothing happens here and the sale is still counted.
+      mirrorPurchaseToPixel(
+        result.tracking?.pixel
+          ? {
+              eventId: result.tracking.eventId,
+              payload: result.tracking.pixel.payload,
+            }
+          : null
+      )
 
       setStatus({
         state: 'sent',

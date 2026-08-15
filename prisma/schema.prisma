@@ -112,10 +112,10 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  memberships          Membership[]
-  invitations          OrgInvitation[]
-  stores               Store[]
-  mediaAssets          MediaAsset[]
+  memberships Membership[]
+  invitations OrgInvitation[]
+  stores      Store[]
+  mediaAssets MediaAsset[]
 
   // Commerce lives here, not on Store. One catalogue, one inventory, one order
   // book, one set of payment/shipping/tax settings — reused by every storefront
@@ -207,15 +207,16 @@ model Store {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  organization  Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  pages         Page[]
-  theme         ThemeSettings?
-  integration   StoreIntegrationConfig?
-  mediaAssets   MediaAsset[]
-  pageViews     PageView[]
+  organization       Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  pages              Page[]
+  theme              ThemeSettings?
+  integration        StoreIntegrationConfig?
+  mediaAssets        MediaAsset[]
+  pageViews          PageView[]
+  trackingDeliveries TrackingDelivery[]
   // Extra hostnames this store answers on. The subdomain above is always
   // available; these are the tenant's own domains and are quota'd by plan.
-  customDomains CustomDomain[]
+  customDomains      CustomDomain[]
 
   // Attribution only. Carts and orders are owned by the organisation; these
   // record which storefront the sale came through, so a merchant running three
@@ -269,14 +270,43 @@ enum ButtonStyle {
   GHOST
 }
 
+// Where a store's traffic and sales are reported to.
+//
+// The ids here are used twice over: once by the browser tag this store renders,
+// and once by the server when it reports the same events itself. That pairing
+// is the whole design — see server/services/trackingService.ts for how the two
+// halves are kept from counting the same sale twice.
 model StoreIntegrationConfig {
-  id               String   @id @default(cuid())
-  storeId          String   @unique
+  id               String  @id @default(cuid())
+  storeId          String  @unique
   gaMeasurementId  String?
   gtmContainerId   String?
   metaPixelId      String?
   customHeadScript String?
-  updatedAt        DateTime @updatedAt
+
+  // ── Server-side tracking credentials ──────────────────────────────────
+  //
+  // Encrypted at rest (lib/crypto) for the same reason payment keys are: a
+  // Conversions API token can post arbitrary events into a merchant's ad
+  // account and shape what Meta charges them for, and a GA4 API secret can
+  // poison the reports they price their advertising against. Neither is
+  // recoverable from a leaked database dump alone.
+  //
+  // Presence is the switch. A pixel id on its own renders the browser tag as
+  // before; a pixel id *and* a token additionally reports from the server, so
+  // turning server-side tracking on is one paste and turning it off is one
+  // delete. There is no separate enabled flag to drift out of step with the
+  // credentials it guards.
+  /// Meta Conversions API access token, encrypted.
+  metaAccessToken   String?
+  /// Meta's Test Events code. Set while a merchant is verifying setup in Events
+  /// Manager; events carrying it are routed to the test stream and excluded
+  /// from reporting, so it must be cleared before it means anything real.
+  metaTestEventCode String?
+  /// GA4 Measurement Protocol API secret, encrypted.
+  ga4ApiSecret      String?
+
+  updatedAt DateTime @updatedAt
 
   store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
 }
@@ -584,7 +614,7 @@ model PageVersion {
 // ── Media ───────────────────────────────────────────────────────────────
 
 model MediaAsset {
-  id             String   @id @default(cuid())
+  id             String  @id @default(cuid())
   organizationId String
   storeId        String?
   uploadedById   String?
@@ -634,6 +664,80 @@ model PageView {
 
   @@index([pageId, createdAt])
   @@index([storeId, createdAt])
+}
+
+// One attempt-tracked delivery of one conversion to one ad platform.
+//
+// Only events that are worth money get a row. A purchase reported to Meta or
+// GA4 decides what a merchant's ads are optimised for and what they believe
+// their return is, so it is queued, retried and auditable — "did the sale
+// reach Meta?" has to have an answer. Page views do not get rows: they are
+// sent best-effort from the render and a lost one is noise, while a row per
+// view per destination would be the largest table in the database within a
+// month and would buy nothing.
+//
+// `dedupeKey` is the platform's own guarantee against double counting, and it
+// is the reason this table exists rather than a fire-and-forget call. It is
+// derived from the business event — `purchase:<orderId>` — so a retried
+// request, a replayed cart, or a second sweep of the queue all collide on the
+// same row and the second insert is discarded. The ad platforms' own
+// deduplication (Meta's `event_id`, GA4's `transaction_id`) is the second
+// line, not the first: those only help when the duplicate reaches them.
+model TrackingDelivery {
+  id      String @id @default(cuid())
+  storeId String
+
+  destination TrackingDestination
+  eventName   TrackingEventName
+
+  /// Shared with the browser tag for the same business event, so Meta collapses
+  /// the pixel's copy and this one into a single conversion. Identical across
+  /// every retry, because a retry is the same event happening once.
+  eventId   String
+  /// Unique per destination. The insert that loses the race is the duplicate.
+  dedupeKey String
+
+  payload Json
+
+  status       TrackingDeliveryStatus @default(PENDING)
+  attempts     Int                    @default(0)
+  statusCode   Int?
+  error        String?
+  responseBody String?                @db.Text
+
+  nextAttemptAt DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime  @default(now())
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([destination, dedupeKey])
+  // Drives the merchant-facing "last conversion sent" panel.
+  @@index([storeId, createdAt])
+  // Drives the retry sweep: pending rows whose backoff has elapsed.
+  @@index([status, nextAttemptAt])
+}
+
+enum TrackingDestination {
+  /// Meta Conversions API.
+  META_CAPI
+  /// Google Analytics 4 Measurement Protocol.
+  GA4_MP
+}
+
+/// The platform's own names for the events it reports. Each destination
+/// translates these into its own vocabulary — PURCHASE is `Purchase` to Meta
+/// and `purchase` to GA4 — so neither wire format leaks into the queue.
+enum TrackingEventName {
+  PAGE_VIEW
+  VIEW_CONTENT
+  PURCHASE
+}
+
+enum TrackingDeliveryStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
 }
 
 // ── Platform admin ────────────────────────────────────────────────────────
