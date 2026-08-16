@@ -12,7 +12,6 @@ const FOOTER_LINKS: {
       { label: 'Features', href: '/#features' },
       { label: 'Sections', href: '/#sections' },
       { label: 'Pricing', href: '/#pricing' },
-      { label: 'Templates', href: '/templates' },
     ],
   },
   {

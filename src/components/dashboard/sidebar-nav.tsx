@@ -5,7 +5,6 @@ import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard,
   Store,
-  LayoutTemplate,
   Settings,
   ShieldCheck,
   Users,
@@ -56,7 +55,6 @@ const NAV_GROUPS: Array<{ label: string | null; items: NavItem[] }> = [
     label: 'Sites',
     items: [
       { href: '/stores', label: 'Stores', icon: Store },
-      { href: '/templates', label: 'Templates', icon: LayoutTemplate },
       { href: '/media', label: 'Media', icon: ImageIcon },
     ],
   },

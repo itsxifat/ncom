@@ -1,6 +1,45 @@
 import type { NextAuthConfig } from 'next-auth'
 
 /**
+ * Every route that renders inside the dashboard layout, plus the two headless
+ * render routes the builder loads in an iframe.
+ *
+ * This list has to hold every one of them. The layout resolves the active
+ * organisation, which *throws* on an anonymous request rather than redirecting,
+ * so a route missing here does not degrade to a login prompt — it 500s into the
+ * error boundary. It had drifted badly: only four of the sixteen dashboard
+ * routes were listed, so signing out and opening /analytics, /orders, /products
+ * or nine others gave an error page instead of the sign-in screen. /invitations
+ * was the case that first exposed it, being the one dashboard URL routinely
+ * opened by someone who is not signed in and often has no account yet.
+ *
+ * Matched on segment boundaries rather than as bare prefixes, so a future public
+ * route like /account-deleted cannot be swallowed by the /account entry.
+ *
+ * Keep in step with `src/app/(dashboard)/`.
+ */
+const PROTECTED_PREFIXES = [
+  '/account',
+  '/analytics',
+  '/billing',
+  '/builder-canvas',
+  '/categories',
+  '/collections',
+  '/customers',
+  '/dashboard',
+  '/discounts',
+  '/inventory',
+  '/invitations',
+  '/media',
+  '/orders',
+  '/organization',
+  '/preview-render',
+  '/products',
+  '/settings',
+  '/stores',
+]
+
+/**
  * Lightweight subset used by `proxy.ts` for optimistic, cookie-only route
  * guarding. No Credentials provider and no Prisma adapter here — proxy runs
  * on every request (including prefetches), so it must only decode the JWT
@@ -35,13 +74,11 @@ export const authConfig = {
         return isLoggedIn && auth?.user?.platformRole === 'SUPER_ADMIN'
       }
 
-      const isProtected =
-        nextUrl.pathname.startsWith('/dashboard') ||
-        nextUrl.pathname.startsWith('/stores') ||
-        nextUrl.pathname.startsWith('/templates') ||
-        nextUrl.pathname.startsWith('/account') ||
-        nextUrl.pathname.startsWith('/preview-render') ||
-        nextUrl.pathname.startsWith('/builder-canvas')
+      const isProtected = PROTECTED_PREFIXES.some(
+        (prefix) =>
+          nextUrl.pathname === prefix ||
+          nextUrl.pathname.startsWith(`${prefix}/`)
+      )
 
       if (isProtected) {
         return isLoggedIn

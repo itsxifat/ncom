@@ -44,19 +44,19 @@ export default async function DashboardPage() {
           icon={<LayoutTemplate />}
         />
         <Link
-          href="/templates"
+          href="/stores/new"
           className="group/tile bg-ink text-ink-foreground shadow-puck hover:shadow-lift relative flex min-h-32 flex-col justify-between gap-6 overflow-hidden rounded-xl p-5 transition-shadow xl:col-span-2 2xl:min-h-36 2xl:p-6"
         >
           <div className="flex items-start justify-between gap-3">
-            <span className="eyebrow opacity-60">Templates</span>
+            <span className="eyebrow opacity-60">New store</span>
             <ArrowPuck className="bg-white/10 text-white ring-white/15" />
           </div>
           <div>
             <p className="font-display max-w-sm text-2xl leading-tight font-semibold tracking-tight text-balance 2xl:text-3xl">
-              Start from a template instead of a blank page
+              Build a page from sections, not a blank file
             </p>
             <p className="mt-2 text-sm opacity-60">
-              Pick a layout, swap the copy, publish.
+              Drop in a hero, swap the copy, publish.
             </p>
           </div>
         </Link>

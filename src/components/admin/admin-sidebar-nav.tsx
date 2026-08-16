@@ -7,8 +7,6 @@ import {
   Users,
   Building2,
   FolderKanban,
-  LayoutTemplate,
-  Blocks,
   Image as ImageIcon,
   Globe,
   Globe2,
@@ -52,8 +50,6 @@ const NAV_GROUPS = [
     label: 'Content',
     items: [
       { href: '/admin/stores', label: 'Stores', icon: FolderKanban },
-      { href: '/admin/templates', label: 'Templates', icon: LayoutTemplate },
-      { href: '/admin/components', label: 'Components', icon: Blocks },
       { href: '/admin/media', label: 'Media', icon: ImageIcon },
       { href: '/admin/published-pages', label: 'Published pages', icon: Globe },
     ],
