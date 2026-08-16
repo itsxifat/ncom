@@ -1,14 +1,37 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { useBuilderStore } from './store'
-import { cn } from '@/lib/utils'
+import { useBuilderStore, type Breakpoint } from './store'
 
-const BREAKPOINT_WIDTHS: Record<string, number> = {
-  desktop: 1440,
-  tablet: 768,
-  mobile: 375,
-}
+/**
+ * The viewport each breakpoint button stands for.
+ *
+ * Both dimensions are load bearing, because the canvas document measures itself
+ * against the iframe rather than against the editor's window.
+ *
+ * Width decides which media queries resolve. `desktop` used to have no width at
+ * all — the iframe was `w-full` and simply took whatever was left between the
+ * two panels, so the same page previewed at ~1296px on a 1080p display and at
+ * ~816px on a laptop. The second of those is below Tailwind's `lg` breakpoint,
+ * so a two-column `lg:` block silently previewed as one column that a real
+ * visitor never sees. Tablet and mobile were wrong in the same way for the
+ * opposite reason: `maxWidth: '100%'` squashed the 768px frame down to fit a
+ * narrow pane, and the document then honestly reported the squashed width.
+ *
+ * Height is what `vh` is measured against, and it was previously the height of
+ * the editor pane. That is the difference between a `full`-height hero
+ * (`min-h-[85vh]`) filling the screen in preview and filling it in production.
+ *
+ * The frame is therefore pinned to real device dimensions and scaled down to
+ * fit, so the preview says the same thing on every display the editor is opened
+ * on.
+ */
+const DEVICE_VIEWPORTS: Record<Breakpoint, { width: number; height: number }> =
+  {
+    desktop: { width: 1440, height: 900 },
+    tablet: { width: 768, height: 1024 },
+    mobile: { width: 375, height: 812 },
+  }
 
 /**
  * The live preview.
@@ -33,6 +56,11 @@ export function Canvas({
   offersRevision?: number
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null)
+  const shellRef = useRef<HTMLDivElement>(null)
+  // Measured rather than derived from the window: the space left for the canvas
+  // depends on the two side panels, so window width alone would not give the
+  // scale factor.
+  const [shell, setShell] = useState({ width: 0, height: 0 })
   // A counter rather than a flag: the canvas announces itself on every load, so
   // a reloaded iframe has to be re-sent the sections it lost. With a boolean
   // the second announcement was a no-op state write and the post effect never
@@ -41,6 +69,19 @@ export function Canvas({
   const breakpoint = useBuilderStore((s) => s.breakpoint)
   const sections = useBuilderStore((s) => s.sections)
   const theme = useBuilderStore((s) => s.theme)
+
+  useEffect(() => {
+    const node = shellRef.current
+    if (!node) return
+    const observer = new ResizeObserver(([entry]) => {
+      // contentRect is the padding box's inside, so the p-6 gutter is already
+      // excluded and the frame never scales into it.
+      const { width, height } = entry.contentRect
+      setShell({ width, height })
+    })
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [])
 
   useEffect(() => {
     function handleMessage(event: MessageEvent) {
@@ -81,22 +122,48 @@ export function Canvas({
     )
   }, [readyToken, sections, theme])
 
+  const viewport = DEVICE_VIEWPORTS[breakpoint]
+
+  // Shrink to fit, never enlarge: scaling a 375px phone up to fill a wide pane
+  // would be just as much of a lie as the old stretched desktop frame, only in
+  // the other direction. Before the first measurement there is nothing to fit
+  // against, so the frame starts at 1:1 and settles on the same tick.
+  const scale =
+    shell.width > 0 && shell.height > 0
+      ? Math.min(
+          1,
+          shell.width / viewport.width,
+          shell.height / viewport.height
+        )
+      : 1
+
   return (
-    <div className="bg-muted flex h-full items-start justify-center overflow-auto p-6">
-      <iframe
-        ref={iframeRef}
-        src={canvasSrc}
-        title="Page canvas"
-        className={cn(
-          'bg-background h-full rounded-lg border shadow-sm transition-[width] duration-200',
-          breakpoint === 'desktop' && 'w-full max-w-full'
-        )}
-        style={
-          breakpoint === 'desktop'
-            ? undefined
-            : { width: BREAKPOINT_WIDTHS[breakpoint], maxWidth: '100%' }
-        }
-      />
+    <div ref={shellRef} className="bg-muted h-full overflow-auto p-6">
+      {/*
+        A transform does not affect layout, so this wrapper carries the frame's
+        post-scale size. Without it, centring and the scroll extent would both be
+        computed from the unscaled 1440px and the frame would sit off to one side.
+      */}
+      <div
+        className="mx-auto"
+        style={{
+          width: viewport.width * scale,
+          height: viewport.height * scale,
+        }}
+      >
+        <iframe
+          ref={iframeRef}
+          src={canvasSrc}
+          title="Page canvas"
+          className="bg-background rounded-lg border shadow-sm"
+          style={{
+            width: viewport.width,
+            height: viewport.height,
+            transform: `scale(${scale})`,
+            transformOrigin: 'top left',
+          }}
+        />
+      </div>
     </div>
   )
 }
