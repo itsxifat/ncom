@@ -1,8 +1,11 @@
 import 'server-only'
 import { after } from 'next/server'
+import { randomUUID } from 'node:crypto'
 import { prisma } from '@/server/db/client'
 import { requireOrgAccess, requireHumanOrgAccess } from '@/server/auth/rbac'
 import { emitWebhook } from './webhookService'
+import { sendEmail } from './emailService'
+import { orderDispatchedEmail } from '@/server/email/templates'
 import { cancelOrder, emitOrderWebhook } from './orderService'
 import {
   consumeCommittedStock,
@@ -669,6 +672,10 @@ async function dispatchOrderInternal(
     })
 
     await emitShipmentWebhook(organizationId, shipment.id, 'SHIPMENT_CREATED')
+
+    // The customer's tracking link, sent the moment a parcel exists. Awaited
+    // but internally guarded: it cannot fail the dispatch it is reporting.
+    await sendDispatchNotification(organizationId, orderId, provider)
 
     return { ok: true, shipmentId: shipment.id }
   } catch (cause) {
@@ -1697,4 +1704,154 @@ function totalWeightKg(
 /** Prisma's Json column rejects `undefined`; a round-trip normalises it away. */
 function toJson(data: unknown) {
   return JSON.parse(JSON.stringify(data ?? {}))
+}
+
+// ── Customer-facing tracking ─────────────────────────────────────────────
+
+/**
+ * Mints the order's public tracking token, once.
+ *
+ * Idempotent by returning the existing one: the link is emailed when the parcel
+ * is dispatched, and a re-dispatch or a retried email must not invalidate a URL
+ * the customer already has.
+ */
+async function ensureTrackingToken(orderId: string): Promise<string> {
+  const existing = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: { trackingToken: true },
+  })
+  if (existing?.trackingToken) return existing.trackingToken
+
+  const token = randomUUID().replace(/-/g, '')
+  await prisma.order.update({
+    where: { id: orderId },
+    data: { trackingToken: token },
+  })
+  return token
+}
+
+/**
+ * Emails the customer their tracking link when the parcel reaches the courier.
+ *
+ * Never throws. A mail server being down is not a reason to fail a dispatch
+ * that already succeeded — the parcel exists either way, and the merchant can
+ * resend from the order page.
+ */
+async function sendDispatchNotification(
+  organizationId: string,
+  orderId: string,
+  provider: CourierProvider
+): Promise<void> {
+  try {
+    const order = await prisma.order.findFirst({
+      where: { id: orderId, organizationId },
+      select: {
+        email: true,
+        orderNumber: true,
+        store: { select: { name: true } },
+        organization: { select: { name: true } },
+      },
+    })
+    // No email address is the normal case for a phone-only COD order, not an
+    // error. There is simply nowhere to send it.
+    if (!order?.email) return
+
+    const token = await ensureTrackingToken(orderId)
+    const origin = (process.env.AUTH_URL ?? '').replace(/\/$/, '')
+
+    const { subject, html, text } = orderDispatchedEmail({
+      orderNumber: order.orderNumber,
+      storeName: order.store?.name ?? order.organization.name,
+      courierName: provider === 'STEADFAST' ? 'Steadfast' : 'Pathao',
+      trackingUrl: `${origin}/track/${token}`,
+    })
+
+    await sendEmail({
+      purpose: 'ORDER_RECEIPT',
+      to: order.email,
+      subject,
+      html,
+      text,
+    })
+  } catch (cause) {
+    console.error('[courier] dispatch email failed for', orderId, cause)
+  }
+}
+
+/**
+ * The customer's view of their parcel, by token.
+ *
+ * Returns everything the courier has said about it, in order. The rider's own
+ * notes are included deliberately: "customer asked to deliver tomorrow" is the
+ * single most useful line on the page, and withholding it is what generates the
+ * phone call this page exists to prevent.
+ */
+export async function trackParcelByToken(token: string) {
+  if (!token) return null
+
+  const order = await prisma.order.findUnique({
+    where: { trackingToken: token },
+    select: {
+      orderNumber: true,
+      workflowState: true,
+      createdAt: true,
+      totalCents: true,
+      currencyCode: true,
+      paidTotalCents: true,
+      store: { select: { name: true } },
+      organization: { select: { name: true } },
+      lines: { select: { title: true, quantity: true } },
+      shipments: {
+        orderBy: { createdAt: 'desc' },
+        take: 1,
+        select: {
+          provider: true,
+          status: true,
+          statusMessage: true,
+          trackingCode: true,
+          consignmentId: true,
+          dispatchedAt: true,
+          deliveredAt: true,
+          events: {
+            orderBy: { occurredAt: 'desc' },
+            select: {
+              id: true,
+              status: true,
+              message: true,
+              occurredAt: true,
+            },
+          },
+        },
+      },
+    },
+  })
+  if (!order) return null
+
+  const shipment = order.shipments[0] ?? null
+
+  return {
+    orderNumber: order.orderNumber,
+    workflowState: order.workflowState,
+    placedAt: order.createdAt,
+    storeName: order.store?.name ?? order.organization.name,
+    totalCents: order.totalCents,
+    currencyCode: order.currencyCode,
+    amountDueCents: Math.max(0, order.totalCents - order.paidTotalCents),
+    items: order.lines,
+    courier: shipment
+      ? {
+          provider: shipment.provider,
+          status: shipment.status,
+          statusMessage: shipment.statusMessage,
+          trackingCode: shipment.trackingCode ?? shipment.consignmentId,
+          trackingUrl: trackingUrlFor(
+            shipment.provider,
+            shipment.trackingCode ?? shipment.consignmentId
+          ),
+          dispatchedAt: shipment.dispatchedAt,
+          deliveredAt: shipment.deliveredAt,
+          events: shipment.events,
+        }
+      : null,
+  }
 }

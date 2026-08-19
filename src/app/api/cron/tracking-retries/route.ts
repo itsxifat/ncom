@@ -1,6 +1,9 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { timingSafeEqual } from 'node:crypto'
-import { retryPendingTrackingDeliveries } from '@/server/services/trackingService'
+import {
+  pruneTrackingDeliveries,
+  retryPendingTrackingDeliveries,
+} from '@/server/services/trackingService'
 
 /**
  * Scheduled sweep that retries conversions whose backoff has elapsed.
@@ -43,7 +46,11 @@ async function run(request: NextRequest) {
   }
 
   const attempted = await retryPendingTrackingDeliveries()
-  return NextResponse.json({ attempted })
+  // Pruned in the same sweep rather than on its own schedule: the delivery log
+  // now records every event, not only purchases, and without this it is the
+  // fastest-growing table in the database.
+  const pruned = await pruneTrackingDeliveries()
+  return NextResponse.json({ attempted, pruned })
 }
 
 export async function POST(request: NextRequest) {

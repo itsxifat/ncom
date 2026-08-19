@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
+  Activity,
   LayoutDashboard,
   Store,
   Settings,
@@ -43,6 +44,7 @@ const NAV_GROUPS: Array<{ label: string | null; items: NavItem[] }> = [
     items: [
       { href: '/orders', label: 'Orders', icon: ShoppingCart },
       { href: '/analytics', label: 'Analytics', icon: BarChart3 },
+      { href: '/tracking', label: 'Tracking', icon: Activity },
       { href: '/products', label: 'Products', icon: Package },
       { href: '/categories', label: 'Categories', icon: FolderTree },
       { href: '/collections', label: 'Collections', icon: Layers },

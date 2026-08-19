@@ -37,6 +37,12 @@ const PROTECTED_PREFIXES = [
   '/products',
   '/settings',
   '/stores',
+  // Note this does NOT gate `/track/<token>`, the customer's own delivery page.
+  // The prefix test is an exact match or a `/`-delimited descendant, so
+  // `/tracking` and `/track/abc` are unrelated paths — which is what lets the
+  // merchant's log be private while the buyer's link stays open to someone who
+  // has no account here at all.
+  '/tracking',
 ]
 
 /**

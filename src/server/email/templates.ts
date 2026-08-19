@@ -192,3 +192,22 @@ export function teamInvitationEmail(input: {
 
 /** Exported for the admin preview, which renders a sample of each template. */
 export const ACCENT_COLOR = ACCENT
+
+export function orderDispatchedEmail(input: {
+  orderNumber: string
+  storeName: string
+  trackingUrl: string
+  courierName: string
+}): RenderedEmail {
+  return {
+    subject: `Order ${input.orderNumber} is on its way`,
+    html: layout(
+      'Your order is with the courier',
+      `<p style="${P}">Order <strong>${escapeHtml(input.orderNumber)}</strong> from ${escapeHtml(input.storeName)} has been handed to ${escapeHtml(input.courierName)}.</p>
+       <p style="${P}">You can follow it here, and the page updates itself as the courier reports progress:</p>
+       <p style="${P}"><a href="${escapeHtml(input.trackingUrl)}" style="color:${ACCENT};">Track your delivery</a></p>
+       <p style="${P}">Keep this link — it stays live until the parcel reaches you.</p>`
+    ),
+    text: `Order ${input.orderNumber} from ${input.storeName} has been handed to ${input.courierName}.\n\nTrack your delivery: ${input.trackingUrl}\n\nKeep this link — it stays live until the parcel reaches you.`,
+  }
+}

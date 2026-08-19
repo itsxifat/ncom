@@ -20,6 +20,7 @@ import {
   parseGaSessionId,
 } from '@/lib/tracking/identity'
 import type {
+  DeliveryOutcome,
   TrackedEvent,
   TrackedItem,
   TrackingConfig,
@@ -74,13 +75,24 @@ import type {
  * second send in the first place. The ad platforms' deduplication is the
  * fallback, not the mechanism.
  *
- * ── What is durable and what is not ─────────────────────────────────────
+ * ── What is retried, and what is merely recorded ────────────────────────
  *
- * Purchases are queued, retried and logged. Page views are sent once, from the
- * render, and forgotten. That asymmetry is deliberate: a lost page view is
- * noise inside a much larger number, while a lost purchase is the number the
- * merchant is making decisions with — and a row per page view per destination
- * would be the largest table in this database within a month.
+ * Purchases are queued and retried. Everything else is sent once, from the
+ * render, and its outcome written to the same table as a terminal row. The
+ * asymmetry in *retrying* is deliberate: a lost page view is noise inside a
+ * much larger number, and by the time a retry landed it would be reporting a
+ * visit that ended long ago. A lost purchase is the number the merchant prices
+ * their advertising with.
+ *
+ * The asymmetry in *recording* was a mistake, now corrected. Only purchases
+ * left a trace, so a merchant whose pixel was 400-ing on every page view had no
+ * way to discover it — the events simply never arrived and nothing anywhere
+ * said so. Every event is logged now, which is what the tracking page reads.
+ *
+ * That does make this the highest-volume table in the database, which is why
+ * `pruneTrackingDeliveries` exists: terminal rows are dropped after
+ * TRACKING_LOG_RETENTION_DAYS. Diagnosing a misconfigured pixel takes hours,
+ * not months, so nothing of value is kept past that.
  */
 
 /** Attempts per delivery, including the first. */
@@ -339,16 +351,87 @@ export async function trackPageEvents(input: {
   const sends: Promise<unknown>[] = []
   for (const { name, event } of events) {
     if (config.meta) {
-      sends.push(sendMetaEvent(config.meta, buildMetaEvent(name, event)))
+      const payload = buildMetaEvent(name, event)
+      sends.push(
+        sendMetaEvent(config.meta, payload).then((outcome) =>
+          recordDirectSend(
+            config.storeId,
+            'META_CAPI',
+            name,
+            event,
+            payload,
+            outcome
+          )
+        )
+      )
     }
     if (config.ga4) {
-      sends.push(sendGa4Event(config.ga4, buildGa4Payload(name, event)))
+      const payload = buildGa4Payload(name, event)
+      sends.push(
+        sendGa4Event(config.ga4, payload).then((outcome) =>
+          recordDirectSend(
+            config.storeId,
+            'GA4_MP',
+            name,
+            event,
+            payload,
+            outcome
+          )
+        )
+      )
     }
   }
 
   // Never throws: this runs in `after()`, where an unhandled rejection is an
   // error log on a response that already went out fine.
   await Promise.allSettled(sends)
+}
+
+/**
+ * Writes the outcome of an already-sent event to the delivery log.
+ *
+ * Upper-funnel events are sent directly rather than queued, and that is
+ * deliberate — a page view is worthless by the time a retry would deliver it,
+ * and queueing every one would mean a row and a sweep per visitor. But "not
+ * worth retrying" is not the same as "not worth knowing about": until this
+ * existed, a merchant whose pixel was silently 400-ing on every page view had
+ * no way to find out, because only purchases left a trace.
+ *
+ * So the row is written terminal — `nextAttemptAt` null, so the retry sweep
+ * ignores it — purely so the tracking page can show it.
+ */
+async function recordDirectSend(
+  storeId: string,
+  destination: TrackingDestination,
+  eventName: TrackingEventName,
+  event: TrackedEvent,
+  payload: Record<string, unknown>,
+  outcome: DeliveryOutcome
+): Promise<void> {
+  try {
+    await prisma.trackingDelivery.create({
+      data: {
+        storeId,
+        destination,
+        eventName,
+        eventId: event.eventId,
+        // The event id is already unique per browser event; scoping the key by
+        // destination is what the table's unique constraint does for us.
+        dedupeKey: event.eventId,
+        payload: payload as never,
+        status: outcome.ok ? 'SUCCEEDED' : 'FAILED',
+        attempts: 1,
+        statusCode: outcome.statusCode,
+        error: outcome.ok ? null : outcome.message,
+        responseBody: outcome.message,
+        nextAttemptAt: null,
+        completedAt: new Date(),
+      },
+    })
+  } catch {
+    // A duplicate key means this event was already logged — the same page
+    // rendered twice against one event id. Nothing to record and nothing wrong.
+  }
 }
 
 // ── Purchases (durable) ───────────────────────────────────────────────────
@@ -886,4 +969,197 @@ export async function recentTrackingDeliveries(
     orderBy: { createdAt: 'desc' },
     take,
   })
+}
+
+// ── Log retention and reporting ───────────────────────────────────────────
+
+/**
+ * How long a finished delivery stays readable.
+ *
+ * Long enough to answer "why did yesterday's conversions not arrive", short
+ * enough that logging every page view for every destination does not become an
+ * unbounded table. Pending rows are never pruned — one that is still retrying
+ * has not finished, however old it looks.
+ */
+const TRACKING_LOG_RETENTION_DAYS = 30
+
+export async function pruneTrackingDeliveries(): Promise<number> {
+  const cutoff = new Date(
+    Date.now() - TRACKING_LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000
+  )
+
+  const { count } = await prisma.trackingDelivery.deleteMany({
+    where: {
+      status: { in: ['SUCCEEDED', 'FAILED'] },
+      createdAt: { lt: cutoff },
+    },
+  })
+
+  return count
+}
+
+export interface TrackingEventFilters {
+  storeId?: string
+  destination?: TrackingDestination
+  eventName?: TrackingEventName
+  status?: 'PENDING' | 'SUCCEEDED' | 'FAILED'
+  /** Free text over the event id, for tracing one conversion end to end. */
+  search?: string
+  take?: number
+  skip?: number
+}
+
+/**
+ * The tracking page's list, scoped to the caller's organisation.
+ *
+ * Scoped by `store: { organizationId }` rather than by a store id the caller
+ * passed: the delivery log carries hashed customer data and exactly what was
+ * sent to an ad platform, and a tenant reading another tenant's would be
+ * reading their customer list and their revenue.
+ */
+export async function listTrackingEvents(
+  organizationId: string,
+  filters: TrackingEventFilters = {}
+) {
+  await requireOrgAccess(organizationId, 'VIEWER')
+
+  const take = Math.min(filters.take ?? 50, 200)
+
+  const where = {
+    store: { organizationId },
+    ...(filters.storeId ? { storeId: filters.storeId } : {}),
+    ...(filters.destination ? { destination: filters.destination } : {}),
+    ...(filters.eventName ? { eventName: filters.eventName } : {}),
+    ...(filters.status ? { status: filters.status } : {}),
+    ...(filters.search ? { eventId: { contains: filters.search } } : {}),
+  }
+
+  const [items, total] = await Promise.all([
+    prisma.trackingDelivery.findMany({
+      where,
+      select: {
+        id: true,
+        destination: true,
+        eventName: true,
+        eventId: true,
+        status: true,
+        attempts: true,
+        statusCode: true,
+        error: true,
+        responseBody: true,
+        payload: true,
+        createdAt: true,
+        completedAt: true,
+        nextAttemptAt: true,
+        store: { select: { id: true, name: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take,
+      skip: filters.skip ?? 0,
+    }),
+    prisma.trackingDelivery.count({ where }),
+  ])
+
+  return { items, total }
+}
+
+export interface TrackingHealth {
+  total: number
+  succeeded: number
+  failed: number
+  pending: number
+  /** Success rate in basis points, so the caller can render it exactly. */
+  successRateBps: number
+  byDestination: {
+    destination: TrackingDestination
+    total: number
+    failed: number
+  }[]
+  byEvent: { eventName: TrackingEventName; total: number; failed: number }[]
+}
+
+/**
+ * The headline numbers for the tracking page, over a window.
+ *
+ * Grouped by destination and by event because those are the two questions a
+ * broken setup produces: "is Meta down or is it everything", and "is it all
+ * events or only purchases". A single overall success rate answers neither.
+ */
+export async function trackingHealth(
+  organizationId: string,
+  options: { sinceHours?: number; storeId?: string } = {}
+): Promise<TrackingHealth> {
+  await requireOrgAccess(organizationId, 'VIEWER')
+
+  const since = new Date(
+    Date.now() - (options.sinceHours ?? 24) * 60 * 60 * 1000
+  )
+
+  const where = {
+    store: { organizationId },
+    ...(options.storeId ? { storeId: options.storeId } : {}),
+    createdAt: { gte: since },
+  }
+
+  const [byDestination, byEvent] = await Promise.all([
+    prisma.trackingDelivery.groupBy({
+      by: ['destination', 'status'],
+      where,
+      _count: { _all: true },
+    }),
+    prisma.trackingDelivery.groupBy({
+      by: ['eventName', 'status'],
+      where,
+      _count: { _all: true },
+    }),
+  ])
+
+  let succeeded = 0
+  let failed = 0
+  let pending = 0
+
+  const destinations = new Map<
+    TrackingDestination,
+    { total: number; failed: number }
+  >()
+  for (const row of byDestination) {
+    const count = row._count._all
+    if (row.status === 'SUCCEEDED') succeeded += count
+    else if (row.status === 'FAILED') failed += count
+    else pending += count
+
+    const entry = destinations.get(row.destination) ?? { total: 0, failed: 0 }
+    entry.total += count
+    if (row.status === 'FAILED') entry.failed += count
+    destinations.set(row.destination, entry)
+  }
+
+  const events = new Map<TrackingEventName, { total: number; failed: number }>()
+  for (const row of byEvent) {
+    const count = row._count._all
+    const entry = events.get(row.eventName) ?? { total: 0, failed: 0 }
+    entry.total += count
+    if (row.status === 'FAILED') entry.failed += count
+    events.set(row.eventName, entry)
+  }
+
+  const total = succeeded + failed + pending
+
+  return {
+    total,
+    succeeded,
+    failed,
+    pending,
+    // Pending is excluded from the denominator: a delivery still retrying has
+    // not failed yet, and counting it as a miss makes a healthy queue look sick.
+    successRateBps:
+      succeeded + failed > 0
+        ? Math.round((succeeded / (succeeded + failed)) * 10_000)
+        : 10_000,
+    byDestination: [...destinations].map(([destination, value]) => ({
+      destination,
+      ...value,
+    })),
+    byEvent: [...events].map(([eventName, value]) => ({ eventName, ...value })),
+  }
 }

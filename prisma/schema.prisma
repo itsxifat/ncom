@@ -2024,6 +2024,17 @@ model Order {
   /// an order that shipped and came back is not an order that never shipped.
   stockRestoredAt DateTime?
 
+  /// Unguessable key for the customer's public tracking page.
+  ///
+  /// The page is reachable without a login — a cash-on-delivery buyer has no
+  /// account to log into — so the URL is the credential. Minted when the order
+  /// is handed to a courier rather than at checkout, because that is when there
+  /// is something to track and when the link is emailed.
+  ///
+  /// Nullable: orders placed before this existed have none, and an order that
+  /// never ships never needs one.
+  trackingToken String? @unique
+
   /// What has been handed back, in money. Returns in a cash-on-delivery market
   /// are usually not refunds — the customer refused at the door and no money
   /// ever moved — so this is tracked separately from `refundedTotalCents`,
