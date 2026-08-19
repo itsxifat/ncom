@@ -3,6 +3,7 @@
 import { useEffect, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import {
+  AlertTriangle,
   Check,
   ExternalLink,
   Loader2,
@@ -127,12 +128,23 @@ export function CourierPanel({
           <ReviewDecision orderId={orderId} providers={providers} />
         )}
 
-        {shipment ? (
+        {/*
+          A shipment row is written *before* the courier is called, so its mere
+          existence does not mean a parcel exists. The consignment id is what
+          says the courier accepted it. Keying the view on the row instead left
+          a failed dispatch showing its error with no way to act on it — the one
+          screen where a retry is obviously wanted was the one that lacked it.
+        */}
+        {shipment?.consignmentId ? (
           <ShipmentBlock shipment={shipment} />
         ) : (
           !cancelled &&
           workflowState !== 'FRAUD_REVIEW' && (
-            <DispatchBlock orderId={orderId} providers={providers} />
+            <DispatchBlock
+              orderId={orderId}
+              providers={providers}
+              failed={shipment}
+            />
           )
         )}
       </CardContent>
@@ -319,12 +331,22 @@ function ReviewDecision({
   )
 }
 
+/**
+ * Sends an order to a courier, or sends it again after a failure.
+ *
+ * One component for both because they are the same action — the only
+ * difference is that a previous attempt left an error worth reading before
+ * pressing the button a second time.
+ */
 function DispatchBlock({
   orderId,
   providers,
+  failed,
 }: {
   orderId: string
   providers: CourierPanelProps['providers']
+  /** A shipment row whose courier call did not produce a consignment. */
+  failed?: CourierPanelShipment | null
 }) {
   const [pending, start] = useTransition()
   const [error, setError] = useState<string | null>(null)
@@ -339,11 +361,26 @@ function DispatchBlock({
     )
   }
 
+  // The previous attempt's error, until this attempt produces its own.
+  const message = error ?? failed?.lastError ?? null
+
   return (
     <div className="flex flex-col gap-2">
-      <p className="text-muted-foreground text-sm">
-        Not sent to a courier yet.
-      </p>
+      {failed ? (
+        <div className="border-destructive/30 bg-destructive/5 flex items-start gap-2 rounded-lg border p-3">
+          <AlertTriangle className="text-destructive mt-0.5 size-4 shrink-0" />
+          <div className="min-w-0 text-sm">
+            <p className="font-medium">Could not send this to the courier.</p>
+            {message && (
+              <p className="text-muted-foreground text-pretty">{message}</p>
+            )}
+          </div>
+        </div>
+      ) : (
+        <p className="text-muted-foreground text-sm">
+          Not sent to a courier yet.
+        </p>
+      )}
 
       <div className="flex flex-wrap gap-2">
         {providers.map((entry) => (
@@ -365,8 +402,18 @@ function DispatchBlock({
               })
             }
           >
-            {pending ? <Loader2 className="animate-spin" /> : <Send />}
-            Send via {entry.label}
+            {pending ? (
+              <Loader2 className="animate-spin" />
+            ) : failed ? (
+              <RefreshCw />
+            ) : (
+              <Send />
+            )}
+            {failed
+              ? providers.length > 1
+                ? `Try again with ${entry.label}`
+                : 'Try again'
+              : `Send via ${entry.label}`}
           </Button>
         ))}
       </div>

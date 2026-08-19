@@ -150,7 +150,7 @@ export async function getStoreOverview(organizationId: string) {
         totalCents: true,
         currencyCode: true,
         financialStatus: true,
-        fulfillmentStatus: true,
+        workflowState: true,
         createdAt: true,
       },
       orderBy: { createdAt: 'desc' },
@@ -162,7 +162,9 @@ export async function getStoreOverview(organizationId: string) {
     where: {
       organizationId,
       cancelledAt: null,
-      fulfillmentStatus: { in: ['UNFULFILLED', 'PARTIALLY_FULFILLED'] },
+      // "Not yet with a courier" is the modern reading of unfulfilled: the
+      // merchant still has these parcels in the building.
+      workflowState: { in: ['PENDING', 'FRAUD_REVIEW', 'PROCESSING'] },
     },
   })
 

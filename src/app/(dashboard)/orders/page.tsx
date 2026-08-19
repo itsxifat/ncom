@@ -14,10 +14,7 @@ import {
 } from '@/components/app/list-panel'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import {
-  FinancialStatusBadge,
-  FulfillmentStatusBadge,
-} from '@/components/store/status-badges'
+import { FinancialStatusBadge } from '@/components/store/status-badges'
 import { Money } from '@/components/store/form-controls'
 import { FormSelect } from '@/components/ui/form-select'
 import { WorkflowStateBadge } from '@/components/store/fraud-badges'
@@ -33,13 +30,6 @@ const FINANCIAL_VALUES = [
   'PARTIALLY_REFUNDED',
   'REFUNDED',
   'VOIDED',
-] as const
-
-const FULFILLMENT_VALUES = [
-  'UNFULFILLED',
-  'PARTIALLY_FULFILLED',
-  'FULFILLED',
-  'RESTOCKED',
 ] as const
 
 const WORKFLOW_VALUES = [
@@ -66,9 +56,6 @@ export default async function OrdersPage({
   const financialStatus = FINANCIAL_VALUES.find(
     (value) => value === query.financial
   )
-  const fulfillmentStatus = FULFILLMENT_VALUES.find(
-    (value) => value === query.fulfillment
-  )
   const workflowState = WORKFLOW_VALUES.find(
     (value) => value === query.delivery
   )
@@ -78,7 +65,6 @@ export default async function OrdersPage({
   const { items, total } = await listOrders(organization.id, {
     search,
     financialStatus,
-    fulfillmentStatus,
     workflowState,
     take: PAGE_SIZE,
     skip: (page - 1) * PAGE_SIZE,
@@ -86,13 +72,7 @@ export default async function OrdersPage({
 
   const base = `/orders`
 
-  if (
-    total === 0 &&
-    !search &&
-    !financialStatus &&
-    !fulfillmentStatus &&
-    !workflowState
-  ) {
+  if (total === 0 && !search && !financialStatus && !workflowState) {
     return (
       <EmptyState
         icon={ShoppingBag}
@@ -114,14 +94,6 @@ export default async function OrdersPage({
         <FormSelect name="financial" defaultValue={financialStatus ?? ''}>
           <option value="">Any payment status</option>
           {FINANCIAL_VALUES.map((value) => (
-            <option key={value} value={value}>
-              {value.replace(/_/g, ' ').toLowerCase()}
-            </option>
-          ))}
-        </FormSelect>
-        <FormSelect name="fulfillment" defaultValue={fulfillmentStatus ?? ''}>
-          <option value="">Any fulfilment status</option>
-          {FULFILLMENT_VALUES.map((value) => (
             <option key={value} value={value}>
               {value.replace(/_/g, ' ').toLowerCase()}
             </option>
@@ -198,9 +170,6 @@ export default async function OrdersPage({
                   badges={
                     <>
                       <FinancialStatusBadge status={order.financialStatus} />
-                      <FulfillmentStatusBadge
-                        status={order.fulfillmentStatus}
-                      />
                       {/* Where the parcel is. Shown beside the money statuses
                           because in a cash-on-delivery market they answer
                           different halves of "is this order done". */}

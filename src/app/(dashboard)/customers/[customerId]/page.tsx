@@ -8,10 +8,8 @@ import { PageHeader } from '@/components/app/page-header'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { StatCard } from '@/components/app/stat-card'
-import {
-  FinancialStatusBadge,
-  FulfillmentStatusBadge,
-} from '@/components/store/status-badges'
+import { FinancialStatusBadge } from '@/components/store/status-badges'
+import { WorkflowStateBadge } from '@/components/store/fraud-badges'
 import { Money } from '@/components/store/form-controls'
 
 export default async function CustomerDetailPage({
@@ -90,9 +88,7 @@ export default async function CustomerDetailPage({
                       </p>
                       <div className="mt-1 flex flex-wrap gap-1.5">
                         <FinancialStatusBadge status={order.financialStatus} />
-                        <FulfillmentStatusBadge
-                          status={order.fulfillmentStatus}
-                        />
+                        <WorkflowStateBadge state={order.workflowState} />
                       </div>
                     </div>
                     <Money>

@@ -1,5 +1,6 @@
 import { apiOk, readPaging, withApiKey } from '@/server/api/context'
 import { listOrders } from '@/server/services/orderService'
+import { legacyFulfillmentStatus } from '@/server/courier/statusMap'
 
 /**
  * `GET /api/v1/orders` — orders, newest first.
@@ -29,7 +30,9 @@ export async function GET(request: Request) {
         email: order.email,
         phone: order.phone,
         financialStatus: order.financialStatus.toLowerCase(),
-        fulfillmentStatus: order.fulfillmentStatus.toLowerCase(),
+        // Derived, not stored — kept so integrations built against v1 keep
+        // working now that fulfilment is not a concept in the platform.
+        fulfillmentStatus: legacyFulfillmentStatus(order.workflowState),
         currencyCode: order.currencyCode,
         subtotalCents: order.subtotalCents,
         totalCents: order.totalCents,

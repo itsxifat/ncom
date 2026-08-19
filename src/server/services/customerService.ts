@@ -323,7 +323,7 @@ export async function getCustomerForMerchant(
           totalCents: true,
           currencyCode: true,
           financialStatus: true,
-          fulfillmentStatus: true,
+          workflowState: true,
           createdAt: true,
         },
         orderBy: { createdAt: 'desc' },

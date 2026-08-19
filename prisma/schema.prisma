@@ -207,7 +207,21 @@ model Store {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
+  /// The one stock pool this store sells from.
+  ///
+  /// An organisation may keep several locations — a shop and a warehouse are
+  /// genuinely different places — but a store reads and writes exactly one of
+  /// them. Multi-location allocation is a warehousing problem, and modelling it
+  /// per store meant every stock question ("can I sell this?") had to first
+  /// answer "from where?", which is a question a single-warehouse merchant
+  /// should never be asked.
+  ///
+  /// Null means "the organisation's first active location", resolved at read
+  /// time — so a store works before anyone has opened inventory settings.
+  inventoryLocationId String?
+
   organization       Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  inventoryLocation  Location?               @relation("StoreInventory", fields: [inventoryLocationId], references: [id], onDelete: SetNull)
   pages              Page[]
   theme              ThemeSettings?
   integration        StoreIntegrationConfig?
@@ -1736,7 +1750,7 @@ model Location {
 
   organization Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   levels       InventoryLevel[]
-  fulfillments Fulfillment[]
+  stores       Store[]          @relation("StoreInventory")
 
   @@index([organizationId])
 }
@@ -1995,8 +2009,29 @@ model Order {
   paidTotalCents     Int @default(0)
   refundedTotalCents Int @default(0)
 
-  financialStatus   FinancialStatus   @default(PENDING)
-  fulfillmentStatus FulfillmentStatus @default(UNFULFILLED)
+  financialStatus FinancialStatus @default(PENDING)
+
+  /// When the goods stopped being reserved and started being gone.
+  ///
+  /// Stock leaves on the courier's pickup, not on a merchant pressing a button,
+  /// so there is nothing to record but the moment it happened. It is a
+  /// timestamp rather than a status because its only job is to make the
+  /// consumption idempotent — a parcel emits several pickup-ish events and the
+  /// stock must move once.
+  stockConsumedAt DateTime?
+  /// Set when a refused parcel's goods went back on the shelf, for the same
+  /// idempotency reason. Distinct from `stockConsumedAt` being cleared, because
+  /// an order that shipped and came back is not an order that never shipped.
+  stockRestoredAt DateTime?
+
+  /// What has been handed back, in money. Returns in a cash-on-delivery market
+  /// are usually not refunds — the customer refused at the door and no money
+  /// ever moved — so this is tracked separately from `refundedTotalCents`,
+  /// which means "money we sent back".
+  returnedAmountCents  Int     @default(0)
+  /// Whether the merchant waived delivery on the returned portion. A judgement
+  /// call made per return and recorded because it changes what the customer owes.
+  deliveryChargeWaived Boolean @default(false)
 
   /// Where the order sits in the courier pipeline, which is a different
   /// question from whether it is paid or how much of it has shipped.
@@ -2059,15 +2094,14 @@ model Order {
   cart         Cart?             @relation(fields: [cartId], references: [id], onDelete: SetNull)
   lines        OrderLine[]
   transactions Transaction[]
-  fulfillments Fulfillment[]
   refunds      Refund[]
+  returns      OrderReturn[]
   events       OrderEvent[]
   shipments    CourierShipment[]
 
   @@unique([organizationId, orderNumber])
   @@index([organizationId, createdAt])
   @@index([organizationId, financialStatus])
-  @@index([organizationId, fulfillmentStatus])
   // Drives the review queue and the auto-dispatch sweep, both of which read
   // "every order in this state for this organisation, newest first".
   @@index([organizationId, workflowState, createdAt])
@@ -2134,13 +2168,6 @@ enum FinancialStatus {
   VOIDED
 }
 
-enum FulfillmentStatus {
-  UNFULFILLED
-  PARTIALLY_FULFILLED
-  FULFILLED
-  RESTOCKED
-}
-
 enum CancelReason {
   CUSTOMER
   FRAUD
@@ -2176,16 +2203,18 @@ model OrderLine {
   weightGrams      Int     @default(0)
   properties       Json?
 
-  // Drives partial fulfillment and partial refunds.
-  fulfilledQuantity Int @default(0)
-  refundedQuantity  Int @default(0)
+  // Drives partial refunds and partial returns. `returnedQuantity` is how many
+  // of this line came back — the customer refusing three of five shirts at the
+  // door is the ordinary case in this market, not an exception.
+  refundedQuantity Int @default(0)
+  returnedQuantity Int @default(0)
 
   order   Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
   product Product?        @relation(fields: [productId], references: [id], onDelete: SetNull)
   variant ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
 
-  fulfillmentLines FulfillmentLine[]
-  refundLines      RefundLine[]
+  refundLines RefundLine[]
+  returnLines OrderReturnLine[]
 
   @@index([orderId])
 }
@@ -2269,48 +2298,53 @@ enum TransactionStatus {
 
 // ── Fulfillment & refunds ────────────────────────────────────────────────
 
-model Fulfillment {
-  id         String  @id @default(cuid())
-  orderId    String
-  locationId String?
+/// A recorded return, whole or partial.
+///
+/// Separate from Refund on purpose. A refund is money going back to a customer;
+/// a return in a cash-on-delivery market usually involves no money at all — the
+/// parcel was refused at the door, nothing was ever collected, and what changes
+/// is what the customer owes and what is back on the shelf. Filing those as
+/// refunds would report money as moving that never did, and every revenue
+/// figure downstream would inherit the lie.
+///
+/// Appended, never edited: the order's totals are recomputed from the sum of
+/// its returns, so a correction is another row rather than a rewrite of this one.
+model OrderReturn {
+  id      String @id @default(cuid())
+  orderId String
 
-  status          FulfillmentState @default(PENDING)
-  trackingCompany String?
-  trackingNumber  String?
-  trackingUrl     String?
-  notifyCustomer  Boolean          @default(true)
+  /// What this return took off what the customer owes.
+  refundAmountCents    Int     @default(0)
+  /// Whether delivery was waived as part of this return specifically.
+  deliveryChargeWaived Boolean @default(false)
+  /// Whether the goods went back on the shelf. A damaged return comes back as a
+  /// return but must not become sellable stock.
+  restocked            Boolean @default(true)
+  note                 String?
 
-  shippedAt   DateTime?
-  deliveredAt DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  /// Who recorded it. Kept as a snapshot name too, because the staff account may
+  /// be removed long before the order stops being disputed.
+  actorUserId String?
+  actorName   String?
 
-  order    Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  location Location?         @relation(fields: [locationId], references: [id], onDelete: SetNull)
-  lines    FulfillmentLine[]
+  createdAt DateTime @default(now())
+
+  order Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  lines OrderReturnLine[]
 
   @@index([orderId])
 }
 
-enum FulfillmentState {
-  PENDING
-  OPEN
-  SHIPPED
-  DELIVERED
-  CANCELLED
-  FAILURE
-}
-
-model FulfillmentLine {
+model OrderReturnLine {
   id            String @id @default(cuid())
-  fulfillmentId String
+  orderReturnId String
   orderLineId   String
   quantity      Int
 
-  fulfillment Fulfillment @relation(fields: [fulfillmentId], references: [id], onDelete: Cascade)
+  orderReturn OrderReturn @relation(fields: [orderReturnId], references: [id], onDelete: Cascade)
   orderLine   OrderLine   @relation(fields: [orderLineId], references: [id], onDelete: Cascade)
 
-  @@index([fulfillmentId])
+  @@index([orderReturnId])
 }
 
 model Refund {

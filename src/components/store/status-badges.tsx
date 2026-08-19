@@ -30,20 +30,6 @@ const FINANCIAL_LABEL = {
   VOIDED: 'Voided',
 } as const
 
-const FULFILLMENT_VARIANT = {
-  UNFULFILLED: 'destructive',
-  PARTIALLY_FULFILLED: 'secondary',
-  FULFILLED: 'lime',
-  RESTOCKED: 'outline',
-} as const
-
-const FULFILLMENT_LABEL = {
-  UNFULFILLED: 'Unfulfilled',
-  PARTIALLY_FULFILLED: 'Partly fulfilled',
-  FULFILLED: 'Fulfilled',
-  RESTOCKED: 'Restocked',
-} as const
-
 export function FinancialStatusBadge({
   status,
 }: {
@@ -51,18 +37,6 @@ export function FinancialStatusBadge({
 }) {
   return (
     <Badge variant={FINANCIAL_VARIANT[status]}>{FINANCIAL_LABEL[status]}</Badge>
-  )
-}
-
-export function FulfillmentStatusBadge({
-  status,
-}: {
-  status: keyof typeof FULFILLMENT_LABEL
-}) {
-  return (
-    <Badge variant={FULFILLMENT_VARIANT[status]}>
-      {FULFILLMENT_LABEL[status]}
-    </Badge>
   )
 }
 

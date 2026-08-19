@@ -4,7 +4,10 @@ import { prisma } from '@/server/db/client'
 import { requireOrgAccess, requireHumanOrgAccess } from '@/server/auth/rbac'
 import { emitWebhook } from './webhookService'
 import { cancelOrder, emitOrderWebhook } from './orderService'
-import { consumeInventoryForFulfillment } from './inventoryService'
+import {
+  consumeCommittedStock,
+  resolveStoreLocationId,
+} from './inventoryService'
 import {
   courierClientFor,
   defaultCourierProvider,
@@ -414,13 +417,28 @@ export async function rejectHeldOrder(
 
 // ── Dispatch ─────────────────────────────────────────────────────────────
 
-/** Merchant-triggered dispatch from the order page. */
+/**
+ * Merchant-triggered dispatch from the order page.
+ *
+ * The attempt budget is reset first. Automatic retries are rationed because
+ * nobody is watching them and a courier having a bad hour should not be asked
+ * five hundred times; a person pressing "Try again" is the opposite situation.
+ * They are here because the last attempt failed, they have usually just fixed
+ * the reason, and a spent counter would let them make exactly one more attempt
+ * before the order became permanently unsendable from the UI.
+ */
 export async function dispatchOrder(
   organizationId: string,
   orderId: string,
   provider?: CourierProvider | null
 ) {
   await requireHumanOrgAccess(organizationId, 'EDITOR')
+
+  await prisma.courierShipment.updateMany({
+    where: { orderId, organizationId, consignmentId: null },
+    data: { attempts: 0, nextAttemptAt: null },
+  })
+
   return dispatchOrderInternal(organizationId, orderId, provider ?? null)
 }
 
@@ -977,7 +995,7 @@ export async function applyCourierEvent(
     event.status === 'OUT_FOR_DELIVERY' ||
     event.status === 'DELIVERED'
   ) {
-    await ensureFulfillment(
+    await consumeStockForDispatch(
       shipment.organizationId,
       shipment.orderId,
       shipmentId
@@ -1074,7 +1092,7 @@ async function syncOrderFromShipments(
  * the step that consumes the commitment. Skipped entirely if the merchant
  * already fulfilled by hand, so the two routes cannot double-count.
  */
-async function ensureFulfillment(
+async function consumeStockForDispatch(
   organizationId: string,
   orderId: string,
   shipmentId: string
@@ -1083,87 +1101,55 @@ async function ensureFulfillment(
     where: { id: orderId, organizationId },
     select: {
       id: true,
-      fulfillments: { select: { id: true } },
+      storeId: true,
+      stockConsumedAt: true,
       lines: {
         select: {
           id: true,
           variantId: true,
           quantity: true,
-          fulfilledQuantity: true,
           requiresShipping: true,
         },
       },
     },
   })
-  if (!order || order.fulfillments.length > 0) return
 
-  const outstanding = order.lines
-    .filter((line) => line.requiresShipping)
-    .map((line) => ({
-      ...line,
-      remaining: line.quantity - line.fulfilledQuantity,
-    }))
-    .filter((line) => line.remaining > 0)
+  // The timestamp is the whole guard. A parcel emits pickup, in-transit and
+  // out-for-delivery in sequence and any of them can arrive twice; stock must
+  // move on the first and never again.
+  if (!order || order.stockConsumedAt) return
 
-  if (outstanding.length === 0) return
+  const shipped = order.lines.filter((line) => line.requiresShipping)
+  if (shipped.length === 0) return
 
-  const shipment = await prisma.courierShipment.findUnique({
-    where: { id: shipmentId },
-    select: { provider: true, trackingCode: true, consignmentId: true },
-  })
+  const locationId = await resolveStoreLocationId(
+    prisma,
+    organizationId,
+    order.storeId
+  )
 
   await prisma.$transaction(async (tx) => {
-    const fulfillment = await tx.fulfillment.create({
-      data: {
-        orderId,
-        status: 'SHIPPED',
-        trackingCompany:
-          shipment?.provider === 'STEADFAST' ? 'Steadfast' : 'Pathao',
-        trackingNumber:
-          shipment?.trackingCode ?? shipment?.consignmentId ?? null,
-        trackingUrl: trackingUrlFor(
-          shipment?.provider ?? 'STEADFAST',
-          shipment?.trackingCode ?? shipment?.consignmentId ?? null
-        ),
-        shippedAt: new Date(),
-        lines: {
-          create: outstanding.map((line) => ({
-            orderLineId: line.id,
-            quantity: line.remaining,
-          })),
-        },
-      },
-      select: { id: true },
-    })
-
-    for (const line of outstanding) {
-      await tx.orderLine.update({
-        where: { id: line.id },
-        data: { fulfilledQuantity: { increment: line.remaining } },
-      })
-    }
-
-    await consumeInventoryForFulfillment(
+    await consumeCommittedStock(
       tx,
-      fulfillment.id,
-      null,
-      outstanding.map((line) => ({
+      shipmentId,
+      locationId,
+      shipped.map((line) => ({
         variantId: line.variantId ?? '',
-        quantity: line.remaining,
+        quantity: line.quantity,
         inventoryTracked: Boolean(line.variantId),
       }))
     )
 
     await tx.order.update({
       where: { id: orderId },
-      data: { fulfillmentStatus: 'FULFILLED' },
+      data: { stockConsumedAt: new Date() },
     })
 
     await tx.orderEvent.create({
       data: {
         orderId,
-        type: 'fulfillment_created',
-        message: 'Courier collected the parcel',
+        type: 'stock_consumed',
+        message: 'Courier collected the parcel — stock released',
       },
     })
   })
@@ -1256,21 +1242,24 @@ async function restockReturnedParcel(
     where: { id: orderId, organizationId },
     select: {
       id: true,
-      fulfillmentStatus: true,
+      storeId: true,
+      stockConsumedAt: true,
+      stockRestoredAt: true,
       lines: {
-        select: { id: true, variantId: true, fulfilledQuantity: true },
+        select: { id: true, variantId: true, quantity: true },
       },
     },
   })
   // Already restocked. Couriers resend "returned" and this must not add stock
-  // twice.
-  if (!order || order.fulfillmentStatus === 'RESTOCKED') return
+  // twice. Nothing to restore either if the goods never left — a parcel refused
+  // before pickup was never taken out of stock in the first place.
+  if (!order || order.stockRestoredAt || !order.stockConsumedAt) return
 
   const returnable = order.lines
-    .filter((line) => line.variantId && line.fulfilledQuantity > 0)
+    .filter((line) => line.variantId && line.quantity > 0)
     .map((line) => ({
       variantId: line.variantId!,
-      quantity: line.fulfilledQuantity,
+      quantity: line.quantity,
     }))
 
   await prisma.$transaction(async (tx) => {
@@ -1314,7 +1303,7 @@ async function restockReturnedParcel(
 
     await tx.order.update({
       where: { id: orderId },
-      data: { fulfillmentStatus: 'RESTOCKED' },
+      data: { stockRestoredAt: new Date() },
     })
 
     await tx.orderEvent.create({

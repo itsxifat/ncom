@@ -1,31 +1,28 @@
 import 'server-only'
 import { prisma } from '@/server/db/client'
 import { requireOrgAccess, requireHumanOrgAccess } from '@/server/auth/rbac'
-import {
-  consumeInventoryForFulfillment,
-  releaseInventoryForOrder,
-  restockInventory,
-} from './inventoryService'
+import { releaseInventoryForOrder, restockInventory } from './inventoryService'
+import { legacyFulfillmentStatus } from '@/server/courier/statusMap'
 import { emitWebhook } from './webhookService'
 import { clampNonNegative } from '@/lib/money'
 import type { WebhookTopic } from '@/generated/prisma/client'
 import type { OrderWorkflowState } from '@/generated/prisma/enums'
 
 /**
- * Order management: reading, fulfilling, cancelling and refunding.
+ * Order management: reading, cancelling, returning and refunding.
  *
  * Orders are append-only where money is concerned. Nothing here rewrites
  * subtotalCents, taxTotalCents or a line's unitPriceCents — those record what
  * was actually agreed and charged. Corrections happen by adding Refund and
  * Transaction rows, so the history of an order always reconstructs from its
- * ledger. The only mutable fields are status flags, fulfilled/refunded
+ * ledger. The only mutable fields are status flags, returned/refunded
  * counters, and merchant annotations.
  */
 
 const ORDER_INCLUDE = {
   lines: true,
   transactions: { orderBy: { createdAt: 'asc' as const } },
-  fulfillments: { include: { lines: true } },
+  returns: { include: { lines: true } },
   refunds: { include: { lines: true } },
   events: { orderBy: { createdAt: 'desc' as const } },
   customer: {
@@ -47,8 +44,6 @@ export async function listOrders(
       | 'PARTIALLY_REFUNDED'
       | 'REFUNDED'
       | 'VOIDED'
-    fulfillmentStatus?:
-      'UNFULFILLED' | 'PARTIALLY_FULFILLED' | 'FULFILLED' | 'RESTOCKED'
     /** Where the order sits in the courier pipeline — see OrderWorkflowState. */
     workflowState?: OrderWorkflowState
     take?: number
@@ -67,9 +62,6 @@ export async function listOrders(
     // `organizationId` above is what scopes it, and it is never null.
     ...(options.financialStatus
       ? { financialStatus: options.financialStatus }
-      : {}),
-    ...(options.fulfillmentStatus
-      ? { fulfillmentStatus: options.fulfillmentStatus }
       : {}),
     ...(options.workflowState ? { workflowState: options.workflowState } : {}),
     ...(options.search
@@ -136,7 +128,8 @@ export async function emitOrderWebhook(
       email: true,
       phone: true,
       financialStatus: true,
-      fulfillmentStatus: true,
+      workflowState: true,
+      stockConsumedAt: true,
       currencyCode: true,
       subtotalCents: true,
       discountTotalCents: true,
@@ -154,7 +147,6 @@ export async function emitOrderWebhook(
           variantTitle: true,
           sku: true,
           quantity: true,
-          fulfilledQuantity: true,
           unitPriceCents: true,
           totalCents: true,
         },
@@ -169,7 +161,8 @@ export async function emitOrderWebhook(
     email: order.email,
     phone: order.phone,
     financialStatus: order.financialStatus.toLowerCase(),
-    fulfillmentStatus: order.fulfillmentStatus.toLowerCase(),
+    // Derived for compatibility only — see legacyFulfillmentStatus.
+    fulfillmentStatus: legacyFulfillmentStatus(order.workflowState),
     currencyCode: order.currencyCode,
     subtotalCents: order.subtotalCents,
     discountTotalCents: order.discountTotalCents,
@@ -186,7 +179,7 @@ export async function emitOrderWebhook(
       variantTitle: line.variantTitle,
       sku: line.sku,
       quantity: line.quantity,
-      fulfilledQuantity: line.fulfilledQuantity,
+      fulfilledQuantity: order.stockConsumedAt ? line.quantity : 0,
       unitPriceCents: line.unitPriceCents,
       totalCents: line.totalCents,
     })),
@@ -203,149 +196,6 @@ export async function getOrder(organizationId: string, orderId: string) {
   if (!order) throw new Error('Order not found')
 
   return order
-}
-
-/**
- * Ships some or all of an order.
- *
- * Quantities are validated against what remains unfulfilled so a double-submit
- * cannot ship the same unit twice, and the order's aggregate status is
- * recomputed from the lines rather than being set by the caller — a caller who
- * can assert "this order is FULFILLED" will eventually assert it wrongly.
- */
-export async function fulfillOrder(
-  organizationId: string,
-  orderId: string,
-  input: {
-    lines: { orderLineId: string; quantity: number }[]
-    locationId?: string | null
-    trackingCompany?: string
-    trackingNumber?: string
-    trackingUrl?: string
-    notifyCustomer?: boolean
-  }
-) {
-  const { session } = await requireHumanOrgAccess(organizationId, 'EDITOR')
-
-  const order = await prisma.order.findFirst({
-    where: { id: orderId, organizationId },
-    include: { lines: true },
-  })
-  if (!order) throw new Error('Order not found')
-  if (order.cancelledAt) throw new Error('This order has been cancelled')
-
-  const lineById = new Map(order.lines.map((line) => [line.id, line]))
-
-  for (const requested of input.lines) {
-    const line = lineById.get(requested.orderLineId)
-    if (!line) throw new Error('That line is not part of this order')
-
-    const remaining = line.quantity - line.fulfilledQuantity
-    if (requested.quantity < 1 || requested.quantity > remaining) {
-      throw new Error(
-        `Cannot fulfil ${requested.quantity} of "${line.title}" — ${remaining} remain`
-      )
-    }
-  }
-
-  const fulfillment = await prisma.$transaction(async (tx) => {
-    const fulfillment = await tx.fulfillment.create({
-      data: {
-        orderId,
-        locationId: input.locationId ?? null,
-        status: 'SHIPPED',
-        trackingCompany: input.trackingCompany ?? null,
-        trackingNumber: input.trackingNumber ?? null,
-        trackingUrl: input.trackingUrl ?? null,
-        notifyCustomer: input.notifyCustomer ?? true,
-        shippedAt: new Date(),
-        lines: {
-          create: input.lines.map((line) => ({
-            orderLineId: line.orderLineId,
-            quantity: line.quantity,
-          })),
-        },
-      },
-      select: { id: true },
-    })
-
-    for (const requested of input.lines) {
-      await tx.orderLine.update({
-        where: { id: requested.orderLineId },
-        data: { fulfilledQuantity: { increment: requested.quantity } },
-      })
-    }
-
-    await consumeInventoryForFulfillment(
-      tx,
-      fulfillment.id,
-      input.locationId ?? null,
-      input.lines.map((requested) => {
-        const line = lineById.get(requested.orderLineId)!
-        return {
-          variantId: line.variantId ?? '',
-          quantity: requested.quantity,
-          inventoryTracked: Boolean(line.variantId),
-        }
-      })
-    )
-
-    const updatedLines = await tx.orderLine.findMany({
-      where: { orderId },
-      select: {
-        quantity: true,
-        fulfilledQuantity: true,
-        requiresShipping: true,
-      },
-    })
-
-    await tx.order.update({
-      where: { id: orderId },
-      data: { fulfillmentStatus: deriveFulfillmentStatus(updatedLines) },
-    })
-
-    await tx.orderEvent.create({
-      data: {
-        orderId,
-        type: 'fulfillment_created',
-        message: input.trackingNumber
-          ? `Shipped with tracking ${input.trackingNumber}`
-          : 'Items marked as shipped',
-        actorUserId: session.user.id,
-      },
-    })
-
-    return fulfillment
-  })
-
-  // Emitted after the transaction commits, so a receiver that calls straight
-  // back to read the order sees the fulfilment rather than the state before it.
-  await emitOrderWebhook(organizationId, orderId, 'ORDER_FULFILLED')
-
-  return fulfillment
-}
-
-function deriveFulfillmentStatus(
-  lines: {
-    quantity: number
-    fulfilledQuantity: number
-    requiresShipping: boolean
-  }[]
-): 'UNFULFILLED' | 'PARTIALLY_FULFILLED' | 'FULFILLED' {
-  // Digital goods never ship, so an order of only digital items would sit at
-  // UNFULFILLED forever if they were counted.
-  const shippable = lines.filter((line) => line.requiresShipping)
-  if (shippable.length === 0) return 'FULFILLED'
-
-  const fulfilled = shippable.reduce(
-    (sum, line) => sum + line.fulfilledQuantity,
-    0
-  )
-  const total = shippable.reduce((sum, line) => sum + line.quantity, 0)
-
-  if (fulfilled === 0) return 'UNFULFILLED'
-  if (fulfilled >= total) return 'FULFILLED'
-  return 'PARTIALLY_FULFILLED'
 }
 
 /**
@@ -382,9 +232,10 @@ export async function cancelOrder(
           .filter((line) => line.variantId !== null)
           .map((line) => ({
             variantId: line.variantId!,
-            // Only unfulfilled units come back — shipped goods are gone until
-            // they are physically returned, which is a separate restock.
-            quantity: line.quantity - line.fulfilledQuantity,
+            // Only units that never shipped come back here. Goods a courier
+            // already collected are gone until physically returned, which is
+            // handled by the return flow instead.
+            quantity: order.stockConsumedAt ? 0 : line.quantity,
             inventoryTracked: true,
           }))
       )
@@ -404,7 +255,9 @@ export async function cancelOrder(
       data: {
         cancelledAt: new Date(),
         cancelReason: input.reason,
-        fulfillmentStatus: input.restock !== false ? 'RESTOCKED' : undefined,
+        ...(input.restock !== false && !order.stockConsumedAt
+          ? { stockRestoredAt: new Date() }
+          : {}),
       },
     })
   })

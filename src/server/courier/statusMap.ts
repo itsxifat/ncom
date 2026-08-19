@@ -30,7 +30,12 @@ import type {
  * confirmation" instead.
  */
 const STEADFAST_STATUS: Record<string, CourierShipmentStatus> = {
-  pending: 'IN_TRANSIT',
+  // Steadfast's `pending` does not mean "waiting to be sent" — it is the state a
+  // consignment enters once the courier physically has the parcel, replacing
+  // `in_review`. Read as English it looks like the opposite, and mapping it to
+  // IN_TRANSIT overstated things in the other direction: the merchant's
+  // question at this point is "did it reach the courier", and the answer is yes.
+  pending: 'PICKED_UP',
   in_review: 'SUBMITTED',
   hold: 'ON_HOLD',
   delivered: 'DELIVERED',
@@ -190,12 +195,46 @@ export function isTerminal(status: CourierShipmentStatus): boolean {
   )
 }
 
+/**
+ * The old `fulfillmentStatus` string, derived rather than stored.
+ *
+ * The concept is gone from the platform: stock moves when a courier takes the
+ * parcel, and the order's own workflow state is the single answer to "where is
+ * this". But the value was published by the v1 order API and the order
+ * webhooks, and integrations built against those are outside this repository
+ * and cannot be migrated in step with it.
+ *
+ * So it is computed on the way out and never persisted. Nothing inside the
+ * platform reads it, which is what stops it from quietly becoming a second
+ * source of truth that drifts from the first.
+ */
+export function legacyFulfillmentStatus(
+  state: OrderWorkflowState
+): 'unfulfilled' | 'fulfilled' | 'restocked' {
+  switch (state) {
+    case 'DISPATCHED':
+    case 'IN_TRANSIT':
+    case 'OUT_FOR_DELIVERY':
+    case 'DELIVERED':
+    case 'PARTIALLY_DELIVERED':
+      return 'fulfilled'
+    case 'RETURNED':
+    case 'CANCELLED':
+      return 'restocked'
+    case 'PENDING':
+    case 'FRAUD_REVIEW':
+    case 'PROCESSING':
+    case 'FAILED':
+      return 'unfulfilled'
+  }
+}
+
 /** Merchant-facing wording for a parcel state, used in UI and in timelines. */
 export const SHIPMENT_STATUS_LABEL: Record<CourierShipmentStatus, string> = {
   PENDING: 'Not sent yet',
   SUBMITTED: 'Accepted by courier',
   PICKUP_PENDING: 'Awaiting pickup',
-  PICKED_UP: 'Picked up',
+  PICKED_UP: 'Received by courier',
   IN_TRANSIT: 'In transit',
   OUT_FOR_DELIVERY: 'Out for delivery',
   DELIVERED: 'Delivered',
@@ -212,7 +251,9 @@ export const WORKFLOW_STATE_LABEL: Record<OrderWorkflowState, string> = {
   PENDING: 'Pending',
   FRAUD_REVIEW: 'Needs review',
   PROCESSING: 'Processing',
-  DISPATCHED: 'Dispatched',
+  // "Dispatched" describes what the merchant did; this describes where the
+  // parcel is, which is what everyone reading the order actually wants to know.
+  DISPATCHED: 'Sent to courier',
   IN_TRANSIT: 'In transit',
   OUT_FOR_DELIVERY: 'Out for delivery',
   DELIVERED: 'Delivered',

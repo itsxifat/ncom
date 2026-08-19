@@ -256,7 +256,6 @@ export async function placeOrder(
         taxTotalCents: pricing.taxTotalCents,
         totalCents,
         financialStatus: 'PENDING',
-        fulfillmentStatus: 'UNFULFILLED',
         shippingAddress: shippingAddress ?? undefined,
         billingAddress: cart.billingAddress ?? shippingAddress ?? undefined,
         shippingCountryCode: readCountryCode(shippingAddress),

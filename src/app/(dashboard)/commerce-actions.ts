@@ -11,6 +11,7 @@
  */
 
 import { revalidatePath } from 'next/cache'
+import { recordOrderReturn } from '@/server/services/returnService'
 import { redirect } from 'next/navigation'
 import { z } from 'zod'
 import { getActiveOrganization } from '@/server/services/organizationService'
@@ -40,7 +41,6 @@ import {
 import {
   addOrderNote,
   cancelOrder,
-  fulfillOrder,
   markOrderPaid,
   refundOrder,
 } from '@/server/services/orderService'
@@ -642,37 +642,6 @@ export async function deleteCollectionAction(
 
 // ── Orders ───────────────────────────────────────────────────────────────
 
-export async function fulfillOrderAction(
-  orderId: string,
-  _prev: StoreActionState,
-  formData: FormData
-): Promise<StoreActionState> {
-  let lines: { orderLineId: string; quantity: number }[]
-  try {
-    lines = JSON.parse(String(formData.get('lines') ?? '[]'))
-  } catch {
-    return { error: 'Could not read the form' }
-  }
-
-  if (lines.length === 0) return { error: 'Select at least one item to fulfil' }
-
-  try {
-    await fulfillOrder(await org(), orderId, {
-      lines,
-      locationId: (formData.get('locationId') as string) || null,
-      trackingCompany: (formData.get('trackingCompany') as string) || undefined,
-      trackingNumber: (formData.get('trackingNumber') as string) || undefined,
-      trackingUrl: (formData.get('trackingUrl') as string) || undefined,
-      notifyCustomer: formData.get('notifyCustomer') === 'on',
-    })
-  } catch (cause) {
-    return fail(cause)
-  }
-
-  revalidatePath(`/orders/${orderId}`)
-  return { success: 'Fulfilment created.' }
-}
-
 export async function refundOrderAction(
   orderId: string,
   _prev: StoreActionState,
@@ -703,6 +672,33 @@ export async function refundOrderAction(
 
   revalidatePath(`/orders/${orderId}`)
   return { success: 'Refund recorded.' }
+}
+
+export async function recordReturnAction(
+  orderId: string,
+  _prev: StoreActionState,
+  formData: FormData
+): Promise<StoreActionState> {
+  let lines: { orderLineId: string; quantity: number }[]
+  try {
+    lines = JSON.parse(String(formData.get('lines') ?? '[]'))
+  } catch {
+    return { error: 'Could not read the form' }
+  }
+
+  try {
+    await recordOrderReturn(await org(), orderId, {
+      lines,
+      waiveDeliveryCharge: formData.get('waiveDelivery') === 'on',
+      restock: formData.get('restock') === 'on',
+      note: (formData.get('note') as string) || undefined,
+    })
+  } catch (cause) {
+    return fail(cause)
+  }
+
+  revalidatePath(`/orders/${orderId}`)
+  return { success: 'Return recorded.' }
 }
 
 export async function cancelOrderAction(

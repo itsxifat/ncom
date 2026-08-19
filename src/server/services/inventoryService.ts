@@ -198,9 +198,9 @@ async function levelHoldingCommitment(
  * Consumes committed stock when goods actually ship. `available` is untouched
  * — it was already decremented at order time.
  */
-export async function consumeInventoryForFulfillment(
+export async function consumeCommittedStock(
   tx: TransactionClient,
-  fulfillmentId: string,
+  referenceId: string,
   locationId: string | null,
   lines: { variantId: string; quantity: number; inventoryTracked: boolean }[]
 ) {
@@ -226,10 +226,44 @@ export async function consumeInventoryForFulfillment(
         variantId: line.variantId,
         delta: 0,
         reason: 'FULFILLED',
-        referenceId: fulfillmentId,
+        referenceId,
       },
     })
   }
+}
+
+/**
+ * The one location a store's stock lives in.
+ *
+ * A store may name its own; otherwise it falls back to the organisation's first
+ * active location. The fallback is what lets a merchant sell before they have
+ * ever opened inventory settings — the alternative is a store that cannot
+ * decrement stock because nobody told it where the stock is.
+ *
+ * Returns null when the organisation has no location at all, which callers
+ * treat as "no stock to move" rather than as an error: an untracked catalogue
+ * is a legitimate way to run a store.
+ */
+export async function resolveStoreLocationId(
+  tx: TransactionClient,
+  organizationId: string,
+  storeId: string | null
+): Promise<string | null> {
+  if (storeId) {
+    const store = await tx.store.findFirst({
+      where: { id: storeId, organizationId },
+      select: { inventoryLocationId: true },
+    })
+    if (store?.inventoryLocationId) return store.inventoryLocationId
+  }
+
+  const fallback = await tx.location.findFirst({
+    where: { organizationId, isActive: true },
+    orderBy: { createdAt: 'asc' },
+    select: { id: true },
+  })
+
+  return fallback?.id ?? null
 }
 
 /**

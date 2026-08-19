@@ -13,16 +13,13 @@ import { formatMoney } from '@/lib/money'
 import { PageHeader } from '@/components/app/page-header'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import {
-  FinancialStatusBadge,
-  FulfillmentStatusBadge,
-} from '@/components/store/status-badges'
+import { FinancialStatusBadge } from '@/components/store/status-badges'
 import {
   CancelOrderPanel,
-  FulfillPanel,
   MarkPaidButton,
   OrderNoteForm,
   RefundPanel,
+  ReturnPanel,
 } from '@/components/store/order-actions'
 import { Money } from '@/components/store/form-controls'
 
@@ -92,8 +89,8 @@ export default async function OrderDetailPage({
     title: line.title,
     variantTitle: line.variantTitle,
     quantity: line.quantity,
-    fulfilledQuantity: line.fulfilledQuantity,
     refundedQuantity: line.refundedQuantity,
+    returnedQuantity: line.returnedQuantity,
     unitPriceCents: line.unitPriceCents,
   }))
 
@@ -110,9 +107,8 @@ export default async function OrderDetailPage({
         description={
           <span className="flex flex-wrap items-center gap-2">
             <FinancialStatusBadge status={order.financialStatus} />
-            <FulfillmentStatusBadge status={order.fulfillmentStatus} />
-            {/* Where the parcel is, which is a different question from whether
-                the order is paid or how much of it has shipped. */}
+            {/* Where the parcel is, which is a different question from
+                whether the order is paid. */}
             <WorkflowStateBadge state={order.workflowState} />
             {order.cancelledAt && (
               <Badge variant="destructive">Cancelled</Badge>
@@ -218,8 +214,8 @@ export default async function OrderDetailPage({
                         {line.sku && <>SKU {line.sku} · </>}
                         {formatMoney(line.unitPriceCents, currency)} ×{' '}
                         {line.quantity}
-                        {line.fulfilledQuantity > 0 && (
-                          <> · {line.fulfilledQuantity} fulfilled</>
+                        {line.returnedQuantity > 0 && (
+                          <> · {line.returnedQuantity} returned</>
                         )}
                         {line.refundedQuantity > 0 && (
                           <> · {line.refundedQuantity} refunded</>
@@ -283,47 +279,6 @@ export default async function OrderDetailPage({
             </CardContent>
           </Card>
 
-          {!order.cancelledAt && (
-            <FulfillPanel
-              orderId={order.id}
-              lines={lineSummaries}
-              locations={locations.map((location) => ({
-                id: location.id,
-                name: location.name,
-              }))}
-            />
-          )}
-
-          {order.fulfillments.length > 0 && (
-            <Card>
-              <CardContent className="flex flex-col gap-3">
-                <h2 className="font-display text-lg font-semibold tracking-tight">
-                  Shipments
-                </h2>
-                {order.fulfillments.map((fulfillment) => (
-                  <div
-                    key={fulfillment.id}
-                    className="rounded-lg border p-3 text-sm"
-                  >
-                    <p className="font-medium">
-                      {fulfillment.trackingCompany ?? 'Shipment'}
-                      {fulfillment.trackingNumber &&
-                        ` · ${fulfillment.trackingNumber}`}
-                    </p>
-                    <p className="text-muted-foreground">
-                      {fulfillment.lines.reduce(
-                        (sum, line) => sum + line.quantity,
-                        0
-                      )}{' '}
-                      items ·{' '}
-                      {fulfillment.shippedAt?.toLocaleDateString() ?? 'Pending'}
-                    </p>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-          )}
-
           <div className="flex flex-wrap items-start gap-3">
             {!order.cancelledAt && (
               <RefundPanel
@@ -331,6 +286,13 @@ export default async function OrderDetailPage({
                 lines={lineSummaries}
                 currencyCode={currency}
                 refundableCents={refundableCents}
+              />
+            )}
+            {!order.cancelledAt && (
+              <ReturnPanel
+                orderId={order.id}
+                lines={lineSummaries}
+                currencyCode={currency}
               />
             )}
             {!order.cancelledAt && <CancelOrderPanel orderId={order.id} />}

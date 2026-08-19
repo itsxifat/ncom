@@ -1,12 +1,12 @@
 'use client'
 
 import { useActionState, useState, useTransition } from 'react'
-import { Package, RotateCcw, XCircle } from 'lucide-react'
+import { Package, PackageX, RotateCcw, XCircle } from 'lucide-react'
 import {
   addOrderNoteAction,
   cancelOrderAction,
-  fulfillOrderAction,
   markOrderPaidAction,
+  recordReturnAction,
   refundOrderAction,
   type StoreActionState,
 } from '@/app/(dashboard)/commerce-actions'
@@ -29,164 +29,16 @@ export interface OrderLineSummary {
   title: string
   variantTitle: string | null
   quantity: number
-  fulfilledQuantity: number
   refundedQuantity: number
+  returnedQuantity: number
   unitPriceCents: number
-}
-
-/**
- * Fulfilment.
- *
- * Quantities default to everything still outstanding, because shipping the
- * whole remaining order is what happens most of the time — a partial shipment
- * is the exception and should cost a keystroke, not the common case.
- */
-export function FulfillPanel({
-  orderId,
-  lines,
-  locations,
-}: {
-  orderId: string
-  lines: OrderLineSummary[]
-  locations: { id: string; name: string }[]
-}) {
-  const outstanding = lines.filter(
-    (line) => line.quantity - line.fulfilledQuantity > 0
-  )
-
-  const [quantities, setQuantities] = useState<Record<string, number>>(
-    Object.fromEntries(
-      outstanding.map((line) => [
-        line.id,
-        line.quantity - line.fulfilledQuantity,
-      ])
-    )
-  )
-
-  const boundAction = fulfillOrderAction.bind(null, orderId)
-  const [state, action, pending] = useActionState<StoreActionState, FormData>(
-    boundAction,
-    undefined
-  )
-
-  if (outstanding.length === 0) return null
-
-  const payload = JSON.stringify(
-    Object.entries(quantities)
-      .filter(([, quantity]) => quantity > 0)
-      .map(([orderLineId, quantity]) => ({ orderLineId, quantity }))
-  )
-
-  return (
-    <Card>
-      <CardContent>
-        <form action={action}>
-          <input type="hidden" name="lines" value={payload} />
-          <FieldGroup>
-            <h3 className="font-display flex items-center gap-2 text-lg font-semibold tracking-tight">
-              <Package className="size-4.5" />
-              Fulfil items
-            </h3>
-
-            <div className="flex flex-col gap-2">
-              {outstanding.map((line) => {
-                const max = line.quantity - line.fulfilledQuantity
-                return (
-                  <div
-                    key={line.id}
-                    className="flex items-center justify-between gap-4 rounded-lg border px-3 py-2"
-                  >
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium">
-                        {line.title}
-                      </p>
-                      {line.variantTitle &&
-                        line.variantTitle !== 'Default Title' && (
-                          <p className="text-muted-foreground text-xs">
-                            {line.variantTitle}
-                          </p>
-                        )}
-                    </div>
-                    <Input
-                      type="number"
-                      min={0}
-                      max={max}
-                      value={quantities[line.id] ?? 0}
-                      onChange={(event) =>
-                        setQuantities((current) => ({
-                          ...current,
-                          [line.id]: Math.min(
-                            Math.max(Number(event.target.value) || 0, 0),
-                            max
-                          ),
-                        }))
-                      }
-                      className="w-24"
-                    />
-                  </div>
-                )
-              })}
-            </div>
-
-            {locations.length > 1 && (
-              <Field>
-                <FieldLabel htmlFor="locationId">Ship from</FieldLabel>
-                <FormSelect id="locationId" name="locationId">
-                  {locations.map((location) => (
-                    <option key={location.id} value={location.id}>
-                      {location.name}
-                    </option>
-                  ))}
-                </FormSelect>
-              </Field>
-            )}
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field>
-                <FieldLabel htmlFor="trackingCompany">Carrier</FieldLabel>
-                <Input id="trackingCompany" name="trackingCompany" />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="trackingNumber">
-                  Tracking number
-                </FieldLabel>
-                <Input id="trackingNumber" name="trackingNumber" />
-              </Field>
-            </div>
-
-            <Field>
-              <FieldLabel htmlFor="trackingUrl">Tracking URL</FieldLabel>
-              <Input id="trackingUrl" name="trackingUrl" type="url" />
-            </Field>
-
-            <label className="flex items-center gap-2 text-sm">
-              <Switch name="notifyCustomer" defaultChecked />
-              Notify the customer
-            </label>
-
-            {state?.error && <FieldError>{state.error}</FieldError>}
-            {state?.success && (
-              <p className="text-muted-foreground text-sm">{state.success}</p>
-            )}
-
-            <Field>
-              <Button type="submit" disabled={pending}>
-                {pending ? 'Fulfilling…' : 'Mark as fulfilled'}
-              </Button>
-            </Field>
-          </FieldGroup>
-        </form>
-      </CardContent>
-    </Card>
-  )
 }
 
 /**
  * Refunds.
  *
  * Quantities start at zero rather than the full order: a refund moves real
- * money and the amounts should be chosen deliberately, which is the opposite
- * of the fulfilment default above.
+ * money and the amounts should be chosen deliberately.
  */
 export function RefundPanel({
   orderId,
@@ -344,6 +196,161 @@ export function RefundPanel({
   )
 }
 
+/**
+ * Returns, whole or partial.
+ *
+ * Distinct from a refund and deliberately placed beside it, because the two are
+ * confused constantly and the difference decides whether the merchant's revenue
+ * figures are true. A refund sends money back to someone who paid. A return is
+ * goods coming back — and on a cash-on-delivery order, usually no money ever
+ * moved at all, so there is nothing to send anywhere.
+ *
+ * Quantities start at zero for the same reason the refund panel's do: this
+ * rewrites the order total, and a default of "everything" is the wrong thing to
+ * confirm by reflex.
+ */
+export function ReturnPanel({
+  orderId,
+  lines,
+  currencyCode,
+}: {
+  orderId: string
+  lines: OrderLineSummary[]
+  currencyCode: string
+}) {
+  const returnable = lines.filter(
+    (line) => line.quantity - line.returnedQuantity > 0
+  )
+
+  const [quantities, setQuantities] = useState<Record<string, number>>({})
+  const [open, setOpen] = useState(false)
+
+  const boundAction = recordReturnAction.bind(null, orderId)
+  const [state, action, pending] = useActionState<StoreActionState, FormData>(
+    boundAction,
+    undefined
+  )
+
+  if (returnable.length === 0) return null
+
+  if (!open) {
+    return (
+      <Button type="button" variant="outline" onClick={() => setOpen(true)}>
+        <PackageX />
+        Record return
+      </Button>
+    )
+  }
+
+  const payload = JSON.stringify(
+    Object.entries(quantities)
+      .filter(([, quantity]) => quantity > 0)
+      .map(([orderLineId, quantity]) => ({ orderLineId, quantity }))
+  )
+
+  const comingBack = returnable.reduce(
+    (sum, line) => sum + (quantities[line.id] ?? 0) * line.unitPriceCents,
+    0
+  )
+
+  return (
+    <Card className="w-full">
+      <CardContent>
+        <form action={action}>
+          <input type="hidden" name="lines" value={payload} />
+          <FieldGroup>
+            <h3 className="font-display text-lg font-semibold tracking-tight">
+              Record a return
+            </h3>
+            <p className="text-muted-foreground text-sm">
+              For goods the customer refused or sent back. The order total is
+              recalculated, with any discount re-applied in proportion to what
+              they kept.
+            </p>
+
+            <div className="flex flex-col gap-2">
+              {returnable.map((line) => {
+                const max = line.quantity - line.returnedQuantity
+                return (
+                  <div
+                    key={line.id}
+                    className="flex items-center justify-between gap-4 rounded-lg border px-3 py-2"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">
+                        {line.title}
+                      </p>
+                      <p className="text-muted-foreground text-xs">
+                        {formatMoney(line.unitPriceCents, currencyCode)} each ·{' '}
+                        {max} still with the customer
+                      </p>
+                    </div>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={max}
+                      value={quantities[line.id] ?? 0}
+                      onChange={(event) =>
+                        setQuantities((current) => ({
+                          ...current,
+                          [line.id]: Math.min(
+                            Math.max(Number(event.target.value) || 0, 0),
+                            max
+                          ),
+                        }))
+                      }
+                      className="w-24"
+                    />
+                  </div>
+                )
+              })}
+            </div>
+
+            <p className="text-muted-foreground text-sm">
+              Goods coming back: {formatMoney(comingBack, currencyCode)}
+            </p>
+
+            <label className="flex items-center gap-2 text-sm">
+              <Switch name="restock" defaultChecked />
+              Put these items back into stock
+            </label>
+
+            <label className="flex items-center gap-2 text-sm">
+              <Switch name="waiveDelivery" />
+              Waive the delivery charge
+            </label>
+
+            <Field>
+              <FieldLabel htmlFor="return-note">Note</FieldLabel>
+              <Textarea
+                id="return-note"
+                name="note"
+                rows={2}
+                placeholder="Why did it come back? (optional)"
+              />
+            </Field>
+
+            {state?.error && <FieldError>{state.error}</FieldError>}
+
+            <div className="flex gap-2">
+              <Button type="submit" disabled={pending}>
+                {pending ? 'Recording…' : 'Record return'}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setOpen(false)}
+              >
+                Cancel
+              </Button>
+            </div>
+          </FieldGroup>
+        </form>
+      </CardContent>
+    </Card>
+  )
+}
+
 export function CancelOrderPanel({ orderId }: { orderId: string }) {
   const [open, setOpen] = useState(false)
   const boundAction = cancelOrderAction.bind(null, orderId)
@@ -392,7 +399,7 @@ export function CancelOrderPanel({ orderId }: { orderId: string }) {
 
             <label className="flex items-center gap-2 text-sm">
               <Switch name="restock" defaultChecked />
-              Return unfulfilled items to stock
+              Return these items to stock
             </label>
 
             {state?.error && <FieldError>{state.error}</FieldError>}
