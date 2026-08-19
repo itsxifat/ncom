@@ -12,6 +12,7 @@ import {
 import { getCourierSettings, screenPhone } from './fraudCheckService'
 import { isTerminal, workflowStateFor } from '@/server/courier/statusMap'
 import { normalizeBdPhone } from '@/server/courier/phone'
+import { requireCourierInvoice } from '@/server/courier/invoice'
 import {
   CourierApiError,
   CourierNotConfiguredError,
@@ -514,6 +515,20 @@ async function dispatchOrderInternal(
     'Customer'
 
   const recipientAddress = formatAddress(address)
+
+  // The order number as a courier can reference it. `#1001` is a fine thing to
+  // show a customer and an invalid `invoice` at Steadfast, which rejects any
+  // character outside letters, numbers, dashes and underscores.
+  let merchantReference: string
+  try {
+    merchantReference = requireCourierInvoice(order.orderNumber)
+  } catch (cause) {
+    const message =
+      cause instanceof Error ? cause.message : 'Unusable order number'
+    await noteDispatchFailure(orderId, message)
+    return { ok: false, shipmentId: null, error: message }
+  }
+
   // The rider collects whatever is still owed, not the order total — a
   // part-paid order must not be charged twice at the door.
   const codAmountCents = Math.max(0, order.totalCents - order.paidTotalCents)
@@ -533,6 +548,12 @@ async function dispatchOrderInternal(
         data: {
           provider,
           courierConfigId: config?.id ?? null,
+          // Refreshed, not just written on create: a row left behind by a
+          // failed attempt still carries whatever reference that attempt used,
+          // and rows created before order numbers were sanitised hold an
+          // unsendable one. Without this line those orders retry forever
+          // against the same rejected value.
+          merchantOrderId: merchantReference,
           recipientName,
           recipientPhone,
           recipientAddress,
@@ -546,7 +567,7 @@ async function dispatchOrderInternal(
           orderId,
           courierConfigId: config?.id ?? null,
           provider,
-          merchantOrderId: order.orderNumber,
+          merchantOrderId: merchantReference,
           status: 'PENDING',
           codAmountCents,
           recipientName,
@@ -557,7 +578,7 @@ async function dispatchOrderInternal(
       })
 
   const request: CourierConsignmentRequest = {
-    merchantOrderId: order.orderNumber,
+    merchantOrderId: merchantReference,
     recipientName,
     recipientPhone,
     recipientAddress,

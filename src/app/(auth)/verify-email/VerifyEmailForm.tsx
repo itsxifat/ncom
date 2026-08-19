@@ -27,9 +27,11 @@ import { Button } from '@/components/ui/button'
 export function VerifyEmailForm({
   email,
   mailerConfigured,
+  callbackUrl,
 }: {
   email: string
   mailerConfigured: boolean
+  callbackUrl?: string
 }) {
   const [state, action, pending] = useActionState(verifyEmailAction, undefined)
   // Not `useActionState`: the resend needs its own trigger, and a second form
@@ -56,6 +58,9 @@ export function VerifyEmailForm({
       </CardHeader>
       <CardContent>
         <form action={action}>
+          {callbackUrl && (
+            <input type="hidden" name="callbackUrl" value={callbackUrl} />
+          )}
           <FieldGroup>
             <Field>
               <FieldLabel htmlFor="code">Verification code</FieldLabel>

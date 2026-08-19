@@ -36,11 +36,20 @@ function GoogleMark() {
   )
 }
 
-export function GoogleSignInButton({ label }: { label: string }) {
+export function GoogleSignInButton({
+  label,
+  callbackUrl,
+}: {
+  label: string
+  callbackUrl?: string
+}) {
   const [state, action, pending] = useActionState(googleSignInAction, undefined)
 
   return (
     <form action={action} className="flex flex-col gap-2">
+      {callbackUrl && (
+        <input type="hidden" name="callbackUrl" value={callbackUrl} />
+      )}
       <Button
         type="submit"
         variant="outline"

@@ -26,11 +26,19 @@ import {
 export function LoginForm({
   googleEnabled,
   registrationOpen,
+  callbackUrl,
 }: {
   googleEnabled: boolean
   registrationOpen: boolean
+  callbackUrl?: string
 }) {
   const [state, action, pending] = useActionState(loginAction, undefined)
+
+  // Someone sent here from an invitation link usually has no account yet, so
+  // the hop to /register has to carry the invitation with it.
+  const registerHref = callbackUrl
+    ? `/register?callbackUrl=${encodeURIComponent(callbackUrl)}`
+    : '/register'
 
   return (
     <Card>
@@ -45,12 +53,18 @@ export function LoginForm({
       <CardContent>
         {googleEnabled && (
           <>
-            <GoogleSignInButton label="Continue with Google" />
+            <GoogleSignInButton
+              label="Continue with Google"
+              callbackUrl={callbackUrl}
+            />
             <AuthDivider />
           </>
         )}
 
         <form action={action}>
+          {callbackUrl && (
+            <input type="hidden" name="callbackUrl" value={callbackUrl} />
+          )}
           <FieldGroup>
             <Field>
               <FieldLabel htmlFor="email">Email</FieldLabel>
@@ -88,7 +102,7 @@ export function LoginForm({
           <p className="text-muted-foreground mt-6 text-center text-sm">
             Don&apos;t have an account?{' '}
             <Link
-              href="/register"
+              href={registerHref}
               className="text-foreground underline underline-offset-4"
             >
               Create one

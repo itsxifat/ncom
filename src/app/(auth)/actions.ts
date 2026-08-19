@@ -17,6 +17,7 @@ import { checkRateLimit, getClientIp } from '@/lib/rate-limit'
 import { isEmailConfigured } from '@/server/services/emailService'
 import { OtpError, issueOtp, verifyOtp } from '@/server/services/otpService'
 import { getPlatformFlag } from '@/server/services/platformFlagService'
+import { safeCallbackPath } from '@/lib/auth-redirect'
 
 export type AuthActionState = { error?: string; notice?: string } | undefined
 
@@ -44,7 +45,10 @@ export async function loginAction(
     await signIn('credentials', {
       email: parsed.data.email,
       password: parsed.data.password,
-      redirectTo: '/dashboard',
+      // Whatever they were trying to reach before the auth gate stopped them,
+      // rather than always the dashboard. An invitation link that dumps its
+      // recipient on a dashboard has not been accepted — it has been lost.
+      redirectTo: safeCallbackPath(formData.get('callbackUrl')),
     })
   } catch (error) {
     if (error instanceof AuthError) {
@@ -61,13 +65,18 @@ export async function loginAction(
  * the server: a hidden button is not a control, and `signIn` needs to run
  * server-side anyway to set up the OAuth state cookie.
  */
-export async function googleSignInAction(): Promise<AuthActionState> {
+export async function googleSignInAction(
+  _prevState: AuthActionState,
+  formData: FormData
+): Promise<AuthActionState> {
   if (!(await getPlatformFlag('auth.googleLoginEnabled'))) {
     return { error: 'Google sign-in is turned off on this platform.' }
   }
 
   // `signIn` redirects by throwing, so anything after it never runs.
-  await signIn('google', { redirectTo: '/dashboard' })
+  await signIn('google', {
+    redirectTo: safeCallbackPath(formData.get('callbackUrl')),
+  })
 }
 
 export async function registerAction(
@@ -124,18 +133,25 @@ export async function registerAction(
     }
   }
 
+  // The account that claimed the administrator seat lands in the admin panel,
+  // so a fresh install's first act is obvious rather than something to go
+  // looking for. An explicit callback outranks that: someone who got here from
+  // an invitation link came to join a workspace, not to tour the admin panel.
+  const destination = safeCallbackPath(
+    formData.get('callbackUrl'),
+    isFirstAdmin ? '/admin' : '/dashboard'
+  )
+
   try {
     await signIn('credentials', {
       email: parsed.data.email,
       password: parsed.data.password,
-      // The account that claimed the administrator seat lands in the admin panel,
-      // so a fresh install's first act is obvious rather than something to go
-      // looking for. Verification still comes first when it is required.
+      // Verification still comes first when it is required — carrying the
+      // destination across, so confirming an address does not strand a brand
+      // new invitee away from the invitation that brought them here.
       redirectTo: verificationRequired
-        ? '/verify-email'
-        : isFirstAdmin
-          ? '/admin'
-          : '/dashboard',
+        ? `/verify-email?callbackUrl=${encodeURIComponent(destination)}`
+        : destination,
     })
   } catch (error) {
     if (error instanceof AuthError) {
@@ -217,7 +233,7 @@ export async function verifyEmailAction(
     data: { emailVerified: new Date() },
   })
 
-  redirect('/dashboard')
+  redirect(safeCallbackPath(formData.get('callbackUrl')))
 }
 
 export async function resendVerificationCodeAction(): Promise<AuthActionState> {

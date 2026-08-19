@@ -26,8 +26,18 @@ import {
   GoogleSignInButton,
 } from '@/components/app/google-sign-in-button'
 
-export function RegisterForm({ googleEnabled }: { googleEnabled: boolean }) {
+export function RegisterForm({
+  googleEnabled,
+  callbackUrl,
+}: {
+  googleEnabled: boolean
+  callbackUrl?: string
+}) {
   const [state, action, pending] = useActionState(registerAction, undefined)
+
+  const loginHref = callbackUrl
+    ? `/login?callbackUrl=${encodeURIComponent(callbackUrl)}`
+    : '/login'
 
   return (
     <Card>
@@ -40,12 +50,18 @@ export function RegisterForm({ googleEnabled }: { googleEnabled: boolean }) {
       <CardContent>
         {googleEnabled && (
           <>
-            <GoogleSignInButton label="Sign up with Google" />
+            <GoogleSignInButton
+              label="Sign up with Google"
+              callbackUrl={callbackUrl}
+            />
             <AuthDivider />
           </>
         )}
 
         <form action={action}>
+          {callbackUrl && (
+            <input type="hidden" name="callbackUrl" value={callbackUrl} />
+          )}
           <FieldGroup>
             <Field>
               <FieldLabel htmlFor="name">Name</FieldLabel>
@@ -106,7 +122,7 @@ export function RegisterForm({ googleEnabled }: { googleEnabled: boolean }) {
         <p className="text-muted-foreground mt-6 text-center text-sm">
           Already have an account?{' '}
           <Link
-            href="/login"
+            href={loginHref}
             className="text-foreground underline underline-offset-4"
           >
             Sign in

@@ -1,6 +1,7 @@
 import 'server-only'
 import { mapSteadfastStatus } from './statusMap'
 import { requireBdPhone } from './phone'
+import { requireCourierInvoice } from './invoice'
 import {
   COURIER_TIMEOUT_MS,
   CourierApiError,
@@ -186,9 +187,13 @@ export class SteadfastClient implements CourierClient {
     // Validated here rather than at the courier, so a bad number produces a
     // message naming the field instead of a generic 422 two layers down.
     const recipientPhone = requireBdPhone(request.recipientPhone)
+    // Steadfast permits only letters, numbers, dashes and underscores in
+    // `invoice`. Callers are expected to pass an already-safe reference; this
+    // is the backstop that keeps a stray `#` from costing a real parcel.
+    const invoice = requireCourierInvoice(request.merchantOrderId)
 
     const payload = {
-      invoice: request.merchantOrderId,
+      invoice,
       recipient_name: request.recipientName.slice(0, 100),
       recipient_phone: recipientPhone,
       ...(request.alternativePhone
@@ -310,7 +315,7 @@ export class SteadfastClient implements CourierClient {
     }
 
     const data = requests.map((request) => ({
-      invoice: request.merchantOrderId,
+      invoice: requireCourierInvoice(request.merchantOrderId),
       recipient_name: request.recipientName.slice(0, 100),
       recipient_phone: requireBdPhone(request.recipientPhone),
       recipient_address: request.recipientAddress.slice(0, 250),
