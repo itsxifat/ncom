@@ -150,12 +150,15 @@ export default async function OrdersPage({
               .join(' ')
 
             return (
-              <ListRow key={order.id}>
+              // The whole row opens the order. A merchant works down this
+              // list all day and the order number is a five-character target;
+              // the link is still the number, it just claims the row.
+              <ListRow key={order.id} interactive>
                 <ListRowText
                   title={
                     <Link
                       href={`${base}/${order.id}`}
-                      className="hover:underline"
+                      className="after:absolute after:inset-0 hover:underline"
                     >
                       {order.orderNumber}
                     </Link>

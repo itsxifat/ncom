@@ -1,11 +1,20 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { AlertTriangle, CheckCircle2, ChevronDown, Clock } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ChevronDown,
+  Clock,
+  Pause,
+  Play,
+} from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { FormSelect } from '@/components/ui/form-select'
 import type {
   TrackingDestination,
   TrackingEventName,
@@ -68,60 +77,89 @@ export function TrackingEventExplorer({
   page,
   pageSize,
   filters,
+  stores,
 }: {
   health: TrackingHealthShape
   events: TrackingEventRow[]
   total: number
   page: number
   pageSize: number
-  filters: { destination: string; event: string; status: string; q: string }
+  filters: {
+    destination: string
+    event: string
+    status: string
+    q: string
+    store: string
+  }
+  /** Every store in the workspace, so the log can be narrowed to one site. */
+  stores: { id: string; name: string }[]
 }) {
   const pages = Math.max(1, Math.ceil(total / pageSize))
+  const filtered = Object.values(filters).some((value) => value !== '')
 
   return (
     <div className="flex flex-col gap-6">
       <HealthSummary health={health} />
 
-      <form className="flex flex-wrap items-end gap-2" method="get">
-        <Select
-          name="destination"
-          defaultValue={filters.destination}
-          label="Destination"
-        >
-          <option value="">Any destination</option>
-          <option value="META_CAPI">Meta CAPI</option>
-          <option value="GA4_MP">GA4</option>
-        </Select>
-        <Select name="event" defaultValue={filters.event} label="Event">
-          <option value="">Any event</option>
-          <option value="PAGE_VIEW">Page view</option>
-          <option value="VIEW_CONTENT">Product view</option>
-          <option value="PURCHASE">Purchase</option>
-        </Select>
-        <Select name="status" defaultValue={filters.status} label="Status">
-          <option value="">Any status</option>
-          <option value="SUCCEEDED">Succeeded</option>
-          <option value="FAILED">Failed</option>
-          <option value="PENDING">Pending</option>
-        </Select>
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-muted-foreground text-xs">Event ID</span>
-          <input
-            name="q"
-            defaultValue={filters.q}
-            placeholder="Trace one conversion"
-            className="border-input bg-background h-9 rounded-md border px-3 text-sm"
-          />
-        </label>
-        <Button type="submit" variant="outline" size="sm">
-          Filter
-        </Button>
-      </form>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <form className="flex flex-wrap items-end gap-2" method="get">
+          <Select
+            name="store"
+            defaultValue={filters.store}
+            label="Store"
+            placeholder="Every store"
+          >
+            <option value="">Every store</option>
+            {stores.map((store) => (
+              <option key={store.id} value={store.id}>
+                {store.name}
+              </option>
+            ))}
+          </Select>
+          <Select
+            name="destination"
+            defaultValue={filters.destination}
+            label="Destination"
+          >
+            <option value="">Any destination</option>
+            <option value="META_CAPI">Meta CAPI</option>
+            <option value="GA4_MP">GA4</option>
+          </Select>
+          <Select name="event" defaultValue={filters.event} label="Event">
+            <option value="">Any event</option>
+            <option value="PAGE_VIEW">Page view</option>
+            <option value="VIEW_CONTENT">Product view</option>
+            <option value="PURCHASE">Purchase</option>
+          </Select>
+          <Select name="status" defaultValue={filters.status} label="Status">
+            <option value="">Any status</option>
+            <option value="SUCCEEDED">Succeeded</option>
+            <option value="FAILED">Failed</option>
+            <option value="PENDING">Pending</option>
+          </Select>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-muted-foreground text-xs">Event ID</span>
+            <input
+              name="q"
+              defaultValue={filters.q}
+              placeholder="Trace one conversion"
+              className="border-input bg-background h-10 rounded-lg border px-3 text-sm"
+            />
+          </label>
+          <Button type="submit" variant="outline">
+            Filter
+          </Button>
+        </form>
+
+        <LiveToggle />
+      </div>
 
       {events.length === 0 ? (
         <Card>
-          <CardContent className="text-muted-foreground py-8 text-center text-sm">
-            No events match these filters.
+          <CardContent className="text-muted-foreground py-8 text-center text-sm text-pretty">
+            {filtered
+              ? 'No events match these filters.'
+              : 'Nothing reported yet. Save a pixel ID or an access token above, then open a published page — every event this server sends lands here within seconds.'}
           </CardContent>
         </Card>
       ) : (
@@ -164,6 +202,10 @@ export function TrackingEventExplorer({
 function HealthSummary({ health }: { health: TrackingHealthShape }) {
   const rate = (health.successRateBps / 100).toFixed(1)
   const healthy = health.successRateBps >= 9500
+  // A rate needs something to be a rate *of*. Reporting 100% over an empty
+  // window tells a merchant whose tracking has stopped entirely that everything
+  // is fine, which is the exact case this panel exists to catch.
+  const measured = health.succeeded + health.failed > 0
 
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -173,12 +215,14 @@ function HealthSummary({ health }: { health: TrackingHealthShape }) {
             Delivery rate · 24h
           </span>
           <span
-            className={`font-display text-2xl font-semibold ${healthy ? '' : 'text-destructive'}`}
+            className={`font-display text-2xl font-semibold ${measured && !healthy ? 'text-destructive' : ''}`}
           >
-            {rate}%
+            {measured ? `${rate}%` : '—'}
           </span>
           <span className="text-muted-foreground text-xs">
-            {health.succeeded} delivered, {health.failed} failed
+            {measured
+              ? `${health.succeeded} delivered, ${health.failed} failed`
+              : 'nothing sent in the last 24 hours'}
           </span>
         </CardContent>
       </Card>
@@ -366,27 +410,77 @@ function Payload({ value }: { value: unknown }) {
   )
 }
 
+/**
+ * Keeps the log current without anyone reloading it.
+ *
+ * Events arrive here from page renders and from the retry sweep — that is,
+ * from everywhere except this tab — so a static list is out of date the moment
+ * it renders. Ten seconds is fast enough to watch a test event land and slow
+ * enough not to re-query the log on every blink. Pausable, because reading a
+ * failed payload while the list reorders underneath you is maddening.
+ */
+function LiveToggle() {
+  const router = useRouter()
+  const [live, setLive] = useState(true)
+
+  useEffect(() => {
+    if (!live) return
+
+    const id = setInterval(() => router.refresh(), 10_000)
+    return () => clearInterval(id)
+  }, [live, router])
+
+  return (
+    <Button
+      type="button"
+      variant={live ? 'outline' : 'ghost'}
+      onClick={() => setLive((value) => !value)}
+      aria-pressed={live}
+    >
+      {live ? (
+        <>
+          <span className="relative flex size-2">
+            <span className="absolute inline-flex size-full animate-ping rounded-full bg-lime-500 opacity-75" />
+            <span className="relative inline-flex size-2 rounded-full bg-lime-500" />
+          </span>
+          Live
+          <Pause className="size-3.5" />
+        </>
+      ) : (
+        <>
+          <Play className="size-3.5" />
+          Paused
+        </>
+      )}
+    </Button>
+  )
+}
+
 function Select({
   name,
   defaultValue,
   label,
+  placeholder,
   children,
 }: {
   name: string
   defaultValue: string
   label: string
+  placeholder?: string
   children: React.ReactNode
 }) {
   return (
     <label className="flex flex-col gap-1 text-sm">
       <span className="text-muted-foreground text-xs">{label}</span>
-      <select
+      <FormSelect
         name={name}
         defaultValue={defaultValue}
-        className="border-input bg-background h-9 rounded-md border px-3 text-sm"
+        placeholder={placeholder}
+        aria-label={label}
+        className="min-w-40"
       >
         {children}
-      </select>
+      </FormSelect>
     </label>
   )
 }

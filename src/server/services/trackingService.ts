@@ -940,34 +940,114 @@ export async function sendTrackingTestEvent(
   return results
 }
 
-/**
- * The last few conversions sent, for the settings page.
- *
- * "Did my sale reach Meta?" is the only question a merchant asks of this
- * feature after setup, and it deserves an answer that is not a support ticket.
- */
-export async function recentTrackingDeliveries(
-  organizationId: string,
-  storeId: string,
-  take = 5
-) {
-  await requireOrgAccess(organizationId, 'VIEWER')
-  await requireStoreInOrg(organizationId, storeId)
+/** One store's tracking setup, as the control page reads it. */
+export interface StoreTrackingSetup {
+  storeId: string
+  name: string
+  subdomain: string
+  gaMeasurementId: string | null
+  gtmContainerId: string | null
+  metaPixelId: string | null
+  metaTestEventCode: string | null
+  customHeadScript: string | null
+  /** Presence only. A saved token is never sent back to a browser. */
+  hasMetaAccessToken: boolean
+  hasGa4ApiSecret: boolean
+  updatedAt: Date | null
+  /** Deliveries in the window, so a card can say whether it is actually working. */
+  recent: { total: number; succeeded: number; failed: number; pending: number }
+}
 
-  return prisma.trackingDelivery.findMany({
-    where: { storeId },
-    select: {
-      id: true,
-      destination: true,
-      eventName: true,
-      status: true,
-      attempts: true,
-      error: true,
-      createdAt: true,
-      completedAt: true,
-    },
-    orderBy: { createdAt: 'desc' },
-    take,
+/**
+ * Every store in the workspace and what each one reports to.
+ *
+ * This is what makes tracking a workspace-level job rather than a per-site one.
+ * A merchant running six landing pages against one ad account was previously
+ * opening six settings pages to find the one with a stale pixel — and the store
+ * whose token had been revoked looked exactly like the five that were fine,
+ * because nothing on the page said whether events were actually arriving. The
+ * 24-hour counts travel with the credentials for that reason: the setup and the
+ * evidence that it works belong on the same card.
+ *
+ * Two queries regardless of store count — the deliveries are grouped in the
+ * database rather than counted per store in a loop.
+ */
+export async function listStoreTrackingSetups(
+  organizationId: string,
+  options: { sinceHours?: number } = {}
+): Promise<StoreTrackingSetup[]> {
+  await requireOrgAccess(organizationId, 'VIEWER')
+
+  const since = new Date(
+    Date.now() - (options.sinceHours ?? 24) * 60 * 60 * 1000
+  )
+
+  const [stores, grouped] = await Promise.all([
+    prisma.store.findMany({
+      where: { organizationId },
+      select: {
+        id: true,
+        name: true,
+        subdomain: true,
+        integration: {
+          select: {
+            gaMeasurementId: true,
+            gtmContainerId: true,
+            metaPixelId: true,
+            metaTestEventCode: true,
+            customHeadScript: true,
+            metaAccessToken: true,
+            ga4ApiSecret: true,
+            updatedAt: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    }),
+    prisma.trackingDelivery.groupBy({
+      by: ['storeId', 'status'],
+      where: { store: { organizationId }, createdAt: { gte: since } },
+      _count: { _all: true },
+    }),
+  ])
+
+  const counts = new Map<string, StoreTrackingSetup['recent']>()
+  for (const row of grouped) {
+    const entry = counts.get(row.storeId) ?? {
+      total: 0,
+      succeeded: 0,
+      failed: 0,
+      pending: 0,
+    }
+    const count = row._count._all
+    entry.total += count
+    if (row.status === 'SUCCEEDED') entry.succeeded += count
+    else if (row.status === 'FAILED') entry.failed += count
+    else entry.pending += count
+    counts.set(row.storeId, entry)
+  }
+
+  return stores.map((store) => {
+    const config = store.integration
+    return {
+      storeId: store.id,
+      name: store.name,
+      subdomain: store.subdomain,
+      gaMeasurementId: config?.gaMeasurementId ?? null,
+      gtmContainerId: config?.gtmContainerId ?? null,
+      metaPixelId: config?.metaPixelId ?? null,
+      metaTestEventCode: config?.metaTestEventCode ?? null,
+      customHeadScript: config?.customHeadScript ?? null,
+      hasMetaAccessToken: Boolean(config?.metaAccessToken),
+      hasGa4ApiSecret: Boolean(config?.ga4ApiSecret),
+      updatedAt: config?.updatedAt ?? null,
+      recent: counts.get(store.id) ?? {
+        total: 0,
+        succeeded: 0,
+        failed: 0,
+        pending: 0,
+      },
+    }
   })
 }
 

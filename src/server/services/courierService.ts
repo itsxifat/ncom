@@ -6,7 +6,7 @@ import { requireOrgAccess, requireHumanOrgAccess } from '@/server/auth/rbac'
 import { emitWebhook } from './webhookService'
 import { sendEmail } from './emailService'
 import { orderDispatchedEmail } from '@/server/email/templates'
-import { cancelOrder, emitOrderWebhook } from './orderService'
+import { cancelOrder, emitOrderWebhook, markOrderPaid } from './orderService'
 import {
   consumeCommittedStock,
   resolveStoreLocationId,
@@ -16,7 +16,13 @@ import {
   defaultCourierProvider,
 } from './courierConfigService'
 import { getCourierSettings, screenPhone } from './fraudCheckService'
-import { isTerminal, workflowStateFor } from '@/server/courier/statusMap'
+import {
+  isManualWorkflowState,
+  isTerminal,
+  shipmentStatusFor,
+  workflowStateFor,
+  WORKFLOW_STATE_LABEL,
+} from '@/server/courier/statusMap'
 import { normalizeBdPhone } from '@/server/courier/phone'
 import { requireCourierInvoice } from '@/server/courier/invoice'
 import {
@@ -746,6 +752,165 @@ async function noteDispatchFailure(orderId: string, message: string) {
   })
 }
 
+// ── Manual status updates ────────────────────────────────────────────────
+
+/** Order states whose meaning is "the goods are no longer in the building". */
+const STATES_THAT_SHIP: ReadonlySet<OrderWorkflowState> = new Set([
+  'DISPATCHED',
+  'IN_TRANSIT',
+  'OUT_FOR_DELIVERY',
+  'DELIVERED',
+  'PARTIALLY_DELIVERED',
+])
+
+/**
+ * A person moves an order along the pipeline by hand.
+ *
+ * Not every parcel goes through a courier with an API. A shop delivers locally
+ * on its own rider, hands the order over at the counter, or ships with a
+ * neighbourhood service that reports nothing back — and those orders are still
+ * orders: the stock has to leave, the cash has to be recorded, and the customer
+ * still asks where it is. Without this they sit at PENDING forever and the
+ * merchant's own order list stops describing their business.
+ *
+ * Everything the courier path does on the way past a state happens here too,
+ * through the same helpers rather than a parallel copy of them: stock is
+ * consumed once when the goods go out, restocked once if they come back, and
+ * the customer's tracking link is minted so there is a page to send. The only
+ * difference is who asserted the state — recorded on the order's timeline with
+ * the name of whoever pressed the button.
+ */
+export async function setOrderWorkflowState(
+  organizationId: string,
+  orderId: string,
+  input: {
+    state: OrderWorkflowState
+    note?: string
+    /**
+     * Whether to book the outstanding balance as collected. A hand delivery is
+     * usually cash in hand, but not always — the merchant says which, because
+     * guessing writes fiction into the ledger either way.
+     */
+    recordPayment?: boolean
+  }
+) {
+  const { session } = await requireHumanOrgAccess(organizationId, 'EDITOR')
+
+  if (!isManualWorkflowState(input.state)) {
+    throw new Error('That delivery status cannot be set by hand')
+  }
+
+  const order = await prisma.order.findFirst({
+    where: { id: orderId, organizationId },
+    select: {
+      id: true,
+      workflowState: true,
+      cancelledAt: true,
+      totalCents: true,
+      paidTotalCents: true,
+      shipments: {
+        orderBy: { createdAt: 'desc' },
+        take: 1,
+        select: { id: true, consignmentId: true },
+      },
+    },
+  })
+  if (!order) throw new Error('Order not found')
+  if (order.cancelledAt) throw new Error('This order has been cancelled')
+
+  const state = input.state
+  const note = input.note?.trim()
+  const label = WORKFLOW_STATE_LABEL[state]
+  const now = new Date()
+
+  await prisma.$transaction(async (tx) => {
+    await tx.order.update({
+      where: { id: orderId },
+      data: { workflowState: state, workflowUpdatedAt: now },
+    })
+
+    await tx.orderEvent.create({
+      data: {
+        orderId,
+        type: 'workflow_state_set',
+        message: note
+          ? `Delivery status set to "${label}" by hand — ${note}`
+          : `Delivery status set to "${label}" by hand`,
+        actorUserId: session.user.id,
+      },
+    })
+
+    // An order that is also at a courier has two sources of truth, and the
+    // courier wins: the order's state is derived from its parcels, so the next
+    // webhook or reconciliation poll would put this straight back where the
+    // courier last left it. Writing the correction onto the consignment as well
+    // is what makes it hold — and it is honest, because a merchant who marks a
+    // parcel delivered is telling us the courier's last word is stale.
+    const shipment = order.shipments[0]
+    const shipmentStatus = shipmentStatusFor(state)
+    if (shipment?.consignmentId && shipmentStatus) {
+      await tx.courierShipment.update({
+        where: { id: shipment.id },
+        data: {
+          status: shipmentStatus,
+          statusMessage: note ? `Set by hand — ${note}` : 'Set by hand',
+          lastEventAt: now,
+          ...(shipmentStatus === 'DELIVERED' ? { deliveredAt: now } : {}),
+        },
+      })
+
+      await tx.courierShipmentEvent.create({
+        data: {
+          shipmentId: shipment.id,
+          status: shipmentStatus,
+          message: note
+            ? `${label} — ${note}`
+            : `${label}, set by the merchant`,
+          source: 'SYSTEM',
+          occurredAt: now,
+        },
+      })
+    }
+  })
+
+  // Each of these is idempotent on its own timestamp, so walking an order up
+  // the ladder one state at a time moves the stock exactly once — the same
+  // guarantee the courier path relies on when a parcel emits four events.
+  if (STATES_THAT_SHIP.has(state)) {
+    await consumeStockForDispatch(
+      organizationId,
+      orderId,
+      `manual:${orderId}`,
+      'Marked as sent out by hand — stock released'
+    )
+  }
+
+  if (state === 'RETURNED') {
+    await restockReturnedParcel(
+      organizationId,
+      orderId,
+      'Marked as returned by hand — stock returned to inventory'
+    )
+  }
+
+  if (
+    input.recordPayment &&
+    (state === 'DELIVERED' || state === 'PARTIALLY_DELIVERED') &&
+    order.totalCents > order.paidTotalCents
+  ) {
+    await markOrderPaid(organizationId, orderId)
+  }
+
+  // Minted here for the same reason dispatch mints it: this is the moment
+  // there is something for the customer to follow. A shop's own delivery has
+  // no courier page to link to, so this is the only tracking page there is.
+  const trackingToken = await ensureTrackingToken(orderId)
+
+  await emitOrderWebhook(organizationId, orderId, 'ORDER_UPDATED')
+
+  return { ok: true as const, trackingToken }
+}
+
 // ── Inbound status updates ───────────────────────────────────────────────
 
 export interface IncomingCourierEvent {
@@ -1102,7 +1267,14 @@ async function syncOrderFromShipments(
 async function consumeStockForDispatch(
   organizationId: string,
   orderId: string,
-  shipmentId: string
+  /**
+   * What the inventory ledger will name as the cause. A consignment id for a
+   * courier pickup, `manual:<order>` for goods a merchant handed over
+   * themselves — either way the adjustment has to point back at something a
+   * person can look up.
+   */
+  reference: string,
+  message = 'Courier collected the parcel — stock released'
 ): Promise<void> {
   const order = await prisma.order.findFirst({
     where: { id: orderId, organizationId },
@@ -1138,7 +1310,7 @@ async function consumeStockForDispatch(
   await prisma.$transaction(async (tx) => {
     await consumeCommittedStock(
       tx,
-      shipmentId,
+      reference,
       locationId,
       shipped.map((line) => ({
         variantId: line.variantId ?? '',
@@ -1156,7 +1328,7 @@ async function consumeStockForDispatch(
       data: {
         orderId,
         type: 'stock_consumed',
-        message: 'Courier collected the parcel — stock released',
+        message,
       },
     })
   })
@@ -1243,7 +1415,8 @@ async function settleCashOnDelivery(
  */
 async function restockReturnedParcel(
   organizationId: string,
-  orderId: string
+  orderId: string,
+  message = 'Courier returned the parcel — stock returned to inventory'
 ): Promise<void> {
   const order = await prisma.order.findFirst({
     where: { id: orderId, organizationId },
@@ -1317,7 +1490,7 @@ async function restockReturnedParcel(
       data: {
         orderId,
         type: 'parcel_returned',
-        message: 'Courier returned the parcel — stock returned to inventory',
+        message,
       },
     })
   })

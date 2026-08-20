@@ -180,6 +180,79 @@ export function workflowStateFor(
 }
 
 /**
+ * The states a person is allowed to assert by hand.
+ *
+ * Everything a courier reports is derived — a webhook says the parcel moved and
+ * the order follows it. But plenty of orders never touch a courier: the shop's
+ * own rider takes them across town, the customer collects at the counter, or
+ * the parcel goes out with a local service that has no API to call back. Those
+ * orders still have to be tracked, so the same ladder is writable by a merchant.
+ *
+ * PENDING and FRAUD_REVIEW are missing because they are screening outcomes
+ * rather than delivery facts — putting an order back into review is asking for
+ * a re-check, which has its own button. CANCELLED is missing because cancelling
+ * returns stock and closes the order, which is the cancel flow's job and not
+ * something to reach by way of a status dropdown.
+ */
+export const MANUAL_WORKFLOW_STATES = [
+  'PROCESSING',
+  'DISPATCHED',
+  'IN_TRANSIT',
+  'OUT_FOR_DELIVERY',
+  'DELIVERED',
+  'PARTIALLY_DELIVERED',
+  'RETURNED',
+  'FAILED',
+] as const satisfies readonly OrderWorkflowState[]
+
+export type ManualWorkflowState = (typeof MANUAL_WORKFLOW_STATES)[number]
+
+/** Guards the server action, which is a public endpoint like any other. */
+export function isManualWorkflowState(
+  value: unknown
+): value is ManualWorkflowState {
+  return (MANUAL_WORKFLOW_STATES as readonly unknown[]).includes(value)
+}
+
+/**
+ * The parcel status an order state implies — `workflowStateFor` backwards.
+ *
+ * Only needed when a merchant corrects an order that *also* has a consignment.
+ * The order's state is derived from its parcels, so a correction written to the
+ * order alone survives until the next reconciliation sweep and no longer;
+ * writing it onto the parcel as well is what makes it stick.
+ *
+ * Deliberately not total. PROCESSING describes an order nobody has picked up
+ * yet, and there is no parcel status for "still on the shelf".
+ */
+export function shipmentStatusFor(
+  state: OrderWorkflowState
+): CourierShipmentStatus | null {
+  switch (state) {
+    case 'DISPATCHED':
+      return 'PICKED_UP'
+    case 'IN_TRANSIT':
+      return 'IN_TRANSIT'
+    case 'OUT_FOR_DELIVERY':
+      return 'OUT_FOR_DELIVERY'
+    case 'DELIVERED':
+      return 'DELIVERED'
+    case 'PARTIALLY_DELIVERED':
+      return 'PARTIALLY_DELIVERED'
+    case 'RETURNED':
+      return 'RETURNED'
+    case 'CANCELLED':
+      return 'CANCELLED'
+    case 'FAILED':
+      return 'DELIVERY_FAILED'
+    case 'PENDING':
+    case 'FRAUD_REVIEW':
+    case 'PROCESSING':
+      return null
+  }
+}
+
+/**
  * Whether a parcel has stopped moving.
  *
  * Used by the reconciliation sweep to stop polling: a delivered or returned

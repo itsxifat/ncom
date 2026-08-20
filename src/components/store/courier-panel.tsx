@@ -5,9 +5,11 @@ import { useRouter } from 'next/navigation'
 import {
   AlertTriangle,
   Check,
+  ClipboardCopy,
   ExternalLink,
   Loader2,
   PackageCheck,
+  PencilLine,
   RefreshCw,
   Send,
   ShieldAlert,
@@ -19,11 +21,20 @@ import {
   dispatchOrderAction,
   recheckOrderFraudAction,
   rejectOrderAction,
+  setOrderStatusAction,
 } from '@/app/(dashboard)/courier-actions'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
+import { Switch } from '@/components/ui/switch'
+import { FormSelect } from '@/components/ui/form-select'
+import { formatMoney } from '@/lib/money'
+import {
+  MANUAL_WORKFLOW_STATES,
+  WORKFLOW_STATE_LABEL,
+  type ManualWorkflowState,
+} from '@/server/courier/statusMap'
 import {
   FraudStats,
   FraudVerdictBadge,
@@ -72,6 +83,11 @@ export interface CourierPanelProps {
   shipment: CourierPanelShipment | null
   /** Couriers switched on for this workspace, for the dispatch picker. */
   providers: { provider: CourierProvider; label: string; isDefault: boolean }[]
+  /** What is still owed, so a hand delivery can book the cash it collected. */
+  outstandingCents: number
+  currencyCode: string
+  /** The customer's tracking page, once one has been minted. */
+  trackingToken: string | null
 }
 
 /**
@@ -89,6 +105,9 @@ export function CourierPanel({
   fraud,
   shipment,
   providers,
+  outstandingCents,
+  currencyCode,
+  trackingToken,
 }: CourierPanelProps) {
   const router = useRouter()
 
@@ -147,6 +166,21 @@ export function CourierPanel({
             />
           )
         )}
+
+        {/* Last, because it is the fallback: the merchant reaches for it when
+            no courier is doing the reporting, or when the one that is has got
+            it wrong. */}
+        {!cancelled && (
+          <ManualStatusBlock
+            orderId={orderId}
+            workflowState={workflowState}
+            withCourier={Boolean(shipment?.consignmentId)}
+            outstandingCents={outstandingCents}
+            currencyCode={currencyCode}
+          />
+        )}
+
+        {trackingToken && <TrackingLink token={trackingToken} />}
       </CardContent>
     </Card>
   )
@@ -419,6 +453,186 @@ function DispatchBlock({
       </div>
 
       {error && <p className="text-destructive text-sm">{error}</p>}
+    </div>
+  )
+}
+
+/**
+ * Moving an order by hand.
+ *
+ * The pipeline is built around couriers that report back, and most orders in
+ * this market do go out that way. The ones that do not are not edge cases: a
+ * shop's own rider covers the neighbourhood, a customer collects at the shop,
+ * a wholesale order goes out on a van. Those orders need the same ladder, and
+ * without this control they stay PENDING forever while the merchant remembers
+ * their real state in their head.
+ *
+ * Offered even when a courier *is* carrying the parcel, because the other half
+ * of this problem is a courier whose webhook never arrived. What it says then
+ * is written onto the consignment too, so the correction is not undone by the
+ * next reconciliation sweep.
+ */
+function ManualStatusBlock({
+  orderId,
+  workflowState,
+  withCourier,
+  outstandingCents,
+  currencyCode,
+}: {
+  orderId: string
+  workflowState: OrderWorkflowState
+  withCourier: boolean
+  outstandingCents: number
+  currencyCode: string
+}) {
+  const router = useRouter()
+  const [pending, start] = useTransition()
+  const [error, setError] = useState<string | null>(null)
+  const [done, setDone] = useState(false)
+
+  // Starts on where the order already is, when that is a state a person is
+  // allowed to set. Anything else — screening states — starts at the first
+  // step, because those orders have not physically moved yet.
+  const [state, setState] = useState<ManualWorkflowState>(
+    MANUAL_WORKFLOW_STATES.find((value) => value === workflowState) ??
+      'PROCESSING'
+  )
+  const [note, setNote] = useState('')
+  const [recordPayment, setRecordPayment] = useState(true)
+
+  const arrived = state === 'DELIVERED' || state === 'PARTIALLY_DELIVERED'
+  const canSettle = arrived && outstandingCents > 0
+
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border p-4">
+      <div className="flex items-start gap-2">
+        <PencilLine className="mt-0.5 size-4 shrink-0" />
+        <div className="min-w-0">
+          <p className="font-medium">Set the status yourself</p>
+          <p className="text-muted-foreground text-sm text-pretty">
+            {withCourier
+              ? 'This order is with a courier. Setting a status here overrides what they last reported — use it when their updates have stopped.'
+              : 'For orders you deliver yourself or hand over outside a courier. The customer’s tracking page shows whatever you set here.'}
+          </p>
+        </div>
+      </div>
+
+      <Input
+        value={note}
+        onChange={(event) => setNote(event.target.value)}
+        placeholder="What happened? (optional, kept on the order)"
+      />
+
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        {/* The trigger is `w-full` at this size, so the width lives on a
+            wrapper rather than fighting the variant for it. */}
+        <div className="sm:w-56">
+          <FormSelect
+            value={state}
+            onChange={(event) =>
+              setState(event.target.value as ManualWorkflowState)
+            }
+            aria-label="Delivery status"
+          >
+            {MANUAL_WORKFLOW_STATES.map((value) => (
+              <option key={value} value={value}>
+                {WORKFLOW_STATE_LABEL[value]}
+              </option>
+            ))}
+          </FormSelect>
+        </div>
+
+        <Button
+          type="button"
+          size="sm"
+          disabled={pending}
+          onClick={() =>
+            start(async () => {
+              setError(null)
+              setDone(false)
+              const result = await setOrderStatusAction(orderId, state, {
+                note: note.trim() || undefined,
+                recordPayment: canSettle && recordPayment,
+              })
+              if (result.ok) {
+                setDone(true)
+                setNote('')
+              } else {
+                setError(result.error ?? 'Could not update the status')
+              }
+              router.refresh()
+            })
+          }
+        >
+          {pending ? <Loader2 className="animate-spin" /> : <Check />}
+          Update status
+        </Button>
+      </div>
+
+      {/* Only when there is money outstanding and the goods have arrived.
+          Marking a parcel delivered is not the same claim as saying the rider
+          came back with the cash, and a shop that gets paid by bank transfer
+          would find its ledger quietly invented otherwise. */}
+      {canSettle && (
+        <label className="flex items-center gap-2 text-sm">
+          <Switch checked={recordPayment} onCheckedChange={setRecordPayment} />
+          Record {formatMoney(outstandingCents, currencyCode)} as collected
+        </label>
+      )}
+
+      {error && <p className="text-destructive text-sm">{error}</p>}
+      {done && !error && (
+        <p className="text-muted-foreground text-sm">
+          Status updated to {WORKFLOW_STATE_LABEL[state]}.
+        </p>
+      )}
+    </div>
+  )
+}
+
+/**
+ * The customer's tracking page, for a merchant to send on.
+ *
+ * A cash-on-delivery buyer has no account and often no email, so the link gets
+ * to them over whatever the shop actually uses — which in practice is a message
+ * pasted into WhatsApp. That makes "copy" the whole feature.
+ */
+function TrackingLink({ token }: { token: string }) {
+  const [copied, setCopied] = useState(false)
+  const path = `/track/${token}`
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3">
+      <div className="min-w-0">
+        <p className="text-sm font-medium">Customer tracking link</p>
+        <p className="text-muted-foreground truncate text-xs">{path}</p>
+      </div>
+      <div className="flex shrink-0 gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={async () => {
+            await navigator.clipboard.writeText(
+              new URL(path, window.location.origin).toString()
+            )
+            setCopied(true)
+          }}
+        >
+          {copied ? <Check /> : <ClipboardCopy />}
+          {copied ? 'Copied' : 'Copy'}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          nativeButton={false}
+          render={<a href={path} target="_blank" rel="noreferrer" />}
+        >
+          Open
+          <ExternalLink />
+        </Button>
+      </div>
     </div>
   )
 }

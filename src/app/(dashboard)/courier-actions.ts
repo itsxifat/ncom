@@ -31,6 +31,7 @@ import {
   dispatchOrder,
   rejectHeldOrder,
   rescreenOrder,
+  setOrderWorkflowState,
 } from '@/server/services/courierService'
 import {
   addFraudAccount,
@@ -48,6 +49,7 @@ import {
 import { getOrganizationSettings } from '@/server/services/organizationSettingsService'
 import { minorUnitsPerMajor } from '@/lib/money'
 import type { CourierProvider } from '@/generated/prisma/enums'
+import type { ManualWorkflowState } from '@/server/courier/statusMap'
 
 export type CourierActionState =
   { error?: string; success?: string } | undefined
@@ -418,6 +420,35 @@ export async function dispatchOrderAction(
     return result.ok
       ? { ok: true as const }
       : { ok: false as const, error: result.error ?? 'Dispatch failed' }
+  } catch (cause) {
+    return { ok: false as const, error: fail(cause)?.error }
+  }
+}
+
+/**
+ * Moves an order's delivery status by hand.
+ *
+ * The escape hatch for every order a courier integration never sees: a shop's
+ * own rider, a counter pickup, a local service that phones rather than posts a
+ * webhook. Editor-level for the same reason approving a held order is — this is
+ * the job of whoever is packing parcels this morning, and putting it behind an
+ * admin means the order list is wrong until someone senior logs in.
+ */
+export async function setOrderStatusAction(
+  orderId: string,
+  state: ManualWorkflowState,
+  options: { note?: string; recordPayment?: boolean } = {}
+) {
+  try {
+    await setOrderWorkflowState(await org(), orderId, {
+      state,
+      note: options.note,
+      recordPayment: options.recordPayment,
+    })
+
+    revalidatePath(`/orders/${orderId}`)
+    revalidatePath('/orders')
+    return { ok: true as const }
   } catch (cause) {
     return { ok: false as const, error: fail(cause)?.error }
   }

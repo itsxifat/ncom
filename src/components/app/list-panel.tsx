@@ -38,12 +38,31 @@ export function ListPanelHeader({
   )
 }
 
-export function ListRow({ className, ...props }: React.ComponentProps<'div'>) {
+/**
+ * One row.
+ *
+ * `interactive` makes the whole row a click target for the link inside it: the
+ * row becomes the positioning context, and the link stretches a transparent
+ * pseudo-element across it with `after:absolute after:inset-0`. It is done that
+ * way — rather than wrapping the row in an anchor or hanging an onClick off the
+ * div — because the link stays a real link: it is reachable by keyboard, it
+ * opens in a new tab on middle click, and screen readers announce the row's
+ * title rather than the whole row's text as the destination.
+ *
+ * Anything else in the row that has to stay clickable needs its own stacking
+ * context (`relative z-10`) to sit above that overlay.
+ */
+export function ListRow({
+  className,
+  interactive,
+  ...props
+}: React.ComponentProps<'div'> & { interactive?: boolean }) {
   return (
     <div
       data-slot="list-row"
       className={cn(
-        'flex flex-col gap-3 px-5 py-4 transition-colors sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:px-6',
+        'relative flex flex-col gap-3 px-5 py-4 transition-colors sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:px-6',
+        interactive && 'hover:bg-muted/50 focus-within:bg-muted/50',
         className
       )}
       {...props}

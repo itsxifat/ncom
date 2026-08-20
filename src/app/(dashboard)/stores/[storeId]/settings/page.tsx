@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { getActiveOrganization } from '@/server/services/organizationService'
-import { getStore, getStoreIntegration } from '@/server/services/storeService'
+import { getStore } from '@/server/services/storeService'
 import { domainTargets, listDomains } from '@/server/services/domainService'
 import { getEntitlements } from '@/server/services/entitlementService'
 import { countCustomDomains } from '@/server/services/usageService'
@@ -10,13 +10,15 @@ import { formatQuota, remainingQuota } from '@/lib/plans'
 import { SettingsSection } from '@/components/app/settings-section'
 import { StoreDetailsForm } from '@/components/dashboard/store-details-form'
 import { DomainManager } from '@/components/dashboard/domain-manager'
-import { IntegrationForm } from '@/components/dashboard/integration-form'
-import { TrackingDeliveryList } from '@/components/dashboard/tracking-delivery-list'
 import { PageShell } from '@/components/app/page-shell'
-import { recentTrackingDeliveries } from '@/server/services/trackingService'
 
 /**
- * A store owns its address and its tracking, and nothing else.
+ * A store owns its address, and nothing else.
+ *
+ * Tracking moved to /tracking, where every store's pixels and Conversions API
+ * credentials are edited side by side — the question "which of my sites stopped
+ * reporting" is a workspace question, and answering it here meant opening one
+ * settings page per store and remembering what the last one said.
  *
  * Currency, tax basis, order numbering and customer accounts used to be edited
  * here through `StoreSettingsForm`, but they are `OrganizationSettings` fields:
@@ -37,9 +39,6 @@ export default async function StoreSettingsPage({
   } catch {
     notFound()
   }
-
-  const integration = await getStoreIntegration(organization.id, storeId)
-  const deliveries = await recentTrackingDeliveries(organization.id, store.id)
 
   // Domains are quota'd per workspace, not per store, so the remaining count has
   // to come from the whole organisation — a tenant with one domain left should
@@ -95,37 +94,14 @@ export default async function StoreSettingsPage({
       </SettingsSection>
 
       <SettingsSection
-        title="Integrations"
-        description="Analytics and tracking scripts injected into every published page in this store."
-      >
-        <IntegrationForm
-          key={integration?.updatedAt.toISOString()}
-          storeId={store.id}
-          gaMeasurementId={integration?.gaMeasurementId ?? null}
-          gtmContainerId={integration?.gtmContainerId ?? null}
-          metaPixelId={integration?.metaPixelId ?? null}
-          customHeadScript={integration?.customHeadScript ?? null}
-          metaTestEventCode={integration?.metaTestEventCode ?? null}
-          hasMetaAccessToken={integration?.hasMetaAccessToken ?? false}
-          hasGa4ApiSecret={integration?.hasGa4ApiSecret ?? false}
-        />
-      </SettingsSection>
-
-      {deliveries.length > 0 && (
-        <SettingsSection
-          title="Recent conversions"
-          description="The last sales this server reported to Meta and Google. Page views are sent too, but are not logged here."
-        >
-          <TrackingDeliveryList deliveries={deliveries} />
-        </SettingsSection>
-      )}
-
-      <SettingsSection
-        title="Workspace settings"
-        description="Currency, tax, shipping, payments and order numbering are shared by every store in this workspace."
+        title="Elsewhere"
+        description="Tracking is set up for every store together under Tracking. Currency, tax, shipping, payments and order numbering are shared by every store in this workspace."
       >
         <div className="flex flex-wrap gap-2">
           {[
+            // Tracking first: it used to be edited on this page, and this is
+            // the pointer for anyone who came here looking for it.
+            { href: '/tracking', label: 'Pixels & tracking' },
             { href: '/settings/payments', label: 'Payments' },
             { href: '/settings/shipping', label: 'Shipping' },
             { href: '/settings/taxes', label: 'Taxes' },

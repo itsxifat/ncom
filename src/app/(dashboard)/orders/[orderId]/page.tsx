@@ -188,6 +188,9 @@ export default async function OrderDetailPage({
                 label: config.displayName,
                 isDefault: config.isDefault,
               }))}
+            outstandingCents={outstandingCents}
+            currencyCode={currency}
+            trackingToken={order.trackingToken}
           />
 
           <Card>
