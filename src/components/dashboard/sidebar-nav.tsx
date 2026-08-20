@@ -22,6 +22,7 @@ import {
   Webhook,
   Truck,
   BarChart3,
+  ScanLine,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -43,6 +44,7 @@ const NAV_GROUPS: Array<{ label: string | null; items: NavItem[] }> = [
     label: 'Sell',
     items: [
       { href: '/orders', label: 'Orders', icon: ShoppingCart },
+      { href: '/scan', label: 'Scan', icon: ScanLine },
       { href: '/analytics', label: 'Analytics', icon: BarChart3 },
       { href: '/tracking', label: 'Tracking', icon: Activity },
       { href: '/products', label: 'Products', icon: Package },

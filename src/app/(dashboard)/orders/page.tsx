@@ -2,22 +2,12 @@ import Link from 'next/link'
 import { ShoppingBag } from 'lucide-react'
 import { getActiveOrganization } from '@/server/services/organizationService'
 import { listOrders } from '@/server/services/orderService'
-import { formatMoney } from '@/lib/money'
-import { Badge } from '@/components/ui/badge'
+import { listStores } from '@/server/services/storeService'
 import { EmptyState } from '@/components/app/empty-state'
-import {
-  ListPanel,
-  ListPanelHeader,
-  ListRow,
-  ListRowActions,
-  ListRowText,
-} from '@/components/app/list-panel'
+import { OrderList } from '@/components/store/order-list'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { FinancialStatusBadge } from '@/components/store/status-badges'
-import { Money } from '@/components/store/form-controls'
 import { FormSelect } from '@/components/ui/form-select'
-import { WorkflowStateBadge } from '@/components/store/fraud-badges'
 import { WORKFLOW_STATE_LABEL } from '@/server/courier/statusMap'
 
 const PAGE_SIZE = 50
@@ -62,17 +52,43 @@ export default async function OrdersPage({
   const page = Math.max(1, Number(query.page) || 1)
 
   const { organization } = await getActiveOrganization()
+
+  const stores = await listStores(organization.id)
+  // A store id from the query string is only honoured if it is one of this
+  // workspace's own — `listOrders` scopes by organisation regardless, but a
+  // filter that silently matched nothing would read as "no orders today".
+  const storeId = stores.find((store) => store.id === query.store)?.id
+
   const { items, total } = await listOrders(organization.id, {
     search,
     financialStatus,
     workflowState,
+    storeId,
     take: PAGE_SIZE,
     skip: (page - 1) * PAGE_SIZE,
   })
 
   const base = `/orders`
 
-  if (total === 0 && !search && !financialStatus && !workflowState) {
+  // Paging must not drop the filters. It did, so page two of "waiting for
+  // review" was page two of everything, which reads as the queue having
+  // silently refilled.
+  const pageQuery = (next: number) =>
+    new URLSearchParams({
+      ...(search ? { q: search } : {}),
+      ...(financialStatus ? { financial: financialStatus } : {}),
+      ...(workflowState ? { delivery: workflowState } : {}),
+      ...(storeId ? { store: storeId } : {}),
+      page: String(next),
+    }).toString()
+
+  if (
+    total === 0 &&
+    !search &&
+    !financialStatus &&
+    !workflowState &&
+    !storeId
+  ) {
     return (
       <EmptyState
         icon={ShoppingBag}
@@ -91,6 +107,19 @@ export default async function OrdersPage({
           placeholder="Search order number or email"
           className="w-full sm:w-72"
         />
+        {/* Which site sold it. A workspace runs several landing pages and
+            packs them separately, so "today's parcels for this store" is the
+            filter a print run starts from. */}
+        {stores.length > 1 && (
+          <FormSelect name="store" defaultValue={storeId ?? ''}>
+            <option value="">Every store</option>
+            {stores.map((store) => (
+              <option key={store.id} value={store.id}>
+                {store.name}
+              </option>
+            ))}
+          </FormSelect>
+        )}
         <FormSelect name="financial" defaultValue={financialStatus ?? ''}>
           <option value="">Any payment status</option>
           {FINANCIAL_VALUES.map((value) => (
@@ -130,77 +159,32 @@ export default async function OrdersPage({
           description="Try clearing the filters."
         />
       ) : (
-        <ListPanel>
-          <ListPanelHeader>
-            <p className="text-muted-foreground text-sm">
-              {total} {total === 1 ? 'order' : 'orders'}
-            </p>
-          </ListPanelHeader>
-
-          {items.map((order) => {
-            const itemCount = order.lines.reduce(
+        <OrderList
+          base={base}
+          total={total}
+          orders={items.map((order) => ({
+            id: order.id,
+            orderNumber: order.orderNumber,
+            customerName:
+              [order.customer?.firstName, order.customer?.lastName]
+                .filter(Boolean)
+                .join(' ') ||
+              order.email ||
+              'Guest',
+            itemCount: order.lines.reduce(
               (sum, line) => sum + line.quantity,
               0
-            )
-            const customerName = [
-              order.customer?.firstName,
-              order.customer?.lastName,
-            ]
-              .filter(Boolean)
-              .join(' ')
-
-            return (
-              // The whole row opens the order. A merchant works down this
-              // list all day and the order number is a five-character target;
-              // the link is still the number, it just claims the row.
-              <ListRow key={order.id} interactive>
-                <ListRowText
-                  title={
-                    <Link
-                      href={`${base}/${order.id}`}
-                      className="after:absolute after:inset-0 hover:underline"
-                    >
-                      {order.orderNumber}
-                    </Link>
-                  }
-                  meta={
-                    <>
-                      {customerName || order.email} · {itemCount}{' '}
-                      {itemCount === 1 ? 'item' : 'items'} ·{' '}
-                      {order.createdAt.toLocaleDateString()}
-                    </>
-                  }
-                  badges={
-                    <>
-                      <FinancialStatusBadge status={order.financialStatus} />
-                      {/* Where the parcel is. Shown beside the money statuses
-                          because in a cash-on-delivery market they answer
-                          different halves of "is this order done". */}
-                      <WorkflowStateBadge state={order.workflowState} />
-                      {/* Which storefront sold it. One catalogue can be sold
-                          from several landing pages, so this is how a merchant
-                          tells which page is actually working. */}
-                      {order.store && (
-                        <Badge variant="outline">{order.store.name}</Badge>
-                      )}
-                      {order.page && (
-                        <Badge variant="outline">{order.page.title}</Badge>
-                      )}
-                      {order.offerLabel && (
-                        <Badge variant="secondary">{order.offerLabel}</Badge>
-                      )}
-                    </>
-                  }
-                />
-                <ListRowActions>
-                  <Money>
-                    {formatMoney(order.totalCents, order.currencyCode)}
-                  </Money>
-                </ListRowActions>
-              </ListRow>
-            )
-          })}
-        </ListPanel>
+            ),
+            placedOn: order.createdAt.toLocaleDateString(),
+            financialStatus: order.financialStatus,
+            workflowState: order.workflowState,
+            storeName: order.store?.name ?? null,
+            pageTitle: order.page?.title ?? null,
+            offerLabel: order.offerLabel,
+            totalCents: order.totalCents,
+            currencyCode: order.currencyCode,
+          }))}
+        />
       )}
 
       {total > PAGE_SIZE && (
@@ -208,7 +192,7 @@ export default async function OrdersPage({
           {page > 1 ? (
             <Button
               variant="outline"
-              render={<Link href={`${base}?page=${page - 1}`} />}
+              render={<Link href={`${base}?${pageQuery(page - 1)}`} />}
               nativeButton={false}
             >
               Previous
@@ -219,7 +203,7 @@ export default async function OrdersPage({
           {page * PAGE_SIZE < total && (
             <Button
               variant="outline"
-              render={<Link href={`${base}?page=${page + 1}`} />}
+              render={<Link href={`${base}?${pageQuery(page + 1)}`} />}
               nativeButton={false}
             >
               Next

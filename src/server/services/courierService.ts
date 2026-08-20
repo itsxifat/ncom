@@ -6,7 +6,13 @@ import { requireOrgAccess, requireHumanOrgAccess } from '@/server/auth/rbac'
 import { emitWebhook } from './webhookService'
 import { sendEmail } from './emailService'
 import { orderDispatchedEmail } from '@/server/email/templates'
-import { cancelOrder, emitOrderWebhook, markOrderPaid } from './orderService'
+import {
+  cancelOrder,
+  emitOrderWebhook,
+  markOrderPaid,
+  orderLineImageUrl,
+  ORDER_LINE_IMAGE_SELECT,
+} from './orderService'
 import {
   consumeCommittedStock,
   resolveStoreLocationId,
@@ -1973,7 +1979,16 @@ export async function trackParcelByToken(token: string) {
       paidTotalCents: true,
       store: { select: { name: true } },
       organization: { select: { name: true } },
-      lines: { select: { title: true, quantity: true } },
+      // The picture as well as the title: "is this the thing I bought" is the
+      // question this page is open to answer, and a product name in a font the
+      // buyer has never seen answers it poorly.
+      lines: {
+        select: {
+          title: true,
+          quantity: true,
+          ...ORDER_LINE_IMAGE_SELECT,
+        },
+      },
       shipments: {
         orderBy: { createdAt: 'desc' },
         take: 1,
@@ -2010,7 +2025,11 @@ export async function trackParcelByToken(token: string) {
     totalCents: order.totalCents,
     currencyCode: order.currencyCode,
     amountDueCents: Math.max(0, order.totalCents - order.paidTotalCents),
-    items: order.lines,
+    items: order.lines.map((line) => ({
+      title: line.title,
+      quantity: line.quantity,
+      imageUrl: orderLineImageUrl(line),
+    })),
     courier: shipment
       ? {
           provider: shipment.provider,

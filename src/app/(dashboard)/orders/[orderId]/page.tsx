@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation'
 import { getActiveOrganization } from '@/server/services/organizationService'
-import { getOrder } from '@/server/services/orderService'
+import { getOrder, orderLineImageUrl } from '@/server/services/orderService'
 import { listLocations } from '@/server/services/shippingService'
 import {
   getShipmentForOrder,
@@ -22,6 +22,7 @@ import {
   ReturnPanel,
 } from '@/components/store/order-actions'
 import { Money } from '@/components/store/form-controls'
+import { ProductThumb } from '@/components/media/product-thumb'
 
 interface AddressShape {
   firstName?: string
@@ -87,6 +88,7 @@ export default async function OrderDetailPage({
   const lineSummaries = order.lines.map((line) => ({
     id: line.id,
     title: line.title,
+    imageUrl: orderLineImageUrl(line),
     variantTitle: line.variantTitle,
     quantity: line.quantity,
     refundedQuantity: line.refundedQuantity,
@@ -205,25 +207,34 @@ export default async function OrderDetailPage({
                     key={line.id}
                     className="flex items-start justify-between gap-4 py-3 first:pt-0 last:pb-0"
                   >
-                    <div className="min-w-0">
-                      <p className="font-medium">{line.title}</p>
-                      {line.variantTitle &&
-                        line.variantTitle !== 'Default Title' && (
-                          <p className="text-muted-foreground text-sm">
-                            {line.variantTitle}
-                          </p>
-                        )}
-                      <p className="text-muted-foreground mt-1 text-sm">
-                        {line.sku && <>SKU {line.sku} · </>}
-                        {formatMoney(line.unitPriceCents, currency)} ×{' '}
-                        {line.quantity}
-                        {line.returnedQuantity > 0 && (
-                          <> · {line.returnedQuantity} returned</>
-                        )}
-                        {line.refundedQuantity > 0 && (
-                          <> · {line.refundedQuantity} refunded</>
-                        )}
-                      </p>
+                    <div className="flex min-w-0 gap-3">
+                      {/* What a packer actually recognises the goods by. Click
+                          for the full picture — the thumbnail is too small to
+                          tell two colourways apart. */}
+                      <ProductThumb
+                        src={orderLineImageUrl(line)}
+                        alt={line.title}
+                      />
+                      <div className="min-w-0">
+                        <p className="font-medium">{line.title}</p>
+                        {line.variantTitle &&
+                          line.variantTitle !== 'Default Title' && (
+                            <p className="text-muted-foreground text-sm">
+                              {line.variantTitle}
+                            </p>
+                          )}
+                        <p className="text-muted-foreground mt-1 text-sm">
+                          {line.sku && <>SKU {line.sku} · </>}
+                          {formatMoney(line.unitPriceCents, currency)} ×{' '}
+                          {line.quantity}
+                          {line.returnedQuantity > 0 && (
+                            <> · {line.returnedQuantity} returned</>
+                          )}
+                          {line.refundedQuantity > 0 && (
+                            <> · {line.refundedQuantity} refunded</>
+                          )}
+                        </p>
+                      </div>
                     </div>
                     <div className="text-right">
                       <Money>{formatMoney(line.totalCents, currency)}</Money>

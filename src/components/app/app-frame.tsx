@@ -58,12 +58,18 @@ export function AppFrame({
     setMobileOpen(false)
   }
 
+  // The brand and the workspace switcher are the rail's fixed frame: they name
+  // where you are, so they stay put while only the list of destinations moves.
   const railContent = (
     <>
-      <div className="px-1 pt-1">{brand}</div>
-      {railHeader}
-      {nav}
-      {railFooter && <div className="mt-auto">{railFooter}</div>}
+      <div className="flex shrink-0 flex-col gap-6">
+        <div className="px-1 pt-1">{brand}</div>
+        {railHeader}
+      </div>
+      <div className="min-h-0 flex-1 scrollbar-none overflow-x-hidden overflow-y-auto">
+        {nav}
+      </div>
+      {railFooter && <div className="shrink-0">{railFooter}</div>}
     </>
   )
 
@@ -84,16 +90,18 @@ export function AppFrame({
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
         <SheetContent
           side="left"
-          className="bg-sidebar text-sidebar-foreground scrollbar-rail w-76 overflow-y-auto p-4 data-[side=left]:sm:max-w-none"
+          className="bg-sidebar text-sidebar-foreground w-76 overflow-hidden p-4 data-[side=left]:sm:max-w-none"
         >
           <SheetHeader className="sr-only p-0">
             <SheetTitle>Navigation</SheetTitle>
           </SheetHeader>
-          <div className="flex h-full flex-col gap-6">{railContent}</div>
+          <div className="flex h-full min-h-0 flex-col gap-6">
+            {railContent}
+          </div>
         </SheetContent>
       </Sheet>
 
-      <aside className="bg-sidebar text-sidebar-foreground scrollbar-rail sticky top-4 hidden h-[calc(100svh-2rem)] w-60 shrink-0 flex-col gap-6 overflow-y-auto rounded-2xl p-4 lg:flex xl:w-68">
+      <aside className="bg-sidebar text-sidebar-foreground sticky top-4 hidden h-[calc(100svh-2rem)] w-60 shrink-0 flex-col gap-6 overflow-hidden rounded-2xl p-4 lg:flex xl:w-68">
         {railContent}
       </aside>
 

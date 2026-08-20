@@ -34,7 +34,13 @@ const PROTECTED_PREFIXES = [
   '/orders',
   '/organization',
   '/preview-render',
+  // Parcel stickers and invoices. Chrome-free and outside the dashboard
+  // layout, which is exactly why it has to be listed here — nothing else on
+  // that route would send a signed-out visitor to the login page, and the
+  // ids in its query string address other people's customers.
+  '/print',
   '/products',
+  '/scan',
   '/settings',
   '/stores',
   // Note this does NOT gate `/track/<token>`, the customer's own delivery page.

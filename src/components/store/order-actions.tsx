@@ -22,11 +22,14 @@ import {
 } from '@/components/ui/field'
 import { Card, CardContent } from '@/components/ui/card'
 import { FormSelect, MoneyInput } from '@/components/store/form-controls'
+import { ProductThumb } from '@/components/media/product-thumb'
 import { formatMoney } from '@/lib/money'
 
 export interface OrderLineSummary {
   id: string
   title: string
+  /** Null when the product was deleted, or never had a photo. */
+  imageUrl: string | null
   variantTitle: string | null
   quantity: number
   refundedQuantity: number
@@ -108,14 +111,21 @@ export function RefundPanel({
                     key={line.id}
                     className="flex items-center justify-between gap-4 rounded-lg border px-3 py-2"
                   >
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium">
-                        {line.title}
-                      </p>
-                      <p className="text-muted-foreground text-xs">
-                        {formatMoney(line.unitPriceCents, currencyCode)} each ·{' '}
-                        {max} refundable
-                      </p>
+                    <div className="flex min-w-0 items-center gap-3">
+                      <ProductThumb
+                        src={line.imageUrl}
+                        alt={line.title}
+                        size="sm"
+                      />
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium">
+                          {line.title}
+                        </p>
+                        <p className="text-muted-foreground text-xs">
+                          {formatMoney(line.unitPriceCents, currencyCode)} each
+                          · {max} refundable
+                        </p>
+                      </div>
                     </div>
                     <Input
                       type="number"
@@ -276,14 +286,21 @@ export function ReturnPanel({
                     key={line.id}
                     className="flex items-center justify-between gap-4 rounded-lg border px-3 py-2"
                   >
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium">
-                        {line.title}
-                      </p>
-                      <p className="text-muted-foreground text-xs">
-                        {formatMoney(line.unitPriceCents, currencyCode)} each ·{' '}
-                        {max} still with the customer
-                      </p>
+                    <div className="flex min-w-0 items-center gap-3">
+                      <ProductThumb
+                        src={line.imageUrl}
+                        alt={line.title}
+                        size="sm"
+                      />
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium">
+                          {line.title}
+                        </p>
+                        <p className="text-muted-foreground text-xs">
+                          {formatMoney(line.unitPriceCents, currencyCode)} each
+                          · {max} still with the customer
+                        </p>
+                      </div>
                     </div>
                     <Input
                       type="number"

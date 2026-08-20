@@ -19,8 +19,52 @@ import type { OrderWorkflowState } from '@/generated/prisma/enums'
  * counters, and merchant annotations.
  */
 
+/**
+ * The relations a line needs to show a picture.
+ *
+ * Not snapshotted onto the line the way the title and price are, and that is a
+ * deliberate difference: those are what was sold and what was charged, and an
+ * order has to keep reporting them after the product is edited or deleted. A
+ * photo is how a human recognises the goods, so the current one is the useful
+ * one — and if the product is gone, so is the picture, which costs the order
+ * nothing because everything that identifies it is already on the line.
+ */
+export const ORDER_LINE_IMAGE_SELECT = {
+  variant: {
+    select: {
+      image: { select: { media: { select: { url: true } } } },
+    },
+  },
+  product: {
+    select: {
+      images: {
+        orderBy: { position: 'asc' as const },
+        take: 1,
+        select: { media: { select: { url: true } } },
+      },
+    },
+  },
+} as const
+
+/**
+ * The picture for one line: the variant's own if it has one, else the
+ * product's first.
+ *
+ * Variant first because that is the whole point of a variant image — an order
+ * for the red one should not show a photo of the blue one, which is how a
+ * packer picks the wrong thing off the shelf.
+ */
+export function orderLineImageUrl(line: {
+  variant?: { image?: { media: { url: string } } | null } | null
+  product?: { images: { media: { url: string } }[] } | null
+}): string | null {
+  return (
+    line.variant?.image?.media.url ?? line.product?.images[0]?.media.url ?? null
+  )
+}
+
 const ORDER_INCLUDE = {
-  lines: true,
+  lines: { include: ORDER_LINE_IMAGE_SELECT },
   transactions: { orderBy: { createdAt: 'asc' as const } },
   returns: { include: { lines: true } },
   refunds: { include: { lines: true } },
@@ -46,6 +90,12 @@ export async function listOrders(
       | 'VOIDED'
     /** Where the order sits in the courier pipeline — see OrderWorkflowState. */
     workflowState?: OrderWorkflowState
+    /**
+     * One storefront's orders. Filtered on the order's own `storeId` rather
+     * than through the relation, so it keeps meaning "sold by this site" and
+     * does not quietly hide orders whose site was deleted.
+     */
+    storeId?: string
     take?: number
     skip?: number
   } = {}
@@ -64,6 +114,7 @@ export async function listOrders(
       ? { financialStatus: options.financialStatus }
       : {}),
     ...(options.workflowState ? { workflowState: options.workflowState } : {}),
+    ...(options.storeId ? { storeId: options.storeId } : {}),
     ...(options.search
       ? {
           OR: [

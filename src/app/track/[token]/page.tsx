@@ -1,11 +1,12 @@
 import { notFound } from 'next/navigation'
-import { Package, Truck } from 'lucide-react'
+import { Truck } from 'lucide-react'
 import { trackParcelByToken } from '@/server/services/courierService'
 import {
   SHIPMENT_STATUS_LABEL,
   WORKFLOW_STATE_LABEL,
 } from '@/server/courier/statusMap'
 import { formatMoney } from '@/lib/money'
+import { ProductThumb } from '@/components/media/product-thumb'
 
 export const metadata = { title: 'Track your delivery' }
 
@@ -136,9 +137,11 @@ export default async function TrackPage({
               key={`${item.title}-${index}`}
               className="flex items-center gap-3 rounded-lg border px-3 py-2 text-sm"
             >
-              <Package className="text-muted-foreground size-4 shrink-0" />
-              <span className="min-w-0 flex-1 truncate">{item.title}</span>
-              <span className="text-muted-foreground">×{item.quantity}</span>
+              <ProductThumb src={item.imageUrl} alt={item.title} size="sm" />
+              <span className="min-w-0 flex-1 text-pretty">{item.title}</span>
+              <span className="text-muted-foreground shrink-0">
+                ×{item.quantity}
+              </span>
             </li>
           ))}
         </ul>

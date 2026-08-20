@@ -197,11 +197,13 @@
   }
 }
 
-/* The rail's scrollbar sits on black; the default light one cuts a bright
-   stripe down the panel edge. */
-@utility scrollbar-rail {
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in oklab, white 18%, transparent) transparent;
+/* The rail scrolls but never shows a scrollbar — a stripe down the edge of the
+   black panel reads as damage to it rather than as a control. */
+@utility scrollbar-none {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 /* Uppercase micro-label used for the one-word category above a heading. */
