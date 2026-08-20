@@ -1,4 +1,5 @@
 import { notFound } from 'next/navigation'
+import { Printer, Receipt } from 'lucide-react'
 import { getActiveOrganization } from '@/server/services/organizationService'
 import { getOrder, orderLineImageUrl } from '@/server/services/orderService'
 import { listLocations } from '@/server/services/shippingService'
@@ -13,6 +14,7 @@ import { formatMoney } from '@/lib/money'
 import { PageHeader } from '@/components/app/page-header'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { FinancialStatusBadge } from '@/components/store/status-badges'
 import {
   CancelOrderPanel,
@@ -294,6 +296,39 @@ export default async function OrderDetailPage({
           </Card>
 
           <div className="flex flex-wrap items-start gap-3">
+            {/* The single-order version of what /labels does in bulk. A parcel
+                that has to be reprinted — smudged sticker, wrong printer, one
+                order packed late — is one order, and sending someone back to a
+                list to tick it is a step with no decision in it. */}
+            <Button
+              variant="outline"
+              nativeButton={false}
+              render={
+                <a
+                  href={`/print/orders?ids=${order.id}&format=sticker`}
+                  target="_blank"
+                  rel="noreferrer"
+                />
+              }
+            >
+              <Printer />
+              Print sticker
+            </Button>
+            <Button
+              variant="outline"
+              nativeButton={false}
+              render={
+                <a
+                  href={`/print/orders?ids=${order.id}&format=invoice`}
+                  target="_blank"
+                  rel="noreferrer"
+                />
+              }
+            >
+              <Receipt />
+              Print invoice
+            </Button>
+
             {!order.cancelledAt && (
               <RefundPanel
                 orderId={order.id}

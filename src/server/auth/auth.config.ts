@@ -30,6 +30,7 @@ const PROTECTED_PREFIXES = [
   '/discounts',
   '/inventory',
   '/invitations',
+  '/labels',
   '/media',
   '/orders',
   '/organization',

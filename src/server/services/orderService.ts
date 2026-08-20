@@ -91,6 +91,13 @@ export async function listOrders(
     /** Where the order sits in the courier pipeline — see OrderWorkflowState. */
     workflowState?: OrderWorkflowState
     /**
+     * Several states at once, for views defined by a job rather than by one
+     * status — "everything still to go out" is four states, and asking the
+     * caller to make four queries and merge them is how a list ends up
+     * paginated wrongly.
+     */
+    workflowStateIn?: OrderWorkflowState[]
+    /**
      * One storefront's orders. Filtered on the order's own `storeId` rather
      * than through the relation, so it keeps meaning "sold by this site" and
      * does not quietly hide orders whose site was deleted.
@@ -114,6 +121,9 @@ export async function listOrders(
       ? { financialStatus: options.financialStatus }
       : {}),
     ...(options.workflowState ? { workflowState: options.workflowState } : {}),
+    ...(options.workflowStateIn?.length
+      ? { workflowState: { in: options.workflowStateIn } }
+      : {}),
     ...(options.storeId ? { storeId: options.storeId } : {}),
     ...(options.search
       ? {

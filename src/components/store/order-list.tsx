@@ -97,25 +97,35 @@ export function OrderList({
           <span className="text-muted-foreground">
             {selected.size > 0
               ? `${selected.size} selected`
-              : `${total} ${total === 1 ? 'order' : 'orders'}`}
+              : `${total} ${total === 1 ? 'order' : 'orders'} — tick to print`}
           </span>
         </label>
 
-        {selected.size > 0 && (
-          <div className="flex flex-wrap items-center gap-2">
-            <Button type="button" size="sm" onClick={() => print('sticker')}>
-              <Printer />
-              Print stickers
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => print('invoice')}
-            >
-              <Receipt />
-              Print invoices
-            </Button>
+        {/* Always shown, disabled until something is ticked, rather than
+            appearing on selection. A control that is not there yet is a
+            feature nobody knows exists — the first question asked of this
+            screen was "where do I print". */}
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            disabled={selected.size === 0}
+            onClick={() => print('sticker')}
+          >
+            <Printer />
+            Print stickers
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={selected.size === 0}
+            onClick={() => print('invoice')}
+          >
+            <Receipt />
+            Print invoices
+          </Button>
+          {selected.size > 0 && (
             <Button
               type="button"
               size="sm"
@@ -125,8 +135,8 @@ export function OrderList({
               <X />
               Clear
             </Button>
-          </div>
-        )}
+          )}
+        </div>
       </ListPanelHeader>
 
       {orders.map((order) => (

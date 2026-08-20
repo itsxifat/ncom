@@ -23,6 +23,7 @@ import {
   Truck,
   BarChart3,
   ScanLine,
+  Printer,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -44,6 +45,9 @@ const NAV_GROUPS: Array<{ label: string | null; items: NavItem[] }> = [
     label: 'Sell',
     items: [
       { href: '/orders', label: 'Orders', icon: ShoppingCart },
+      // The packing bench, in the order a parcel meets it: print the sticker,
+      // stick it on, scan it back when it goes out.
+      { href: '/labels', label: 'Labels', icon: Printer },
       { href: '/scan', label: 'Scan', icon: ScanLine },
       { href: '/analytics', label: 'Analytics', icon: BarChart3 },
       { href: '/tracking', label: 'Tracking', icon: Activity },
