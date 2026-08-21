@@ -1,5 +1,6 @@
 import { type NextRequest } from 'next/server'
 import { getActiveOrganization } from '@/server/services/organizationService'
+import { hasFeature } from '@/server/services/entitlementService'
 import { getOrganizationSettings } from '@/server/services/organizationSettingsService'
 import {
   getSalesAnalytics,
@@ -17,7 +18,9 @@ import { minorUnitsPerMajor } from '@/lib/money'
  *
  * Authorised through the same path as the page — `getActiveOrganization` plus
  * the role check inside `getSalesAnalytics` — so a link shared out of the
- * dashboard cannot be opened by someone without access to the order book.
+ * dashboard cannot be opened by someone without access to the order book. The
+ * plan gate is repeated here rather than trusted from the page: the page only
+ * decides whether to render the button, and this URL is guessable.
  *
  * Money is written in major units with two decimals, because this file is
  * opened in a spreadsheet by a person, not parsed by a program. Cents would be
@@ -31,6 +34,14 @@ export async function GET(request: NextRequest) {
   const to = params.get('to') ?? ''
 
   const { organization } = await getActiveOrganization()
+
+  if (!(await hasFeature(organization.id, 'ADVANCED_ANALYTICS'))) {
+    return new Response(
+      'Analytics is not included in your plan. Upgrade from Billing to export sales data.',
+      { status: 403, headers: { 'Content-Type': 'text/plain; charset=utf-8' } }
+    )
+  }
+
   const window = resolveRange({ range, from, to })
 
   const [analytics, settings] = await Promise.all([

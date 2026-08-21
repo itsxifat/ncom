@@ -219,7 +219,14 @@ async function loadDiscount(
   }
 }
 
-async function loadTaxRates(
+/**
+ * The tax rates that apply to a destination.
+ *
+ * Exported because the order editor has to answer the same question when a
+ * merchant adds a line to a placed order, and the province-preference rule
+ * below is exactly the kind of thing that goes wrong when it is written twice.
+ */
+export async function loadTaxRates(
   organizationId: string,
   countryCode: string | null,
   provinceCode: string | null
@@ -276,7 +283,8 @@ async function loadShippingRates(
   return matching.flatMap((zone) => zone.rates)
 }
 
-function parseAddress(
+/** Reads a country/province out of a stored address JSON blob. */
+export function parseAddress(
   value: unknown
 ): { countryCode: string; provinceCode: string | null } | null {
   if (!value || typeof value !== 'object') return null

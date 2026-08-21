@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { Printer } from 'lucide-react'
 import { getActiveOrganization } from '@/server/services/organizationService'
 import { listOrders } from '@/server/services/orderService'
+import { getOrderStatusColors } from '@/server/services/organizationSettingsService'
 import { listStores } from '@/server/services/storeService'
 import { PageHeader } from '@/components/app/page-header'
 import { EmptyState } from '@/components/app/empty-state'
@@ -9,7 +10,6 @@ import { OrderList } from '@/components/store/order-list'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { FormSelect } from '@/components/ui/form-select'
-import { WORKFLOW_STATE_LABEL } from '@/server/courier/statusMap'
 import type { OrderWorkflowState } from '@/generated/prisma/enums'
 
 export const metadata = { title: 'Labels' }
@@ -62,14 +62,17 @@ export default async function LabelsPage({
   searchParams,
 }: PageProps<'/labels'>) {
   const query = await searchParams
-  const { organization } = await getActiveOrganization()
+  const { organization, role } = await getActiveOrganization()
 
   const view: ViewKey =
     query.view === 'all' || query.view === 'unsent' ? query.view : 'packing'
   const search = typeof query.q === 'string' ? query.q.trim() : undefined
   const page = Math.max(1, Number(query.page) || 1)
 
-  const stores = await listStores(organization.id)
+  const [stores, statusColors] = await Promise.all([
+    listStores(organization.id),
+    getOrderStatusColors(organization.id),
+  ])
   const storeId = stores.find((store) => store.id === query.store)?.id
 
   const { items, total } = await listOrders(organization.id, {
@@ -140,7 +143,13 @@ export default async function LabelsPage({
           }
         />
       ) : (
-        <OrderList base="/orders" total={total} orders={items.map(toRow)} />
+        <OrderList
+          base="/orders"
+          total={total}
+          orders={items.map(toRow)}
+          statusColors={statusColors}
+          canEditStatus={role !== 'VIEWER'}
+        />
       )}
 
       {total > PAGE_SIZE && (
@@ -192,5 +201,6 @@ function toRow(order: ListedOrder) {
     offerLabel: order.offerLabel,
     totalCents: order.totalCents,
     currencyCode: order.currencyCode,
+    cancelled: Boolean(order.cancelledAt),
   }
 }

@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { BarChart3, Download } from 'lucide-react'
 import { getActiveOrganization } from '@/server/services/organizationService'
+import { getEntitlements } from '@/server/services/entitlementService'
 import { getSalesAnalytics } from '@/server/services/salesAnalyticsService'
 import { getOrganizationSettings } from '@/server/services/organizationSettingsService'
 import { resolveRange, percentChange } from '@/lib/date-range'
@@ -10,6 +11,7 @@ import { PageHeader } from '@/components/app/page-header'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { EmptyState } from '@/components/app/empty-state'
+import { FeatureLocked } from '@/components/app/feature-locked'
 import { AnalyticsFilterBar } from '@/components/store/analytics-filter-bar'
 import { AnalyticsTrend } from '@/components/store/analytics-trend'
 import {
@@ -50,6 +52,28 @@ export default async function AnalyticsPage({
   const to = typeof query.to === 'string' ? query.to : ''
 
   const { organization } = await getActiveOrganization()
+
+  // Gated before the queries run, not after: `getSalesAnalytics` walks every
+  // order in the window, and a workspace that is not allowed to see the answer
+  // should not be paying for it to be computed.
+  const entitlements = await getEntitlements(organization.id)
+  if (!entitlements.features.ADVANCED_ANALYTICS) {
+    return (
+      <FeatureLocked
+        feature="ADVANCED_ANALYTICS"
+        planName={entitlements.planName}
+        availability={entitlements.availability.ADVANCED_ANALYTICS}
+        description="See what you sold, what you collected, which landing pages produced the orders and which of them actually got delivered."
+        highlights={[
+          'Invoiced against collected, so you know what is still out with couriers',
+          'Delivery rate and what cancellations cost you',
+          'Best sellers, top customers, and new against returning buyers',
+          'Export any date range to CSV',
+        ]}
+      />
+    )
+  }
+
   const window = resolveRange({ range, from, to })
 
   const [analytics, orgSettings] = await Promise.all([
@@ -165,7 +189,7 @@ export default async function AnalyticsPage({
             <AnalyticsTrend
               series={analytics.series}
               granularity={analytics.granularity}
-              formatMoney={money}
+              currencyCode={currency}
             />
           </ChartCard>
 

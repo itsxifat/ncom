@@ -1,9 +1,10 @@
 'use client'
 
-import { useId, useMemo, useState } from 'react'
+import { useCallback, useId, useMemo, useState } from 'react'
 import { Table2, TrendingUp } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { formatBucketLabel, type Granularity } from '@/lib/date-range'
+import { formatMoney as formatMoneyIn } from '@/lib/money'
 
 export interface TrendPoint {
   key: string
@@ -35,14 +36,30 @@ export interface TrendPoint {
 export function AnalyticsTrend({
   series,
   granularity,
-  formatMoney,
+  currencyCode,
 }: {
   series: TrendPoint[]
   granularity: Granularity
-  /** Cents -> display string, in the store's currency. */
-  formatMoney: (cents: number) => string
+  /**
+   * The store's currency, not a formatter.
+   *
+   * This component renders on the client and the page that mounts it is a
+   * Server Component, so a `(cents) => string` prop cannot cross the boundary:
+   * React refuses to serialise a function and the render throws. It did — and
+   * only for workspaces that had actually sold something, because the chart is
+   * behind an `orders === 0` check, so the analytics page worked on every empty
+   * account and broke on every real one.
+   */
+  currencyCode: string
 }) {
   const gradientId = useId()
+
+  // Stable across renders so the memoised geometry below is not invalidated by
+  // a fresh closure on every keystroke of hover state.
+  const formatMoney = useCallback(
+    (cents: number) => formatMoneyIn(cents, currencyCode),
+    [currencyCode]
+  )
   const [showTable, setShowTable] = useState(false)
   const [hover, setHover] = useState<number | null>(null)
 

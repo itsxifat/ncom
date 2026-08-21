@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation'
 import { Printer, Receipt } from 'lucide-react'
 import { getActiveOrganization } from '@/server/services/organizationService'
 import { getOrder, orderLineImageUrl } from '@/server/services/orderService'
+import { orderEditability } from '@/server/services/orderEditService'
 import { listLocations } from '@/server/services/shippingService'
 import {
   getShipmentForOrder,
@@ -23,6 +24,7 @@ import {
   RefundPanel,
   ReturnPanel,
 } from '@/components/store/order-actions'
+import { OrderEditor } from '@/components/store/order-editor'
 import { Money } from '@/components/store/form-controls'
 import { ProductThumb } from '@/components/media/product-thumb'
 
@@ -100,6 +102,23 @@ export default async function OrderDetailPage({
 
   const refundableCents = order.paidTotalCents - order.refundedTotalCents
   const outstandingCents = order.totalCents - order.paidTotalCents
+
+  // Whether the goods can still be changed — decided by the same function the
+  // service enforces with, so the button and the save agree.
+  const { editable, reason: notEditableReason } = orderEditability(order)
+
+  const editableLines = order.lines.map((line) => ({
+    id: line.id,
+    variantId: line.variantId,
+    title: line.title,
+    variantTitle: line.variantTitle,
+    sku: line.sku,
+    imageUrl: orderLineImageUrl(line),
+    quantity: line.quantity,
+    unitPriceCents: line.unitPriceCents,
+    totalDiscountCents: line.totalDiscountCents,
+    settledQuantity: Math.max(line.refundedQuantity, line.returnedQuantity),
+  }))
 
   return (
     <div className="flex flex-col gap-8">
@@ -328,6 +347,22 @@ export default async function OrderDetailPage({
               <Receipt />
               Print invoice
             </Button>
+
+            {/* First in the row, ahead of the money actions. A customer
+                ringing to change their order is the common case; refunding and
+                cancelling are the exceptions, and they are also the ones that
+                cannot be undone. */}
+            <OrderEditor
+              orderId={order.id}
+              orderNumber={order.orderNumber}
+              currencyCode={currency}
+              lines={editableLines}
+              shippingCents={order.shippingTotalCents}
+              discountTotalCents={order.discountTotalCents}
+              taxTotalCents={order.taxTotalCents}
+              editable={editable}
+              notEditableReason={notEditableReason}
+            />
 
             {!order.cancelledAt && (
               <RefundPanel

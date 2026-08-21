@@ -2,13 +2,16 @@ import Link from 'next/link'
 import { ShoppingBag } from 'lucide-react'
 import { getActiveOrganization } from '@/server/services/organizationService'
 import { listOrders } from '@/server/services/orderService'
+import { getOrderStatusColors } from '@/server/services/organizationSettingsService'
 import { listStores } from '@/server/services/storeService'
 import { EmptyState } from '@/components/app/empty-state'
 import { OrderList } from '@/components/store/order-list'
+import { OrderFilters } from '@/components/store/order-filters'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { FormSelect } from '@/components/ui/form-select'
-import { WORKFLOW_STATE_LABEL } from '@/server/courier/statusMap'
+import type {
+  FinancialStatus,
+  OrderWorkflowState,
+} from '@/generated/prisma/enums'
 
 const PAGE_SIZE = 50
 
@@ -20,7 +23,7 @@ const FINANCIAL_VALUES = [
   'PARTIALLY_REFUNDED',
   'REFUNDED',
   'VOIDED',
-] as const
+] as const satisfies readonly FinancialStatus[]
 
 const WORKFLOW_VALUES = [
   'PENDING',
@@ -34,10 +37,25 @@ const WORKFLOW_VALUES = [
   'RETURNED',
   'CANCELLED',
   'FAILED',
-] as const
+] as const satisfies readonly OrderWorkflowState[]
+
+/**
+ * Reads the `delivery` parameter, which carries either one state or several.
+ *
+ * The saved views in the filter bar are questions like "what still needs doing"
+ * that no single status answers, so the parameter is a comma-separated list.
+ * Unknown values are dropped rather than rejected — a stale bookmark from
+ * before a state was renamed should narrow the list oddly, not fail to render
+ * it.
+ */
+function parseWorkflowStates(raw: unknown): OrderWorkflowState[] {
+  if (typeof raw !== 'string' || raw === '') return []
+
+  const wanted = new Set(raw.split(','))
+  return WORKFLOW_VALUES.filter((value) => wanted.has(value))
+}
 
 export default async function OrdersPage({
-  params,
   searchParams,
 }: PageProps<'/orders'>) {
   const query = await searchParams
@@ -46,14 +64,16 @@ export default async function OrdersPage({
   const financialStatus = FINANCIAL_VALUES.find(
     (value) => value === query.financial
   )
-  const workflowState = WORKFLOW_VALUES.find(
-    (value) => value === query.delivery
-  )
+  const workflowStates = parseWorkflowStates(query.delivery)
   const page = Math.max(1, Number(query.page) || 1)
 
-  const { organization } = await getActiveOrganization()
+  const { organization, role } = await getActiveOrganization()
 
-  const stores = await listStores(organization.id)
+  const [stores, statusColors] = await Promise.all([
+    listStores(organization.id),
+    getOrderStatusColors(organization.id),
+  ])
+
   // A store id from the query string is only honoured if it is one of this
   // workspace's own — `listOrders` scopes by organisation regardless, but a
   // filter that silently matched nothing would read as "no orders today".
@@ -62,7 +82,13 @@ export default async function OrdersPage({
   const { items, total } = await listOrders(organization.id, {
     search,
     financialStatus,
-    workflowState,
+    // Only ever one of the two is passed: `listOrders` spreads them into the
+    // same `workflowState` key, so sending both would silently drop one.
+    ...(workflowStates.length === 1
+      ? { workflowState: workflowStates[0] }
+      : workflowStates.length > 1
+        ? { workflowStateIn: workflowStates }
+        : {}),
     storeId,
     take: PAGE_SIZE,
     skip: (page - 1) * PAGE_SIZE,
@@ -77,18 +103,18 @@ export default async function OrdersPage({
     new URLSearchParams({
       ...(search ? { q: search } : {}),
       ...(financialStatus ? { financial: financialStatus } : {}),
-      ...(workflowState ? { delivery: workflowState } : {}),
+      ...(workflowStates.length ? { delivery: workflowStates.join(',') } : {}),
       ...(storeId ? { store: storeId } : {}),
       page: String(next),
     }).toString()
 
-  if (
-    total === 0 &&
-    !search &&
-    !financialStatus &&
-    !workflowState &&
-    !storeId
-  ) {
+  const filtered = Boolean(
+    search || financialStatus || workflowStates.length || storeId
+  )
+
+  // Nothing at all, and nothing filtered out — this workspace has simply not
+  // sold anything yet, which is a different screen from "no matches".
+  if (total === 0 && !filtered) {
     return (
       <EmptyState
         icon={ShoppingBag}
@@ -99,58 +125,11 @@ export default async function OrdersPage({
   }
 
   return (
-    <div className="flex flex-col gap-6">
-      <form className="flex flex-wrap items-center gap-3">
-        <Input
-          name="q"
-          defaultValue={search ?? ''}
-          placeholder="Search order number or email"
-          className="w-full sm:w-72"
-        />
-        {/* Which site sold it. A workspace runs several landing pages and
-            packs them separately, so "today's parcels for this store" is the
-            filter a print run starts from. */}
-        {stores.length > 1 && (
-          <FormSelect name="store" defaultValue={storeId ?? ''}>
-            <option value="">Every store</option>
-            {stores.map((store) => (
-              <option key={store.id} value={store.id}>
-                {store.name}
-              </option>
-            ))}
-          </FormSelect>
-        )}
-        <FormSelect name="financial" defaultValue={financialStatus ?? ''}>
-          <option value="">Any payment status</option>
-          {FINANCIAL_VALUES.map((value) => (
-            <option key={value} value={value}>
-              {value.replace(/_/g, ' ').toLowerCase()}
-            </option>
-          ))}
-        </FormSelect>
-        <FormSelect name="delivery" defaultValue={workflowState ?? ''}>
-          <option value="">Any delivery state</option>
-          {WORKFLOW_VALUES.map((value) => (
-            <option key={value} value={value}>
-              {WORKFLOW_STATE_LABEL[value]}
-            </option>
-          ))}
-        </FormSelect>
-        <Button type="submit" variant="outline">
-          Filter
-        </Button>
-      </form>
-
-      {/* The review queue is the one filter a merchant needs every morning, so
-          it gets a link rather than being buried in a dropdown. */}
-      {!workflowState && (
-        <Link
-          href={`${base}?delivery=FRAUD_REVIEW`}
-          className="text-muted-foreground text-sm underline underline-offset-4"
-        >
-          Show only orders waiting for review
-        </Link>
-      )}
+    <div className="flex flex-col gap-5">
+      <OrderFilters
+        stores={stores.map((store) => ({ id: store.id, name: store.name }))}
+        total={total}
+      />
 
       {items.length === 0 ? (
         <EmptyState
@@ -162,6 +141,11 @@ export default async function OrdersPage({
         <OrderList
           base={base}
           total={total}
+          statusColors={statusColors}
+          // VIEWERs read the order book; moving a parcel along is an EDITOR's
+          // job, and the server enforces the same line. Rendering the menu for
+          // someone who cannot use it is offering a button that fails.
+          canEditStatus={role !== 'VIEWER'}
           orders={items.map((order) => ({
             id: order.id,
             orderNumber: order.orderNumber,
@@ -170,6 +154,7 @@ export default async function OrdersPage({
                 .filter(Boolean)
                 .join(' ') ||
               order.email ||
+              order.phone ||
               'Guest',
             itemCount: order.lines.reduce(
               (sum, line) => sum + line.quantity,
@@ -183,6 +168,7 @@ export default async function OrdersPage({
             offerLabel: order.offerLabel,
             totalCents: order.totalCents,
             currencyCode: order.currencyCode,
+            cancelled: Boolean(order.cancelledAt),
           }))}
         />
       )}

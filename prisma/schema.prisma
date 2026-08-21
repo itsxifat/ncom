@@ -1458,6 +1458,20 @@ model OrganizationSettings {
   businessName    String?
   businessAddress Json?
 
+  /// How each delivery status paints its row in the order list.
+  ///
+  /// `{ "DELIVERED": "green", "RETURNED": "red", ... }` — a partial map from
+  /// OrderWorkflowState to one of the named tones in lib/order-status-colors.ts.
+  /// Missing keys fall back to the built-in default, so this stays valid when a
+  /// new workflow state is added and when a merchant has never opened the
+  /// setting at all.
+  ///
+  /// Tone names rather than hex: the list has to stay readable in both themes,
+  /// and a merchant picking #FFFF00 as a background would make the row's text
+  /// invisible in exactly one of them. The names map to token pairs that are
+  /// defined for both.
+  orderStatusColors Json?
+
   updatedAt DateTime @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)

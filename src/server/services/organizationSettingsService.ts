@@ -1,6 +1,10 @@
 import 'server-only'
 import { prisma } from '@/server/db/client'
 import { requireOrgAccess } from '@/server/auth/rbac'
+import {
+  parseStatusColors,
+  type StatusColorMap,
+} from '@/lib/order-status-colors'
 
 /**
  * Organisation-wide commerce settings.
@@ -74,6 +78,62 @@ export async function updateOrganizationSettings(
       // import endpoint warn while it still matters.
       ...(input.currencyCode ? { currencyConfiguredAt: new Date() } : {}),
     },
+  })
+}
+
+/**
+ * How this workspace wants its order rows coloured.
+ *
+ * VIEWER, not ADMIN: this is a reading aid on a list everyone in the workspace
+ * looks at, and a packer whose rows are the wrong colour is a packer who ships
+ * the wrong parcel. Writing it is a separate, higher bar below.
+ *
+ * Anything unrecognised in the column is dropped rather than thrown on — see
+ * parseStatusColors. A bad value must not be able to blank the order list.
+ */
+export async function getOrderStatusColors(
+  organizationId: string
+): Promise<StatusColorMap> {
+  await requireOrgAccess(organizationId, 'VIEWER')
+
+  const settings = await prisma.organizationSettings.findUnique({
+    where: { organizationId },
+    select: { orderStatusColors: true },
+  })
+
+  return parseStatusColors(settings?.orderStatusColors)
+}
+
+/**
+ * Saves the colour map.
+ *
+ * The whole map is written each time rather than merged: the editor shows every
+ * status at once, so what it posts *is* the intended state, and a merge would
+ * make "set this one back to the default" impossible to express.
+ *
+ * EDITOR rather than ADMIN — it changes nothing about what the business sells
+ * or charges, and putting a display preference behind an owner login means the
+ * people who actually read the list all day cannot fix it.
+ */
+export async function setOrderStatusColors(
+  organizationId: string,
+  colors: StatusColorMap
+) {
+  await requireOrgAccess(organizationId, 'EDITOR')
+
+  // Upserted rather than updated. Not every organisation has a settings row —
+  // the column has always been read with a `?? default` behind it, so nothing
+  // noticed — and a display preference must not be the thing that discovers
+  // it. `organizationId` is unique, so this is the row or nothing.
+  //
+  // Re-parsed on the way in as well as on the way out: this arrives from a
+  // server action, which is a public endpoint like any other.
+  const orderStatusColors = parseStatusColors(colors)
+
+  return prisma.organizationSettings.upsert({
+    where: { organizationId },
+    update: { orderStatusColors },
+    create: { organizationId, orderStatusColors },
   })
 }
 

@@ -48,3 +48,7 @@ next-env.d.ts
 /playwright-report
 /blob-report
 /playwright/.cache
+
+# Playwright saved sessions — these are real auth cookies.
+e2e/.auth-*.json
+test-results/

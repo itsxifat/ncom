@@ -137,6 +137,13 @@ export async function listOrders(
             {
               email: { contains: options.search, mode: 'insensitive' as const },
             },
+            // Phone is how a cash-on-delivery order is identified. The customer
+            // rings about "my order" and gives a number, not an order number —
+            // and frequently there is no email on the order at all, so
+            // searching without this means the merchant cannot find them.
+            {
+              phone: { contains: options.search, mode: 'insensitive' as const },
+            },
           ],
         }
       : {}),

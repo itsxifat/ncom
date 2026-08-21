@@ -15,7 +15,10 @@ import { recordOrderReturn } from '@/server/services/returnService'
 import { redirect } from 'next/navigation'
 import { z } from 'zod'
 import { getActiveOrganization } from '@/server/services/organizationService'
-import { updateOrganizationSettings } from '@/server/services/organizationSettingsService'
+import {
+  setOrderStatusColors,
+  updateOrganizationSettings,
+} from '@/server/services/organizationSettingsService'
 import {
   archiveProduct,
   bulkDeleteProducts,
@@ -44,6 +47,10 @@ import {
   markOrderPaid,
   refundOrder,
 } from '@/server/services/orderService'
+import {
+  editOrder,
+  type OrderEditLine,
+} from '@/server/services/orderEditService'
 import {
   createDiscount,
   deleteDiscount,
@@ -75,6 +82,7 @@ import {
   taxRateSchema,
 } from '@/lib/validation/store'
 import { parseMoneyInput } from '@/lib/money'
+import { parseStatusColors } from '@/lib/order-status-colors'
 
 /**
  * Commerce server actions.
@@ -699,6 +707,81 @@ export async function recordReturnAction(
 
   revalidatePath(`/orders/${orderId}`)
   return { success: 'Return recorded.' }
+}
+
+/**
+ * Saves an edited order.
+ *
+ * The whole basket is posted as one JSON field rather than a diff: the merchant
+ * is looking at the finished basket while the customer is still on the phone,
+ * and a stream of add/remove commands would apply in an order nobody chose if
+ * the page was stale. The server diffs it against what is stored.
+ */
+export async function editOrderAction(
+  orderId: string,
+  _prev: StoreActionState,
+  formData: FormData
+): Promise<StoreActionState> {
+  let lines: OrderEditLine[]
+  try {
+    lines = JSON.parse(String(formData.get('lines') ?? '[]'))
+  } catch {
+    return { error: 'Could not read the form' }
+  }
+
+  if (!Array.isArray(lines) || lines.length === 0) {
+    return { error: 'An order needs at least one item. Cancel it instead.' }
+  }
+
+  try {
+    const organizationId = await org()
+    const shippingRaw = String(formData.get('shipping') ?? '').trim()
+
+    await editOrder(organizationId, orderId, {
+      lines,
+      shippingCents: shippingRaw
+        ? parseMoneyInput(
+            shippingRaw,
+            await organizationCurrency(organizationId)
+          )
+        : undefined,
+      reason: (formData.get('reason') as string) || undefined,
+    })
+  } catch (cause) {
+    return fail(cause)
+  }
+
+  revalidatePath(`/orders/${orderId}`)
+  revalidatePath('/orders')
+  return { success: 'Order updated.' }
+}
+
+/**
+ * Saves the order list's colour coding.
+ *
+ * Posted as JSON because it is a map, and revalidates `/orders` rather than the
+ * settings page — the colours are the thing that changed, and the list is where
+ * the merchant is standing when they change them.
+ */
+export async function saveOrderStatusColorsAction(
+  _prev: StoreActionState,
+  formData: FormData
+): Promise<StoreActionState> {
+  let raw: unknown
+  try {
+    raw = JSON.parse(String(formData.get('colors') ?? '{}'))
+  } catch {
+    return { error: 'Could not read the colours' }
+  }
+
+  try {
+    await setOrderStatusColors(await org(), parseStatusColors(raw))
+  } catch (cause) {
+    return fail(cause)
+  }
+
+  revalidatePath('/orders')
+  return { success: 'Colours saved.' }
 }
 
 export async function cancelOrderAction(

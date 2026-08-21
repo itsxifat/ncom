@@ -65,7 +65,10 @@ export const PLAN_SEEDS: Prisma.PlanCreateInput[] = [
     // "Optional" on the price sheet: permitted at this tier, but only after the
     // add-on is bought.
     aiContentAssistant: 'ADDON',
-    advancedAnalytics: 'ADDON',
+    // The sales report is part of running a shop, not a premium extra — a
+    // merchant paying for the product should be able to see what they sold.
+    // Free is the only tier without it.
+    advancedAnalytics: 'INCLUDED',
 
     supportTier: 'STANDARD',
   },
@@ -98,7 +101,7 @@ export const PLAN_SEEDS: Prisma.PlanCreateInput[] = [
     metaPixel: 'INCLUDED',
     googleTagManager: 'INCLUDED',
     aiContentAssistant: 'INCLUDED',
-    advancedAnalytics: 'ADDON',
+    advancedAnalytics: 'INCLUDED',
     dedicatedAccountManager: 'INCLUDED',
     dedicatedTechnicalSupport: 'LIMITED',
 
