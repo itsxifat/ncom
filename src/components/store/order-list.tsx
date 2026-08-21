@@ -1,17 +1,9 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useTransition } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import {
-  Check,
-  ChevronDown,
-  Loader2,
-  Palette,
-  Printer,
-  Receipt,
-  X,
-} from 'lucide-react'
+import { Check, ChevronDown, Loader2, Palette, Printer } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   ListPanel,
@@ -22,7 +14,6 @@ import {
 } from '@/components/app/list-panel'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -72,11 +63,14 @@ export interface OrderListRow {
 }
 
 /**
- * The order book, with the morning's print run in it.
+ * The order book.
  *
- * Three things happen on this screen and they are deliberately all reachable
- * without leaving it: seeing at a glance which orders are in trouble, moving
- * one along the pipeline, and printing a batch.
+ * Two things happen on this screen: seeing at a glance which orders are in
+ * trouble, and moving one along the pipeline. Printing is deliberately **not**
+ * one of them — it moved to /labels, which is a packing bench rather than a
+ * list, and having a second selection-and-print implementation here meant two
+ * screens drifting apart while claiming to do the same job. The header keeps a
+ * signpost to it so the function is still findable from where it used to live.
  *
  * Colour carries the status because that is what a merchant scanning a hundred
  * rows is actually reading — the badge text is confirmation, not the signal.
@@ -85,13 +79,8 @@ export interface OrderListRow {
  * both come from it, because a tint alone is too weak on a busy screen and a
  * spine alone is too easy to miss on a phone.
  *
- * Selection lives here rather than in a URL because it is a scratch decision —
- * "these eleven are going out on the van" — that nobody wants to bookmark, and
- * because a merchant tends to tick boxes while scrolling and would lose the lot
- * to a navigation.
- *
- * Rows stay whole-row links even with a checkbox and a status menu on them;
- * both are lifted above the link's overlay so neither opens the order.
+ * Rows are whole-row links; the status menu is lifted above that overlay so
+ * changing a status does not open the order.
  */
 export function OrderList({
   orders,
@@ -107,86 +96,28 @@ export function OrderList({
   /** Viewers see the colours but cannot move an order along. */
   canEditStatus: boolean
 }) {
-  const [selected, setSelected] = useState<Set<string>>(new Set())
   const colors = resolveStatusColors(statusColors)
-
-  const toggle = (id: string) =>
-    setSelected((current) => {
-      const next = new Set(current)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-
-  const allOnPage = orders.length > 0 && orders.every((o) => selected.has(o.id))
-
-  const print = (format: 'sticker' | 'invoice') => {
-    const ids = orders.filter((o) => selected.has(o.id)).map((o) => o.id)
-    if (ids.length === 0) return
-    // A new tab, because the print dialog opens over it and the merchant is
-    // meant to come back to this list with their selection intact.
-    window.open(
-      `/print/orders?ids=${ids.join(',')}&format=${format}`,
-      '_blank',
-      'noopener'
-    )
-  }
 
   return (
     <ListPanel>
       <ListPanelHeader className="flex-wrap">
-        <label className="flex items-center gap-3 text-sm">
-          <Checkbox
-            checked={allOnPage}
-            indeterminate={!allOnPage && selected.size > 0}
-            onCheckedChange={(checked) =>
-              setSelected(
-                checked ? new Set(orders.map((o) => o.id)) : new Set()
-              )
-            }
-          />
-          <span className="text-muted-foreground">
-            {selected.size > 0
-              ? `${selected.size} selected`
-              : `${total} ${total === 1 ? 'order' : 'orders'} — tick to print`}
-          </span>
-        </label>
+        <span className="text-muted-foreground text-sm">
+          {total} {total === 1 ? 'order' : 'orders'}
+        </span>
 
-        {/* Always shown, disabled until something is ticked, rather than
-            appearing on selection. A control that is not there yet is a
-            feature nobody knows exists — the first question asked of this
-            screen was "where do I print". */}
         <div className="flex flex-wrap items-center gap-2">
+          {/* A signpost, not a second implementation. Bulk printing used to
+              live on this screen, so the people who did it here every morning
+              need to be told once where it went. */}
           <Button
-            type="button"
             size="sm"
-            disabled={selected.size === 0}
-            onClick={() => print('sticker')}
+            variant="ghost"
+            nativeButton={false}
+            render={<Link href="/labels" />}
           >
             <Printer />
-            Print stickers
+            Print labels
           </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={selected.size === 0}
-            onClick={() => print('invoice')}
-          >
-            <Receipt />
-            Print invoices
-          </Button>
-          {selected.size > 0 && (
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              onClick={() => setSelected(new Set())}
-            >
-              <X />
-              Clear
-            </Button>
-          )}
 
           {/* The colour key lives on the list it explains. A merchant who wants
               returns to shout at them is looking at a return when they decide
@@ -222,17 +153,6 @@ export function OrderList({
             />
 
             <div className="flex min-w-0 flex-1 items-start gap-3">
-              {/* Above the row-wide link overlay, or ticking a box would open
-                  the order instead of selecting it. Not wrapped in a <label>:
-                  this checkbox is a button, so a label around it contributes an
-                  empty name and hides the one the aria-label gives it. */}
-              <Checkbox
-                className="relative z-10 mt-0.5"
-                checked={selected.has(order.id)}
-                onCheckedChange={() => toggle(order.id)}
-                aria-label={`Select ${order.orderNumber}`}
-              />
-
               <ListRowText
                 className="flex-1"
                 title={

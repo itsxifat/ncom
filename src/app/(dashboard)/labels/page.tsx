@@ -1,15 +1,13 @@
 import Link from 'next/link'
 import { Printer } from 'lucide-react'
 import { getActiveOrganization } from '@/server/services/organizationService'
-import { listOrders } from '@/server/services/orderService'
-import { getOrderStatusColors } from '@/server/services/organizationSettingsService'
+import { listLabelQueue } from '@/server/services/labelService'
 import { listStores } from '@/server/services/storeService'
 import { PageHeader } from '@/components/app/page-header'
 import { EmptyState } from '@/components/app/empty-state'
-import { OrderList } from '@/components/store/order-list'
+import { LabelList } from '@/components/store/label-list'
+import { LabelFilters } from '@/components/store/label-filters'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { FormSelect } from '@/components/ui/form-select'
 import type { OrderWorkflowState } from '@/generated/prisma/enums'
 
 export const metadata = { title: 'Labels' }
@@ -62,20 +60,17 @@ export default async function LabelsPage({
   searchParams,
 }: PageProps<'/labels'>) {
   const query = await searchParams
-  const { organization, role } = await getActiveOrganization()
+  const { organization } = await getActiveOrganization()
 
   const view: ViewKey =
     query.view === 'all' || query.view === 'unsent' ? query.view : 'packing'
   const search = typeof query.q === 'string' ? query.q.trim() : undefined
   const page = Math.max(1, Number(query.page) || 1)
 
-  const [stores, statusColors] = await Promise.all([
-    listStores(organization.id),
-    getOrderStatusColors(organization.id),
-  ])
+  const stores = await listStores(organization.id)
   const storeId = stores.find((store) => store.id === query.store)?.id
 
-  const { items, total } = await listOrders(organization.id, {
+  const { items, total } = await listLabelQueue(organization.id, {
     search: search || undefined,
     storeId,
     workflowStateIn: VIEWS[view].states,
@@ -99,38 +94,14 @@ export default async function LabelsPage({
         description="Tick the orders going out, then print 4×6 parcel stickers or A4 invoices. Every sticker carries a barcode the scanner reads."
       />
 
-      <form className="flex flex-wrap items-center gap-3">
-        <FormSelect name="view" defaultValue={view}>
-          {(Object.keys(VIEWS) as ViewKey[]).map((key) => (
-            <option key={key} value={key}>
-              {VIEWS[key].label}
-            </option>
-          ))}
-        </FormSelect>
-
-        {/* One workspace packs several sites' parcels, usually one pile at a
-            time — so a print run starts by naming the pile. */}
-        {stores.length > 1 && (
-          <FormSelect name="store" defaultValue={storeId ?? ''}>
-            <option value="">Every store</option>
-            {stores.map((store) => (
-              <option key={store.id} value={store.id}>
-                {store.name}
-              </option>
-            ))}
-          </FormSelect>
-        )}
-
-        <Input
-          name="q"
-          defaultValue={search ?? ''}
-          placeholder="Search order number or email"
-          className="w-full sm:w-64"
-        />
-        <Button type="submit" variant="outline">
-          Filter
-        </Button>
-      </form>
+      <LabelFilters
+        views={(Object.keys(VIEWS) as ViewKey[]).map((key) => ({
+          key,
+          label: VIEWS[key].label,
+        }))}
+        stores={stores.map((store) => ({ id: store.id, name: store.name }))}
+        total={total}
+      />
 
       {items.length === 0 ? (
         <EmptyState
@@ -143,13 +114,7 @@ export default async function LabelsPage({
           }
         />
       ) : (
-        <OrderList
-          base="/orders"
-          total={total}
-          orders={items.map(toRow)}
-          statusColors={statusColors}
-          canEditStatus={role !== 'VIEWER'}
-        />
+        <LabelList total={total} rows={items.map(toRow)} />
       )}
 
       {total > PAGE_SIZE && (
@@ -180,27 +145,26 @@ export default async function LabelsPage({
   )
 }
 
-type ListedOrder = Awaited<ReturnType<typeof listOrders>>['items'][number]
+type QueuedOrder = Awaited<ReturnType<typeof listLabelQueue>>['items'][number]
 
-function toRow(order: ListedOrder) {
+/**
+ * Dates are formatted here, on the server, so the list is not a Client
+ * Component just to call toLocaleDateString.
+ */
+function toRow(order: QueuedOrder) {
   return {
     id: order.id,
     orderNumber: order.orderNumber,
-    customerName:
-      [order.customer?.firstName, order.customer?.lastName]
-        .filter(Boolean)
-        .join(' ') ||
-      order.email ||
-      'Guest',
-    itemCount: order.lines.reduce((sum, line) => sum + line.quantity, 0),
-    placedOn: order.createdAt.toLocaleDateString(),
-    financialStatus: order.financialStatus,
-    workflowState: order.workflowState,
-    storeName: order.store?.name ?? null,
-    pageTitle: order.page?.title ?? null,
-    offerLabel: order.offerLabel,
-    totalCents: order.totalCents,
+    placedOn: order.placedOn.toLocaleDateString(),
     currencyCode: order.currencyCode,
-    cancelled: Boolean(order.cancelledAt),
+    recipientName: order.recipientName,
+    phone: order.phone,
+    destination: order.destination,
+    codCents: order.codCents,
+    units: order.units,
+    workflowState: order.workflowState,
+    courier: order.courier,
+    consignmentId: order.consignmentId,
+    storeName: order.storeName,
   }
 }

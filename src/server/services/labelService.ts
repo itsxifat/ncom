@@ -2,6 +2,7 @@ import 'server-only'
 import { prisma } from '@/server/db/client'
 import { requireOrgAccess } from '@/server/auth/rbac'
 import { orderLineImageUrl, ORDER_LINE_IMAGE_SELECT } from './orderService'
+import type { OrderWorkflowState } from '@/generated/prisma/enums'
 
 /**
  * What goes on a parcel sticker and an invoice.
@@ -191,6 +192,153 @@ export async function getOrdersForLabels(
       })),
     }
   })
+}
+
+/**
+ * One row of the label queue.
+ *
+ * Deliberately not an order-book row. At a packing bench the question is "whose
+ * parcel is this, what goes in it, and what does the rider collect" — so the
+ * recipient is the headline and the COD amount is the money, not the order
+ * total. Those two differ on a part-paid order, and printing the wrong one puts
+ * a rider at a door asking for money that was already taken.
+ */
+export interface LabelQueueRow {
+  id: string
+  orderNumber: string
+  placedOn: Date
+  currencyCode: string
+  recipientName: string
+  phone: string | null
+  /** City/area only. The full address is on the sticker; this is for sorting piles. */
+  destination: string | null
+  /** What the rider collects at the door. Zero on an already-paid order. */
+  codCents: number
+  units: number
+  workflowState: OrderWorkflowState
+  courier: string | null
+  consignmentId: string | null
+  storeName: string | null
+}
+
+/**
+ * The orders waiting to be printed.
+ *
+ * A separate query from `listOrders` rather than a flag on it: this one has to
+ * reach into the shipping address and the latest consignment, which the order
+ * book neither needs nor should pay for on every page of fifty.
+ */
+export async function listLabelQueue(
+  organizationId: string,
+  options: {
+    search?: string
+    storeId?: string
+    workflowStateIn?: OrderWorkflowState[]
+    take?: number
+    skip?: number
+  } = {}
+): Promise<{ items: LabelQueueRow[]; total: number }> {
+  await requireOrgAccess(organizationId, 'VIEWER')
+
+  const where = {
+    organizationId,
+    // A cancelled order is not going in a box. It stays reachable from the
+    // order book, but offering it for printing is offering a mistake.
+    cancelledAt: null,
+    ...(options.workflowStateIn?.length
+      ? { workflowState: { in: options.workflowStateIn } }
+      : {}),
+    ...(options.storeId ? { storeId: options.storeId } : {}),
+    ...(options.search
+      ? {
+          OR: [
+            {
+              orderNumber: {
+                contains: options.search,
+                mode: 'insensitive' as const,
+              },
+            },
+            {
+              email: { contains: options.search, mode: 'insensitive' as const },
+            },
+            {
+              phone: { contains: options.search, mode: 'insensitive' as const },
+            },
+          ],
+        }
+      : {}),
+  }
+
+  const [orders, total] = await Promise.all([
+    prisma.order.findMany({
+      where,
+      select: {
+        id: true,
+        orderNumber: true,
+        createdAt: true,
+        currencyCode: true,
+        email: true,
+        phone: true,
+        shippingAddress: true,
+        totalCents: true,
+        paidTotalCents: true,
+        workflowState: true,
+        store: { select: { name: true } },
+        lines: { select: { quantity: true } },
+        shipments: {
+          where: { consignmentId: { not: null } },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: { consignmentId: true, provider: true },
+        },
+      },
+      // Oldest first, unlike the order book. A print run works through a
+      // backlog, and the parcel that has been waiting longest is the one that
+      // should go out on this van.
+      orderBy: { createdAt: 'asc' },
+      take: options.take ?? 100,
+      skip: options.skip ?? 0,
+    }),
+    prisma.order.count({ where }),
+  ])
+
+  return {
+    total,
+    items: orders.map((order) => {
+      const address = readAddress(order.shippingAddress)
+      const shipment = order.shipments[0] ?? null
+
+      return {
+        id: order.id,
+        orderNumber: order.orderNumber,
+        placedOn: order.createdAt,
+        currencyCode: order.currencyCode,
+        recipientName:
+          [address.firstName, address.lastName]
+            .filter(Boolean)
+            .join(' ')
+            .trim() ||
+          order.email ||
+          'Customer',
+        phone: order.phone ?? address.phone ?? null,
+        destination:
+          [address.city, address.provinceCode]
+            .filter(Boolean)
+            .join(', ')
+            .trim() || null,
+        codCents: Math.max(0, order.totalCents - order.paidTotalCents),
+        units: order.lines.reduce((sum, line) => sum + line.quantity, 0),
+        workflowState: order.workflowState,
+        courier: shipment
+          ? shipment.provider === 'STEADFAST'
+            ? 'Steadfast'
+            : 'Pathao'
+          : null,
+        consignmentId: shipment?.consignmentId ?? null,
+        storeName: order.store?.name ?? null,
+      }
+    }),
+  }
 }
 
 /**
