@@ -37,6 +37,9 @@ export default async function TrackPage({
   if (!parcel) notFound()
 
   const courier = parcel.courier
+  // `workflowState` here is already the merged status — see lib/order-status.ts
+  // and trackParcelByToken.
+  const cancelled = parcel.workflowState === 'CANCELLED'
 
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-10">
@@ -54,8 +57,14 @@ export default async function TrackPage({
         <div className="flex items-center gap-3">
           <Truck className="size-5 shrink-0" />
           <div className="min-w-0">
+            {/* The parcel's own status is the more precise answer while it is
+                moving, but a cancellation outranks it: a consignment that was
+                never withdrawn at the courier goes on reporting "Accepted by
+                courier" for days, and telling a buyer their cancelled order is
+                on its way is the one thing this page must not do. What the
+                courier said is still below, in Progress. */}
             <p className="font-medium">
-              {courier
+              {courier && !cancelled
                 ? SHIPMENT_STATUS_LABEL[courier.status]
                 : WORKFLOW_STATE_LABEL[parcel.workflowState]}
             </p>
@@ -87,7 +96,9 @@ export default async function TrackPage({
           </p>
         )}
 
-        {parcel.amountDueCents > 0 && (
+        {/* Nothing is owed on a cancelled order, and asking a buyer to keep
+            cash ready for a rider who is not coming is worse than silence. */}
+        {!cancelled && parcel.amountDueCents > 0 && (
           <p className="mt-3 text-sm">
             Please have{' '}
             <strong>
