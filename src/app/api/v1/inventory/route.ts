@@ -107,18 +107,71 @@ export async function POST(request: Request) {
       .map((line) => line.sku)
       .filter((sku): sku is string => Boolean(sku))
 
-    const bySku = new Map(
+    const skuMatches =
       skus.length === 0
         ? []
-        : (
-            await prisma.productVariant.findMany({
-              where: { sku: { in: skus }, product: { organizationId } },
-              select: { id: true, sku: true },
-            })
-          ).map((variant) => [variant.sku!, variant.id])
-    )
+        : await prisma.productVariant.findMany({
+            where: { sku: { in: skus }, product: { organizationId } },
+            select: { id: true, sku: true },
+          })
+
+    /**
+     * SKU → variant, plus the SKUs that name more than one of them.
+     *
+     * `sku` is indexed but not unique, and a catalogue imported from a system
+     * that holds duplicate records of its own products routinely puts the same
+     * SKU on several variants. Building a plain Map here kept whichever row the
+     * database happened to return last and dropped the rest in silence, so a
+     * sync updated one variant and left its twins holding whatever they already
+     * had — permanently, because nothing ever reported the miss, and a stale
+     * count reads as sellable stock. Which of several candidates a bare SKU
+     * meant is not knowable from what the caller sent, so the row fails and says
+     * so rather than being applied to an arbitrary one of them.
+     */
+    const bySku = new Map<string, string>()
+    const ambiguousSku = new Map<string, number>()
+
+    for (const variant of skuMatches) {
+      const sku = variant.sku!
+      if (bySku.has(sku)) {
+        ambiguousSku.set(sku, (ambiguousSku.get(sku) ?? 1) + 1)
+        continue
+      }
+      bySku.set(sku, variant.id)
+    }
 
     const defaultLocation = await ensureDefaultLocation(organizationId)
+
+    const targetKey = (variantId: string, locationId?: string) =>
+      `${variantId}@${locationId ?? defaultLocation.id}`
+
+    /**
+     * Absolute writes aimed at the same shelf more than once in one batch.
+     *
+     * `available` states a fact about one (variant, location); two of them in a
+     * batch are two contradictory facts, and applying both in order means the
+     * last row silently wins while every earlier count is lost. That is how a
+     * single variant took thirty-two absolute writes in one second and settled
+     * on an arbitrary one of thirty-two figures, which the storefront then sold
+     * against. A repeated `delta` is not a conflict — two receipts of five
+     * legitimately make ten — so only absolute rows are counted here.
+     *
+     * Counted in a pass of its own so every row in a conflicting group fails
+     * rather than only the later ones: the first row is no more trustworthy
+     * than the rest, and applying it would keep the guess this exists to stop.
+     */
+    const absoluteTargets = new Map<string, number>()
+
+    for (const line of body.data.updates) {
+      if (line.available === undefined) continue
+
+      const variantId =
+        line.variantId ?? (line.sku ? bySku.get(line.sku) : undefined)
+      if (!variantId) continue
+
+      const key = targetKey(variantId, line.locationId)
+      absoluteTargets.set(key, (absoluteTargets.get(key) ?? 0) + 1)
+    }
 
     const applied: {
       variantId: string
@@ -155,6 +208,33 @@ export async function POST(request: Request) {
           error: line.sku
             ? 'No variant with that SKU'
             : 'No variant with that id',
+        })
+        continue
+      }
+
+      // Only when the SKU is what resolved the row. An explicit variantId is
+      // unambiguous however many variants happen to share its SKU.
+      if (!line.variantId && line.sku && ambiguousSku.has(line.sku)) {
+        failed.push({
+          sku: line.sku,
+          error:
+            `SKU “${line.sku}” is on ${ambiguousSku.get(line.sku)} variants in this ` +
+            `workspace — address them by variantId, or make the SKU unique`,
+        })
+        continue
+      }
+
+      if (
+        line.available !== undefined &&
+        (absoluteTargets.get(targetKey(variantId, line.locationId)) ?? 0) > 1
+      ) {
+        failed.push({
+          variantId,
+          sku: line.sku,
+          error:
+            'This batch sets an absolute count for this variant and location more ' +
+            'than once. Send one count per variant per location, or use `delta` ' +
+            'if the changes are meant to add up',
         })
         continue
       }

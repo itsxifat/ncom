@@ -1,5 +1,5 @@
 import { notFound } from 'next/navigation'
-import { Printer, Receipt } from 'lucide-react'
+import { Gift, Printer, Receipt } from 'lucide-react'
 import { getActiveOrganization } from '@/server/services/organizationService'
 import { getOrder, orderLineImageUrl } from '@/server/services/orderService'
 import { orderEditability } from '@/server/services/orderEditService'
@@ -117,6 +117,7 @@ export default async function OrderDetailPage({
     quantity: line.quantity,
     unitPriceCents: line.unitPriceCents,
     totalDiscountCents: line.totalDiscountCents,
+    isGift: line.isGift,
     settledQuantity: Math.max(line.refundedQuantity, line.returnedQuantity),
   }))
 
@@ -237,7 +238,15 @@ export default async function OrderDetailPage({
                         alt={line.title}
                       />
                       <div className="min-w-0">
-                        <p className="font-medium">{line.title}</p>
+                        <p className="flex items-center gap-2 font-medium">
+                          {line.title}
+                          {line.isGift && (
+                            <Badge variant="lime">
+                              <Gift className="size-3" />
+                              Gift
+                            </Badge>
+                          )}
+                        </p>
                         {line.variantTitle &&
                           line.variantTitle !== 'Default Title' && (
                             <p className="text-muted-foreground text-sm">
@@ -257,11 +266,20 @@ export default async function OrderDetailPage({
                         </p>
                       </div>
                     </div>
+                    {/* A gift shows the word rather than a price of zero. It is
+                        not a line sold at nothing — it is a line not sold — and
+                        the value it was worth is still on the row below, so the
+                        merchant can see what the goodwill cost them. */}
                     <div className="text-right">
-                      <Money>{formatMoney(line.totalCents, currency)}</Money>
+                      {line.isGift ? (
+                        <p className="text-sm font-semibold">Gift</p>
+                      ) : (
+                        <Money>{formatMoney(line.totalCents, currency)}</Money>
+                      )}
                       {line.totalDiscountCents > 0 && (
                         <p className="text-muted-foreground text-xs">
-                          −{formatMoney(line.totalDiscountCents, currency)}
+                          {line.isGift ? 'worth ' : '−'}
+                          {formatMoney(line.totalDiscountCents, currency)}
                         </p>
                       )}
                     </div>
@@ -280,9 +298,23 @@ export default async function OrderDetailPage({
                     value={`−${formatMoney(order.discountTotalCents, currency)}`}
                   />
                 )}
+                {order.manualDiscountCents > 0 && (
+                  <Row
+                    label={`Extra discount${
+                      order.manualDiscountReason
+                        ? ` (${order.manualDiscountReason})`
+                        : ''
+                    }`}
+                    value={`−${formatMoney(order.manualDiscountCents, currency)}`}
+                  />
+                )}
                 <Row
                   label={order.shippingMethodTitle ?? 'Shipping'}
-                  value={formatMoney(order.shippingTotalCents, currency)}
+                  value={
+                    order.shippingWaived
+                      ? 'Waived'
+                      : formatMoney(order.shippingTotalCents, currency)
+                  }
                 />
                 <Row
                   label="Tax"
@@ -358,8 +390,11 @@ export default async function OrderDetailPage({
               currencyCode={currency}
               lines={editableLines}
               shippingCents={order.shippingTotalCents}
-              discountTotalCents={order.discountTotalCents}
+              shippingWaived={order.shippingWaived}
+              discountCode={order.discountCode}
+              manualDiscountCents={order.manualDiscountCents}
               taxTotalCents={order.taxTotalCents}
+              totalCents={order.totalCents}
               editable={editable}
               notEditableReason={notEditableReason}
             />

@@ -128,6 +128,7 @@ model Organization {
   carts            Cart[]
   orders           Order[]
   discounts        Discount[]
+  offers           Offer[]
   locations        Location[]
   shippingZones    ShippingZone[]
   taxRates         TaxRate[]
@@ -237,6 +238,7 @@ model Store {
   // landing pages off one catalogue can tell which one is working.
   carts  Cart[]
   orders Order[]
+  offers Offer[]
 }
 
 enum DomainStatus {
@@ -404,9 +406,56 @@ enum OfferPricingMode {
   AMOUNT
 }
 
+/// Where an offer is sold.
+///
+/// A campaign page runs its own bundle, but a merchant who wants "any 3 shirts
+/// for 1000" across every page of a shop — or across every shop they run —
+/// should type it once. The resolver unions all three scopes for a page, so a
+/// page-level offer sits alongside the shop-wide ones rather than replacing
+/// them.
+enum OfferScope {
+  /// One landing page. `pageId` is set.
+  PAGE
+  /// Every page of one store. `storeId` is set.
+  STORE
+  /// Every page of every store in the workspace.
+  ORGANIZATION
+}
+
+/// How a COLLECTION offer's ladder answers a quantity it was not given.
+enum OfferTierMode {
+  /// Only the exact rungs can be bought. Four pieces with rungs at 3 and 5 is
+  /// refused, because no one priced four.
+  EXACT
+  /// The highest rung at or below the quantity sets the price, and anything
+  /// above it is charged at the regular price. Four pieces pay the 3-piece rung
+  /// plus one at list — which is what a merchant means by "3 for 1000" when a
+  /// buyer takes four.
+  THRESHOLD
+}
+
+/// What one rung of a ladder says the goods cost.
+enum OfferTierReward {
+  /// `priceCents` is the total for that many pieces.
+  PRICE
+  /// `discountBps` off the regular total of that many pieces. Survives a price
+  /// change in the catalogue, which a typed total does not.
+  PERCENT
+}
+
 model Offer {
-  id     String @id @default(cuid())
-  pageId String
+  id String @id @default(cuid())
+
+  /// Always set. An offer belongs to the workspace that owns the catalogue it
+  /// sells, whatever it is scoped to below — which is what lets one query find
+  /// every offer a merchant has without walking their stores.
+  organizationId String
+  scope          OfferScope @default(PAGE)
+  /// Set on a STORE-scoped offer, and on a PAGE-scoped one for the page's own
+  /// store, so "everything this shop sells" is one indexed read.
+  storeId        String?
+  /// Set only on a PAGE-scoped offer.
+  pageId         String?
 
   /// Stable identity posted by the public order form. Regenerating this
   /// orphans any ad already pointing at the offer, so it is written once.
@@ -439,18 +488,79 @@ model Offer {
   isActive  Boolean @default(true)
   position  Int     @default(0)
 
+  /// How the ladder answers a quantity nobody priced. COLLECTION only.
+  tierMode OfferTierMode @default(EXACT)
+
+  /// A window the offer runs in. `startsAt` in the future hides it, `endsAt` in
+  /// the past retires it — so a weekend campaign is typed once rather than
+  /// switched on and off by hand at midnight.
+  startsAt DateTime?
+  endsAt   DateTime?
+
+  /// A variant thrown in free with the offer, and how many. Priced at zero and
+  /// labelled as a gift on the order rather than discounted, because "free
+  /// tote with every combo" is a different promise from "1000 off".
+  giftVariantId String?
+  giftQuantity  Int     @default(1)
+
   imageMediaId String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  page  Page        @relation(fields: [pageId], references: [id], onDelete: Cascade)
-  image MediaAsset? @relation(fields: [imageMediaId], references: [id], onDelete: SetNull)
-  items OfferItem[]
-  tiers OfferTier[]
+  organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  store        Store?             @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  page         Page?              @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  image        MediaAsset?        @relation(fields: [imageMediaId], references: [id], onDelete: SetNull)
+  giftVariant  ProductVariant?    @relation("OfferGift", fields: [giftVariantId], references: [id], onDelete: SetNull)
+  items        OfferItem[]
+  tiers        OfferTier[]
+  variantRules OfferVariantRule[]
 
-  @@unique([pageId, key])
+  /// Keyed per workspace rather than per page now that an offer need not have
+  /// one. The key still reads like a slug, so an order still says
+  /// "family-pack" rather than a cuid.
+  @@unique([organizationId, key])
+  @@index([organizationId, scope])
   @@index([pageId, position])
+  @@index([storeId, position])
+}
+
+/// Per-size rules for one offer.
+///
+/// The reason this table exists: a shirt priced 450/500/550 by size is one
+/// product with three prices, and a merchant running "20% off shirts" very
+/// often means "except the XL, which is already thin". Without a per-variant
+/// row the only ways to say that are to split the product or to skip the
+/// promotion — merchants do the second, and the offer stops being used.
+///
+/// Two independent things can be said about a size:
+///
+///   - `excluded` — this size is not part of the offer at all. It disappears
+///     from the buyer's options rather than appearing at a price the offer
+///     does not honour.
+///   - a pricing override — this size is in the offer, at its own terms. Null
+///     `pricingMode` means "whatever the offer says", which is the common case
+///     and the default.
+model OfferVariantRule {
+  id      String @id @default(cuid())
+  offerId String
+
+  variantId String
+
+  excluded Boolean @default(false)
+
+  /// Null falls through to the offer's own pricing.
+  pricingMode OfferPricingMode?
+  priceCents  Int               @default(0)
+  discountBps Int               @default(0)
+
+  offer   Offer          @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  variant ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@unique([offerId, variantId])
+  @@index([offerId])
+  @@index([variantId])
 }
 
 model OfferItem {
@@ -461,6 +571,16 @@ model OfferItem {
   /// Pin a variant, or leave null to let the buyer choose one on the page.
   /// A single-variant product needs no choice and resolves automatically.
   variantId String?
+
+  /// Which sizes of this product the offer covers. Empty means all of them,
+  /// which is the ordinary case; a non-empty list is the merchant saying "this
+  /// bundle is the M and the L, not the XL". `variantId` still wins when set,
+  /// because a pin is a stronger statement than a shortlist.
+  ///
+  /// Ids rather than a join table: the list is read on every render of the
+  /// page and written whole on every save, so a second query to reconstruct it
+  /// would buy nothing. A deleted variant simply stops matching.
+  variantIds String[] @default([])
 
   /// How many of this line the offer includes. FIXED offers only — in a
   /// COLLECTION or ALACARTE the buyer decides, so this is ignored.
@@ -482,8 +602,10 @@ model OfferTier {
   id      String @id @default(cuid())
   offerId String
 
-  quantity   Int
-  priceCents Int
+  quantity    Int
+  reward      OfferTierReward @default(PRICE)
+  priceCents  Int             @default(0)
+  discountBps Int             @default(0)
 
   offer Offer @relation(fields: [offerId], references: [id], onDelete: Cascade)
 
@@ -1652,12 +1774,14 @@ model ProductVariant {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  product         Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
-  image           ProductImage?    @relation(fields: [imageId], references: [id], onDelete: SetNull)
+  product         Product            @relation(fields: [productId], references: [id], onDelete: Cascade)
+  image           ProductImage?      @relation(fields: [imageId], references: [id], onDelete: SetNull)
   inventoryLevels InventoryLevel[]
   cartLines       CartLine[]
   orderLines      OrderLine[]
   offerItems      OfferItem[]
+  offerRules      OfferVariantRule[]
+  offerGifts      Offer[]            @relation("OfferGift")
 
   @@unique([productId, option1, option2, option3])
   @@index([productId, position])
@@ -2099,6 +2223,29 @@ model Order {
   shippingMethodTitle String?
   discountCode        String?
 
+  /// Money taken off by hand, over and above every rule.
+  ///
+  /// Kept apart from `discountTotalCents` (which is the sum of everything) so
+  /// an edit can recompute the rule-driven part from scratch without wiping the
+  /// goodwill someone deliberately granted on the phone. The reason is stored
+  /// because "why is this order 200 cheaper" is asked of the merchant later, by
+  /// their accountant.
+  manualDiscountCents  Int     @default(0)
+  manualDiscountReason String?
+  /// What the code in `discountCode` was actually worth, on its own.
+  ///
+  /// `discountTotalCents` is the sum of everything — the bundle's saving, a
+  /// gift, the code, and anything granted by hand — and none of those can be
+  /// recovered from it afterwards. This is recorded so an edit can re-judge the
+  /// code against the new basket and, when the campaign behind it has since
+  /// been deleted, carry forward exactly what the customer was given rather
+  /// than a figure that also contains the bundle discount.
+  couponDiscountCents  Int     @default(0)
+  /// Delivery waived by hand on an edit. A zero charge and a *waived* charge
+  /// read the same in the total and differently in a conversation, and the
+  /// order form's own free-delivery rule must not be credited for it.
+  shippingWaived       Boolean @default(false)
+
   note          String?
   tags          String[] @default([])
   // Marketing attribution captured at checkout.
@@ -2227,6 +2374,16 @@ model OrderLine {
   requiresShipping Boolean @default(true)
   weightGrams      Int     @default(0)
   properties       Json?
+
+  /// Given away rather than sold.
+  ///
+  /// The line keeps its real `unitPriceCents` and carries an equal
+  /// `totalDiscountCents`, so the subtotal still says what the goods were worth
+  /// and the discount total says what was given away — the merchant's margin
+  /// report stays honest, and the customer's total is unaffected. This flag is
+  /// what makes the difference visible: the order shows "Gift" where a price
+  /// would be, rather than a suspicious 100%-off line.
+  isGift Boolean @default(false)
 
   // Drives partial refunds and partial returns. `returnedQuantity` is how many
   // of this line came back — the customer refusing three of five shirts at the
@@ -2440,9 +2597,29 @@ model Discount {
   valueBps   Int?
   valueCents Int?
 
+  /// A ceiling on what a percentage may take off, in minor units. Null is no
+  /// ceiling. "20% off, up to 500" is how a merchant runs a percentage sale
+  /// without it costing them a fortune on the one large order of the month.
+  maxDiscountCents Int?
+
+  /// Which storefronts honour this code. Empty means all of them — the common
+  /// case, and what every existing row means. Naming stores turns one campaign
+  /// into a per-shop one without duplicating the rule, which is what makes a
+  /// cross-store workspace usable.
+  storeIds String[] @default([])
+
   appliesTo           DiscountScope @default(ALL)
   targetProductIds    String[]      @default([])
   targetCollectionIds String[]      @default([])
+  /// Size-level targeting. A shirt's M and L can be on offer while the XL is
+  /// not, which is a thing merchants ask for constantly and previously could
+  /// only be expressed by splitting the product.
+  targetVariantIds    String[]      @default([])
+
+  /// Carved out of whatever the scope above selected. Exclusions are checked
+  /// after inclusion, so "everything except these two sizes" is one rule.
+  excludedProductIds String[] @default([])
+  excludedVariantIds String[] @default([])
 
   // Entry conditions.
   minimumSubtotalCents Int?
@@ -2487,6 +2664,8 @@ enum DiscountScope {
   ALL
   PRODUCTS
   COLLECTIONS
+  /// Individual variants — the size-level scope.
+  VARIANTS
 }
 
 model DiscountCode {

@@ -50,7 +50,6 @@ const offerInclude = {
           id: true,
           title: true,
           status: true,
-          publishedAt: true,
           images: {
             orderBy: { position: 'asc' },
             take: 1,
@@ -72,7 +71,25 @@ const offerInclude = {
     },
   },
   tiers: { orderBy: { quantity: 'asc' } },
+  variantRules: true,
   image: { select: { url: true } },
+  giftVariant: {
+    select: {
+      id: true,
+      title: true,
+      priceCents: true,
+      product: {
+        select: {
+          title: true,
+          images: {
+            orderBy: { position: 'asc' },
+            take: 1,
+            select: { media: { select: { url: true } } },
+          },
+        },
+      },
+    },
+  },
 } as const
 
 type OfferRow = Awaited<
@@ -100,26 +117,53 @@ function isAvailable(variant: VariantRow): boolean {
   return onHand > 0
 }
 
-function toVariantChoice(variant: VariantRow): OfferVariantChoice {
+/** The per-size rules of one offer, by variant. */
+type VariantRules = Map<string, OfferRow['variantRules'][number]>
+
+function toVariantChoice(
+  variant: VariantRow,
+  rules: VariantRules
+): OfferVariantChoice {
+  const rule = rules.get(variant.id)
+
   return {
     id: variant.id,
     title: variant.title,
     priceCents: variant.priceCents,
     available: isAvailable(variant),
+    // Only a rule that actually names a mode overrides anything. A row that
+    // exists purely to exclude a size carries no pricing, and treating its
+    // zeroed columns as "0% off" would quietly cancel the offer on that size
+    // instead of removing it.
+    pricing: rule?.pricingMode
+      ? {
+          mode: rule.pricingMode,
+          priceCents: rule.priceCents,
+          discountBps: rule.discountBps,
+        }
+      : null,
   }
 }
 
 /**
  * One offer line as the page should see it, or null when it cannot be sold.
  *
- * A draft or unpublished product must never appear on a live page, and a line
- * whose pinned variant has sold out has nothing to offer — returning null lets
- * the caller decide whether that kills the whole offer (FIXED: yes, the set is
- * incomplete) or just shrinks the pool (COLLECTION/ALACARTE: no).
+ * A draft product must never appear on a live page, and a line whose only
+ * remaining sizes are sold out or excluded has nothing to offer — returning
+ * null lets the caller decide whether that kills the whole offer (FIXED: yes,
+ * the set is incomplete) or just shrinks the pool (COLLECTION/ALACARTE: no).
+ *
+ * `status` is the only publication gate. There is deliberately no check on
+ * `publishedAt` here: nothing in the product editor ever sets that column, so
+ * requiring it hid every offer on the platform behind a field no merchant
+ * could fill in.
  */
-function toOfferLine(item: OfferRow['items'][number]): OfferLine | null {
+function toOfferLine(
+  item: OfferRow['items'][number],
+  rules: VariantRules
+): OfferLine | null {
   const product = item.product
-  if (product.status !== 'ACTIVE' || !product.publishedAt) return null
+  if (product.status !== 'ACTIVE') return null
 
   const pinned = item.variantId
     ? product.variants.find((variant) => variant.id === item.variantId)
@@ -128,8 +172,23 @@ function toOfferLine(item: OfferRow['items'][number]): OfferLine | null {
   // A pinned variant that no longer exists is treated as "no pin" rather than
   // as a broken line: the merchant's intent was to sell this product, and the
   // buyer can still choose.
-  const candidates = pinned ? [pinned] : product.variants
-  const choices = candidates.map(toVariantChoice)
+  let candidates = pinned ? [pinned] : product.variants
+
+  // The line's own shortlist of sizes, when the merchant narrowed it. A
+  // shortlist that matches nothing any more — every named size deleted — is
+  // treated as no shortlist, because dropping the product entirely is a worse
+  // answer to a stale id than selling it in the sizes that still exist.
+  if (!pinned && item.variantIds.length > 0) {
+    const allowed = new Set(item.variantIds)
+    const narrowed = candidates.filter((variant) => allowed.has(variant.id))
+    if (narrowed.length > 0) candidates = narrowed
+  }
+
+  // Sizes the merchant carved out of this offer are gone, not shown at a price
+  // the offer does not honour.
+  candidates = candidates.filter((variant) => !rules.get(variant.id)?.excluded)
+
+  const choices = candidates.map((variant) => toVariantChoice(variant, rules))
   if (choices.length === 0) return null
   if (!choices.some((choice) => choice.available)) return null
 
@@ -144,8 +203,12 @@ function toOfferLine(item: OfferRow['items'][number]): OfferLine | null {
 }
 
 function toPublicOffer(row: OfferRow): PublicOffer | null {
+  const rules: VariantRules = new Map(
+    row.variantRules.map((rule) => [rule.variantId, rule])
+  )
+
   const lines = row.items
-    .map(toOfferLine)
+    .map((item) => toOfferLine(item, rules))
     .filter((line): line is OfferLine => line !== null)
 
   const isPool = row.kind === 'COLLECTION' || row.kind === 'ALACARTE'
@@ -158,7 +221,9 @@ function toPublicOffer(row: OfferRow): PublicOffer | null {
 
   const tiers = row.tiers.map((tier) => ({
     quantity: tier.quantity,
+    reward: tier.reward,
     priceCents: tier.priceCents,
+    discountBps: tier.discountBps,
   }))
   if (row.kind === 'COLLECTION' && tiers.length === 0) return null
 
@@ -173,6 +238,17 @@ function toPublicOffer(row: OfferRow): PublicOffer | null {
     items: isPool ? [] : lines,
     pool: isPool ? lines : [],
     tiers,
+    tierMode: row.tierMode,
+    gift: row.giftVariant
+      ? {
+          variantId: row.giftVariant.id,
+          title: row.giftVariant.product.title,
+          variantTitle: row.giftVariant.title,
+          imageUrl: row.giftVariant.product.images[0]?.media.url ?? null,
+          quantity: Math.max(1, row.giftQuantity),
+          priceCents: row.giftVariant.priceCents,
+        }
+      : null,
     minQuantity: row.minQuantity,
     maxQuantity: row.maxQuantity,
     pricing: {
@@ -210,14 +286,43 @@ function regularTotalOf(offer: PublicOffer): number {
 /**
  * Every sellable offer on a page, in the merchant's order.
  *
+ * Three scopes are unioned here: the page's own offers, the ones its store runs
+ * everywhere, and the ones the workspace runs across every store. A merchant
+ * who typed "any 3 shirts for 1500" once at the workspace level gets it on
+ * every campaign page without copying it, and a page that needs its own
+ * headline bundle still adds one — page offers sort first, because a page-level
+ * offer is the more specific statement and belongs at the top of the card list.
+ *
  * Offers that cannot currently be sold are dropped rather than rendered as
  * disabled: a landing page's job is to make one choice obvious, and a greyed
  * out "sold out" bundle sitting next to it only creates doubt.
  */
 export async function getPublicOffers(pageId: string): Promise<PublicOffer[]> {
+  const page = await prisma.page.findUnique({
+    where: { id: pageId },
+    select: { storeId: true, store: { select: { organizationId: true } } },
+  })
+  if (!page) return []
+
+  const now = new Date()
+
   const rows = await prisma.offer.findMany({
-    where: { pageId, isActive: true },
-    orderBy: { position: 'asc' },
+    where: {
+      isActive: true,
+      // A campaign that has not opened yet, or has closed, is not on sale. Both
+      // bounds are optional and an unset one means "no limit in that
+      // direction", which is what an always-on offer is.
+      AND: [
+        { OR: [{ startsAt: null }, { startsAt: { lte: now } }] },
+        { OR: [{ endsAt: null }, { endsAt: { gt: now } }] },
+      ],
+      OR: [
+        { scope: 'PAGE', pageId },
+        { scope: 'STORE', storeId: page.storeId },
+        { scope: 'ORGANIZATION', organizationId: page.store.organizationId },
+      ],
+    },
+    orderBy: [{ scope: 'asc' }, { position: 'asc' }],
     take: OFFER_PRODUCT_LIMIT,
     include: offerInclude,
   })
@@ -398,6 +503,8 @@ export interface PricedSubmission {
   goodsCents: number
   savingCents: number
   quantity: number
+  /** What the offer throws in free, if anything, and how many. */
+  gift: PublicOffer['gift']
 }
 
 /**
@@ -447,10 +554,11 @@ export async function priceOfferSubmission(
   }
 
   const resolved = [...merged.values()]
-  const quote = quoteOffer(offer, resolved, (variantId) => {
-    const variant = allowed.get(variantId)
-    return variant ? variant.priceCents : null
-  })
+  const quote = quoteOffer(
+    offer,
+    resolved,
+    (variantId) => allowed.get(variantId) ?? null
+  )
 
   if (quote.error) throw new Error(quote.error)
 
@@ -461,6 +569,7 @@ export async function priceOfferSubmission(
     goodsCents: quote.goodsCents,
     savingCents: quote.savingCents,
     quantity: quote.quantity,
+    gift: offer.gift,
   }
 }
 

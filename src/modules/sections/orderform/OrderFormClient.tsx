@@ -18,6 +18,7 @@ import type { StorefrontCommerce } from '../registry'
 import type { OrderformContent } from './index'
 import {
   fixedSelection,
+  priceVariesByVariant,
   quantityBounds,
   quoteOffer,
 } from '@/lib/offers/pricing'
@@ -27,6 +28,7 @@ import { formatMoney } from '@/lib/money'
 import type {
   OfferLine,
   OfferSelectionItem,
+  OfferVariantChoice,
   PublicOffer,
 } from '@/lib/offers/types'
 import { cn } from '@/lib/utils'
@@ -99,6 +101,16 @@ export function OrderFormClient({
     city: '',
     note: '',
   })
+  /**
+   * A code the buyer typed.
+   *
+   * Deliberately not previewed here. Whether a code qualifies depends on rules
+   * this page was never sent — who has used it, how many times, which stores it
+   * runs on — so a browser-side "−৳200" would be a guess, and a guess that
+   * turns out wrong at the summary is worse than no number at all. The server
+   * applies it and the confirmation reports the real total.
+   */
+  const [couponCode, setCouponCode] = useState('')
 
   // Falls back to the first offer rather than to nothing. `offerKey` is seeded
   // once, on mount, from whatever offers existed then — so a form that mounted
@@ -183,6 +195,7 @@ export function OrderFormClient({
           selections,
           countryCode: content.countryCode,
           shippingRateId: rateId || undefined,
+          discountCode: couponCode.trim() || undefined,
           name: values.name,
           phone: values.phone,
           email: values.email || undefined,
@@ -485,6 +498,29 @@ export function OrderFormClient({
               )}
             </div>
 
+            {/* Discount code. Below the address rather than beside the total,
+                because a buyer who has one already knows it and a buyer who
+                does not should not be shown a field that reads as "you are
+                paying too much" while they are deciding. */}
+            <div className="border-t border-black/[0.06] px-5 pt-4 pb-5 sm:px-6">
+              <label className={labelClass} htmlFor="lp-coupon">
+                Discount code (optional)
+              </label>
+              <input
+                id="lp-coupon"
+                className={cn(fieldClass, 'uppercase')}
+                autoComplete="off"
+                autoCapitalize="characters"
+                spellCheck={false}
+                placeholder="SAVE10"
+                value={couponCode}
+                onChange={(e) => setCouponCode(e.target.value)}
+              />
+              <p className="mt-1.5 text-[11px] text-[color:var(--lp-text)]/45">
+                Applied when you place the order.
+              </p>
+            </div>
+
             {/* Summary + submit */}
             <div className="space-y-2 border-t border-black/[0.06] bg-black/[0.02] px-5 py-5 sm:px-6">
               <div className="flex justify-between text-[13px] text-[color:var(--lp-text)]/70">
@@ -507,6 +543,20 @@ export function OrderFormClient({
                 >
                   <span>Offer saving</span>
                   <span>−{money(offerSavings)}</span>
+                </div>
+              )}
+
+              {offer.gift && priced && (
+                <div
+                  className="flex justify-between text-[13px]"
+                  style={{ color: 'var(--lp-accent)' }}
+                >
+                  <span className="flex items-center gap-1">
+                    <Gift size={12} />
+                    {offer.gift.quantity > 1 && `${offer.gift.quantity} × `}
+                    {offer.gift.title}
+                  </span>
+                  <span className="font-semibold">FREE</span>
                 </div>
               )}
 
@@ -617,11 +667,16 @@ export function OrderFormClient({
 /**
  * One package card.
  *
- * Only a FIXED offer has one price to name. A pool offer's total depends on
- * what the buyer picks, and a "from X" here would be worse than vague: it would
- * quote one item with the whole cart's discount already taken off, so a
- * 3-piece combo could advertise less than a 2-piece. The real price is right
- * below — the tier ladder, the per-item prices, and the running total.
+ * A FIXED offer has one price and names it. A pool offer's total depends on
+ * what the buyer picks, so it leads with the least they could pay and says
+ * "from" — which is honest, and is what the card has to do to be a card at all.
+ * Showing nothing, which is what these used to do, left a merchant looking at a
+ * row of unpriced boxes and concluding their offers were broken.
+ *
+ * `headlinePriceCents` is computed by the same pricing module the server
+ * charges with: the cheapest rung for a ladder, the cheapest thing in the pool
+ * at the minimum quantity for à la carte. It cannot advertise below what the
+ * offer can actually be bought for.
  */
 function OfferCard({
   offer,
@@ -634,7 +689,8 @@ function OfferCard({
   onSelect: () => void
   money: (cents: number) => string
 }) {
-  const exactPrice = offer.kind === 'FIXED'
+  const exactPrice = offer.kind === 'FIXED' && !priceVariesByVariant(offer)
+  const hasPrice = offer.headlinePriceCents > 0
   const savings = Math.max(0, offer.compareAtCents - offer.headlinePriceCents)
 
   return (
@@ -650,14 +706,7 @@ function OfferCard({
       }}
     >
       {offer.imageUrl && (
-        <div className="relative h-14 w-12 flex-shrink-0 overflow-hidden rounded-lg bg-black/5">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={offer.imageUrl}
-            alt=""
-            className="absolute inset-0 h-full w-full object-cover"
-          />
-        </div>
+        <ProductThumb url={offer.imageUrl} className="h-20 w-16" />
       )}
       <div className="min-w-0 flex-1">
         <p className="truncate text-[13px] font-semibold text-[color:var(--lp-text)]">
@@ -668,17 +717,30 @@ function OfferCard({
             {offer.description}
           </p>
         )}
-        {exactPrice && (
+        {hasPrice && (
           <p
             className="mt-0.5 text-[13px] font-bold"
             style={{ color: 'var(--lp-accent)' }}
           >
+            {!exactPrice && (
+              <span className="mr-1 text-[11px] font-normal opacity-70">
+                from
+              </span>
+            )}
             {money(offer.headlinePriceCents)}
-            {savings > 0 && (
+            {/* Only against an exact price. A strike-through beside a "from"
+                price compares two different baskets and reads as a bigger
+                saving than the offer is giving. */}
+            {exactPrice && savings > 0 && (
               <span className="ml-1.5 text-[11px] font-normal text-[color:var(--lp-text)]/40 line-through">
                 {money(offer.compareAtCents)}
               </span>
             )}
+          </p>
+        )}
+        {offer.gift && (
+          <p className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-[color:var(--lp-text)]/60">
+            <Gift size={11} /> Free {offer.gift.title}
           </p>
         )}
       </div>
@@ -699,6 +761,41 @@ function OfferCard({
         </span>
       )}
     </button>
+  )
+}
+
+/**
+ * A product's photo, at a size a phone can read.
+ *
+ * These were 48×56. A rack of shirts that differ only in the collar looked
+ * like one shirt repeated seven times at that size, and buyers picked by
+ * position rather than by product. Telling two similar products apart is the
+ * entire job of this box, so it is sized for that and nothing else.
+ */
+function ProductThumb({
+  url,
+  className,
+}: {
+  url: string | null
+  className?: string
+}) {
+  return (
+    <div
+      className={cn(
+        'relative flex-shrink-0 overflow-hidden rounded-lg bg-black/5',
+        className ?? 'h-24 w-20 sm:h-28 sm:w-24'
+      )}
+    >
+      {url && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={url}
+          alt=""
+          loading="lazy"
+          className="absolute inset-0 h-full w-full object-cover"
+        />
+      )}
+    </div>
   )
 }
 
@@ -723,18 +820,9 @@ function FixedLine({
 
   return (
     <div className="flex items-center gap-3">
-      <div className="relative h-14 w-12 flex-shrink-0 overflow-hidden rounded-lg bg-black/5">
-        {line.imageUrl && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={line.imageUrl}
-            alt=""
-            className="absolute inset-0 h-full w-full object-cover"
-          />
-        )}
-      </div>
+      <ProductThumb url={line.imageUrl} />
       <div className="min-w-0 flex-1">
-        <p className="truncate text-[13px] font-medium text-[color:var(--lp-text)]">
+        <p className="line-clamp-2 text-[13.5px] leading-snug font-medium text-[color:var(--lp-text)]">
           {line.title}
           {line.quantity > 1 && (
             <span className="text-[color:var(--lp-text)]/45">
@@ -748,30 +836,44 @@ function FixedLine({
             {pinned.title}
           </p>
         ) : line.variants.length > 1 ? (
-          <div className="mt-1.5 flex flex-wrap gap-1.5">
-            {line.variants.map((variant) => {
-              const active = chosen === variant.id
-              return (
-                <button
-                  type="button"
-                  key={variant.id}
-                  disabled={!variant.available}
-                  onClick={() => onChoose(variant.id)}
-                  className="min-w-[38px] rounded-lg border px-2.5 py-1 text-[12px] font-medium transition-colors disabled:opacity-35"
-                  style={{
-                    borderColor: active
-                      ? 'var(--lp-accent)'
-                      : 'rgba(0,0,0,0.12)',
-                    background: active ? 'var(--lp-accent)' : 'white',
-                    color: active ? '#fff' : 'inherit',
-                  }}
-                >
-                  {variant.title}
-                  {varies ? ` · ${money(variant.priceCents)}` : ''}
-                </button>
-              )
-            })}
-          </div>
+          <>
+            {/* Nothing is pre-selected, so the line has to ask. The summary's
+                error says an option is missing; only the row knows which
+                item is missing it. */}
+            {!chosen && (
+              <p
+                className="mt-0.5 text-[11.5px] font-medium"
+                style={{ color: 'var(--lp-accent)' }}
+              >
+                Select an option
+              </p>
+            )}
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {line.variants.map((variant) => {
+                const active = chosen === variant.id
+                return (
+                  <button
+                    type="button"
+                    key={variant.id}
+                    disabled={!variant.available}
+                    aria-pressed={active}
+                    onClick={() => onChoose(variant.id)}
+                    className="min-w-[42px] rounded-lg border px-3 py-1.5 text-[12.5px] font-medium transition-colors disabled:opacity-35"
+                    style={{
+                      borderColor: active
+                        ? 'var(--lp-accent)'
+                        : 'rgba(0,0,0,0.14)',
+                      background: active ? 'var(--lp-accent)' : 'white',
+                      color: active ? '#fff' : 'var(--lp-text)',
+                    }}
+                  >
+                    {variant.title}
+                    {varies ? ` · ${money(variant.priceCents)}` : ''}
+                  </button>
+                )
+              })}
+            </div>
+          </>
         ) : null}
       </div>
     </div>
@@ -803,10 +905,15 @@ function PoolPicker({
   const isCollection = offer.kind === 'COLLECTION'
   const totalQty = Object.values(picks).reduce((n, x) => n + x, 0)
   const atMax = bounds.max > 0 && totalQty >= bounds.max
-  const activeTierQty = isCollection
-    ? ([...offer.tiers].reverse().find((t) => t.quantity <= totalQty)
-        ?.quantity ?? 0)
-    : 0
+  // Which rung the buyer is standing on. A threshold ladder keeps the last one
+  // they passed; an exact ladder only lights up when they land on a rung, which
+  // is the truth — one item either side of it and that price is not on offer.
+  const activeTierQty = !isCollection
+    ? 0
+    : offer.tierMode === 'THRESHOLD'
+      ? ([...offer.tiers].reverse().find((t) => t.quantity <= totalQty)
+          ?.quantity ?? 0)
+      : (offer.tiers.find((t) => t.quantity === totalQty)?.quantity ?? 0)
   const rangeLabel =
     bounds.min === bounds.max && bounds.max
       ? `${bounds.max}`
@@ -817,7 +924,9 @@ function PoolPicker({
       {isCollection ? (
         <div className="px-5 pt-5 sm:px-6">
           <p className={labelClass}>
-            Pick any {rangeLabel} — price drops as you add
+            {offer.tierMode === 'THRESHOLD'
+              ? `Pick ${bounds.min || 1} or more — price drops as you add`
+              : `Pick any ${rangeLabel} — price drops as you add`}
           </p>
           <div className="flex flex-wrap gap-1.5">
             {offer.tiers.map((t) => {
@@ -836,7 +945,10 @@ function PoolPicker({
                     color: active ? 'var(--lp-accent)' : 'inherit',
                   }}
                 >
-                  {t.quantity} pcs · {money(t.priceCents)}
+                  {t.quantity} pcs ·{' '}
+                  {t.reward === 'PERCENT'
+                    ? `${t.discountBps / 100}% off`
+                    : money(t.priceCents)}
                 </span>
               )
             })}
@@ -890,6 +1002,12 @@ function PoolPicker({
  * is a second, smaller decision made inside its row. Picks stay keyed by
  * variant id, so two options of the same product remain two order lines and the
  * server prices each at its own price.
+ *
+ * Nothing is chosen on the buyer's behalf. The first sellable option used to be
+ * selected on mount, which made "M" the answer to a question nobody had asked:
+ * a row could be added with one tap that never mentioned a size, and the size
+ * that rode along was whichever happened to be first. Orders arrived for sizes
+ * the buyer never looked at. Now the row cannot be added until they say which.
  */
 function PoolRow({
   line,
@@ -907,16 +1025,41 @@ function PoolRow({
   atMax: boolean
 }) {
   const sellable = line.variants.filter((variant) => variant.available)
-  const [variantId, setVariantId] = useState(() => sellable[0]?.id ?? '')
+  // One option is not a choice — there is nothing to get wrong, so it stays
+  // selected. Two or more start empty and wait for the buyer.
+  const [variantId, setVariantId] = useState<string | null>(() =>
+    sellable.length === 1 ? (sellable[0]?.id ?? null) : null
+  )
+  /** Set when the buyer tries to add the row before naming an option. */
+  const [needsChoice, setNeedsChoice] = useState(false)
 
   if (sellable.length === 0) return null
 
   const variant =
-    sellable.find((candidate) => candidate.id === variantId) ?? sellable[0]!
-  const qty = picks[variant.id] ?? 0
-  const pickedAny = sellable.some((v) => (picks[v.id] ?? 0) > 0)
+    sellable.find((candidate) => candidate.id === variantId) ?? null
+  const qty = variant ? (picks[variant.id] ?? 0) : 0
+  const rowQty = sellable.reduce((n, v) => n + (picks[v.id] ?? 0), 0)
+  const pickedAny = rowQty > 0
+  // With no option chosen there is no one price to name, so the row leads with
+  // the cheapest and says "from" rather than quoting a size at random.
+  const fromCents = Math.min(...sellable.map((v) => v.priceCents))
+  const varies = new Set(sellable.map((v) => v.priceCents)).size > 1
+
+  const choose = (choiceId: string) => {
+    setVariantId(choiceId)
+    setNeedsChoice(false)
+    // Naming an option on an untouched row *is* the buyer choosing the product;
+    // making them tap again to confirm what they just said would be strange. A
+    // row that already holds picks is a buyer adding a second option to it, so
+    // there only the chip moves and the stepper adds.
+    if (rowQty === 0 && !atMax) onPicks({ ...picks, [choiceId]: 1 })
+  }
 
   const bump = (delta: number) => {
+    if (!variant) {
+      setNeedsChoice(true)
+      return
+    }
     if (delta > 0 && atMax) return
     onPicks({ ...picks, [variant.id]: Math.max(0, qty + delta) })
   }
@@ -924,6 +1067,10 @@ function PoolRow({
   // Tapping the row picks it. A 28px stepper button was the only way in — for
   // the one action the whole page exists for. Tapping a picked row clears it.
   const toggle = () => {
+    if (!variant) {
+      setNeedsChoice(true)
+      return
+    }
     if (qty > 0) {
       onPicks({ ...picks, [variant.id]: 0 })
       return
@@ -935,7 +1082,7 @@ function PoolRow({
   return (
     <div
       onClick={toggle}
-      className="flex cursor-pointer items-center gap-3 rounded-xl border-2 p-3 transition-colors select-none"
+      className="flex cursor-pointer gap-3 rounded-xl border-2 p-3 transition-colors select-none"
       style={{
         borderColor: pickedAny ? 'var(--lp-accent)' : 'rgba(0,0,0,0.08)',
         background: pickedAny
@@ -943,83 +1090,119 @@ function PoolRow({
           : 'white',
       }}
     >
-      <div className="relative h-14 w-12 flex-shrink-0 overflow-hidden rounded-lg bg-black/5">
-        {line.imageUrl && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={line.imageUrl}
-            alt=""
-            className="absolute inset-0 h-full w-full object-cover"
-          />
-        )}
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-[13px] font-medium text-[color:var(--lp-text)]">
-          {line.title}
+      <ProductThumb url={line.imageUrl} />
+      <div className="flex min-w-0 flex-1 flex-col justify-between gap-2">
+        <div className="min-w-0">
+          <p className="line-clamp-2 text-[13.5px] leading-snug font-medium text-[color:var(--lp-text)]">
+            {line.title}
+          </p>
           {priced && (
-            <span className="text-[color:var(--lp-text)]/55">
-              {' '}
-              · {money(variant.priceCents)}
-            </span>
+            <p className="mt-0.5 text-[12.5px] font-semibold text-[color:var(--lp-text)]/70">
+              {!variant && varies && (
+                <span className="font-normal opacity-70">from </span>
+              )}
+              {money(variant?.priceCents ?? fromCents)}
+              {/* A size on its own terms says so on the row it is chosen from.
+                  Without this the total moves when the buyer switches from M to
+                  L and nothing on screen explains why. */}
+              {variant?.pricing?.mode === 'AUTO' && (
+                <span className="font-normal text-[color:var(--lp-text)]/45">
+                  {' '}
+                  · no offer
+                </span>
+              )}
+            </p>
           )}
-        </p>
-        {sellable.length > 1 && (
+          {sellable.length > 1 && !variant && (
+            <p
+              className={cn(
+                'mt-0.5 text-[11.5px] font-semibold',
+                needsChoice && 'text-amber-600'
+              )}
+              style={needsChoice ? undefined : { color: 'var(--lp-accent)' }}
+            >
+              {needsChoice ? 'Please select a size first' : 'Select a size'}
+            </p>
+          )}
+        </div>
+
+        {/* Wraps rather than squeezing: on a phone the stepper drops to its own
+            line and the chips get the full width, so four sizes sit in two
+            comfortable rows instead of four ragged ones. */}
+        <div className="flex flex-wrap items-end justify-between gap-2">
+          {sellable.length > 1 && (
+            <div
+              className="flex min-w-[150px] flex-1 flex-wrap gap-1.5"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {sellable.map((choice) => {
+                const active = variant?.id === choice.id
+                const chosenQty = picks[choice.id] ?? 0
+                return (
+                  <button
+                    type="button"
+                    key={choice.id}
+                    aria-pressed={active}
+                    onClick={() => choose(choice.id)}
+                    className="min-w-[42px] rounded-lg border px-3 py-1.5 text-[12.5px] font-medium transition-colors"
+                    style={{
+                      // A size the buyer has already taken stays marked even
+                      // while another one is the active chip, or their first
+                      // pick vanishes from the row that holds it.
+                      borderColor:
+                        active || chosenQty > 0
+                          ? 'var(--lp-accent)'
+                          : 'rgba(0,0,0,0.14)',
+                      background: active
+                        ? 'var(--lp-accent)'
+                        : chosenQty > 0
+                          ? 'color-mix(in srgb, var(--lp-accent) 12%, white)'
+                          : 'white',
+                      color: active
+                        ? '#fff'
+                        : chosenQty > 0
+                          ? 'var(--lp-accent)'
+                          : 'var(--lp-text)',
+                    }}
+                  >
+                    {choice.title}
+                    {chosenQty > 0 ? ` ×${chosenQty}` : ''}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+          {/* Covers the buttons, the count and the gaps between them. */}
           <div
-            className="mt-1.5 flex flex-wrap gap-1.5"
+            className="ml-auto flex flex-shrink-0 items-center gap-1"
             onClick={(e) => e.stopPropagation()}
           >
-            {sellable.map((choice) => {
-              const active = variant.id === choice.id
-              const chosenQty = picks[choice.id] ?? 0
-              return (
-                <button
-                  type="button"
-                  key={choice.id}
-                  onClick={() => setVariantId(choice.id)}
-                  className="min-w-[34px] rounded-md border px-2 py-0.5 text-[11px] font-medium transition-colors"
-                  style={{
-                    borderColor: active
-                      ? 'var(--lp-accent)'
-                      : 'rgba(0,0,0,0.12)',
-                    background: active ? 'var(--lp-accent)' : 'white',
-                    color: active ? '#fff' : 'inherit',
-                  }}
-                >
-                  {choice.title}
-                  {chosenQty > 0 ? ` ×${chosenQty}` : ''}
-                </button>
-              )
-            })}
+            <button
+              type="button"
+              onClick={() => bump(-1)}
+              disabled={!qty}
+              className="flex h-8 w-8 items-center justify-center rounded-full border border-black/15 text-[color:var(--lp-text)]/70 disabled:opacity-30"
+              aria-label="Remove one"
+            >
+              <Minus size={15} />
+            </button>
+            <span className="w-6 text-center text-[13px] font-semibold text-[color:var(--lp-text)] tabular-nums">
+              {qty}
+            </span>
+            {/* Stays live with no option chosen: it is the buyer's most likely
+                way in, and it has to be able to tell them why it did nothing. */}
+            <button
+              type="button"
+              onClick={() => bump(1)}
+              disabled={atMax && Boolean(variant)}
+              className="flex h-8 w-8 items-center justify-center rounded-full text-white disabled:opacity-30"
+              style={{ background: 'var(--lp-accent)' }}
+              aria-label="Add one"
+            >
+              <Plus size={15} />
+            </button>
           </div>
-        )}
-      </div>
-      {/* Covers the buttons, the count and the gaps between them. */}
-      <div
-        className="flex flex-shrink-0 items-center gap-1"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <button
-          type="button"
-          onClick={() => bump(-1)}
-          disabled={!qty}
-          className="flex h-7 w-7 items-center justify-center rounded-full border border-black/15 text-[color:var(--lp-text)]/70 disabled:opacity-30"
-          aria-label="Remove one"
-        >
-          <Minus size={13} />
-        </button>
-        <span className="w-6 text-center text-[13px] font-semibold text-[color:var(--lp-text)] tabular-nums">
-          {qty}
-        </span>
-        <button
-          type="button"
-          onClick={() => bump(1)}
-          disabled={atMax}
-          className="flex h-7 w-7 items-center justify-center rounded-full text-white disabled:opacity-30"
-          style={{ background: 'var(--lp-accent)' }}
-          aria-label="Add one"
-        >
-          <Plus size={13} />
-        </button>
+        </div>
       </div>
     </div>
   )
@@ -1059,12 +1242,17 @@ function buildSelections(
     }))
 }
 
-/** Unit prices as the page was rendered with them. */
+/**
+ * The offer's variants as the page was rendered with them.
+ *
+ * The whole choice rather than just its price, because a size can carry its own
+ * terms inside the offer and the preview has to apply the same rule the server
+ * will.
+ */
 function priceLookup(offer: PublicOffer) {
-  const prices = new Map<string, number>()
+  const variants = new Map<string, OfferVariantChoice>()
   for (const line of [...offer.items, ...offer.pool]) {
-    for (const variant of line.variants)
-      prices.set(variant.id, variant.priceCents)
+    for (const variant of line.variants) variants.set(variant.id, variant)
   }
-  return (variantId: string) => prices.get(variantId) ?? null
+  return (variantId: string) => variants.get(variantId) ?? null
 }

@@ -94,7 +94,7 @@ export async function priceCartById(
   const provinceCode = shippingAddress?.provinceCode ?? null
 
   const [discount, taxRates, shippingRates] = await Promise.all([
-    loadDiscount(cart.organizationId, cart.discountCode),
+    loadDiscount(cart.organizationId, cart.discountCode, cart.storeId),
     loadTaxRates(cart.organizationId, countryCode, provinceCode),
     loadShippingRates(cart.organizationId, countryCode),
   ])
@@ -167,9 +167,24 @@ export async function priceCartById(
   }
 }
 
-async function loadDiscount(
+/**
+ * The rule behind a typed code, ready to price with — or null if it cannot be
+ * used right now.
+ *
+ * Exported because three callers have to answer the identical question and must
+ * answer it identically: the cart, the landing-page order route, and the order
+ * editor revalidating a code against a basket a merchant just changed on the
+ * phone. A code that is honoured at checkout and refused on an edit — or the
+ * reverse — is a conversation the merchant cannot win.
+ *
+ * `storeId` narrows to campaigns that storefront is part of. A discount naming
+ * no stores runs everywhere, which is what every existing row means and what a
+ * merchant with one shop expects.
+ */
+export async function loadDiscount(
   organizationId: string,
-  code: string | null
+  code: string | null,
+  storeId?: string | null
 ): Promise<PricingDiscount | null> {
   if (!code) return null
 
@@ -203,15 +218,29 @@ async function loadDiscount(
     return null
   }
 
+  // An empty list is "every store", so it is not a filter — only a non-empty
+  // one is, and then only when we know which store is asking.
+  if (
+    storeId &&
+    discount.storeIds.length > 0 &&
+    !discount.storeIds.includes(storeId)
+  ) {
+    return null
+  }
+
   return {
     id: discount.id,
     code: discountCode.code,
     type: discount.type,
     valueBps: discount.valueBps,
     valueCents: discount.valueCents,
+    maxDiscountCents: discount.maxDiscountCents,
     appliesTo: discount.appliesTo,
     targetProductIds: discount.targetProductIds,
     targetCollectionIds: discount.targetCollectionIds,
+    targetVariantIds: discount.targetVariantIds,
+    excludedProductIds: discount.excludedProductIds,
+    excludedVariantIds: discount.excludedVariantIds,
     minimumSubtotalCents: discount.minimumSubtotalCents,
     minimumQuantity: discount.minimumQuantity,
     buyQuantity: discount.buyQuantity,

@@ -56,7 +56,7 @@ const NAV_GROUPS: Array<{ label: string | null; items: NavItem[] }> = [
       { href: '/collections', label: 'Collections', icon: Layers },
       { href: '/inventory', label: 'Inventory', icon: Warehouse },
       { href: '/customers', label: 'Customers', icon: UserRound },
-      { href: '/discounts', label: 'Discounts', icon: Tag },
+      { href: '/discounts', label: 'Discounts & offers', icon: Tag },
     ],
   },
   {

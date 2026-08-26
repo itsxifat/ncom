@@ -1,10 +1,9 @@
 import { getActiveOrganization } from '@/server/services/organizationService'
-import { listProducts } from '@/server/services/productService'
 import { listCollections } from '@/server/services/collectionService'
 import { getOrganizationSettings } from '@/server/services/organizationSettingsService'
 import { PageHeader } from '@/components/app/page-header'
-import { PageShell } from '@/components/app/page-shell'
 import { DiscountForm } from '@/components/store/discount-form'
+import { loadDiscountTargets } from '../discount-data'
 
 /** `datetime-local` wants "YYYY-MM-DDTHH:mm" in local time, not an ISO string. */
 function toLocalInput(date: Date): string {
@@ -15,14 +14,14 @@ function toLocalInput(date: Date): string {
 export default async function NewDiscountPage() {
   const { organization } = await getActiveOrganization()
 
-  const [{ items }, collections, settings] = await Promise.all([
-    listProducts(organization.id, { take: 200 }),
+  const [targets, collections, settings] = await Promise.all([
+    loadDiscountTargets(organization.id),
     listCollections(organization.id),
     getOrganizationSettings(organization.id),
   ])
 
   return (
-    <PageShell>
+    <>
       <PageHeader
         backHref={`/discounts`}
         backLabel="Discounts"
@@ -30,17 +29,24 @@ export default async function NewDiscountPage() {
       />
       <DiscountForm
         currencyCode={settings?.currencyCode ?? 'USD'}
-        products={items.map((p) => ({ id: p.id, title: p.title }))}
+        products={targets.products}
         collections={collections.map((c) => ({ id: c.id, title: c.title }))}
+        stores={targets.stores}
+        variants={targets.variants}
         initial={{
           title: '',
           method: 'CODE',
           type: 'PERCENTAGE',
           percentage: '',
           amount: '',
+          maxDiscount: '',
+          storeIds: [],
           appliesTo: 'ALL',
           targetProductIds: [],
           targetCollectionIds: [],
+          targetVariantIds: [],
+          excludedProductIds: [],
+          excludedVariantIds: [],
           minimumSubtotal: '',
           minimumQuantity: '',
           buyQuantity: '',
@@ -54,6 +60,6 @@ export default async function NewDiscountPage() {
           codes: [],
         }}
       />
-    </PageShell>
+    </>
   )
 }

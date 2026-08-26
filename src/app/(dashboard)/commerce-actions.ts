@@ -49,6 +49,8 @@ import {
 } from '@/server/services/orderService'
 import {
   editOrder,
+  previewOrderEdit,
+  type OrderEditInput,
   type OrderEditLine,
 } from '@/server/services/orderEditService'
 import {
@@ -717,36 +719,83 @@ export async function recordReturnAction(
  * and a stream of add/remove commands would apply in an order nobody chose if
  * the page was stale. The server diffs it against what is stored.
  */
+/**
+ * The whole edit, as one JSON payload.
+ *
+ * One blob rather than a field per control because the editor is a live
+ * calculator: it previews the same payload against the server as the merchant
+ * types, and a preview built from different fields than the save would defeat
+ * the point of previewing.
+ */
+const orderEditSchema = z.object({
+  lines: z
+    .array(
+      z.object({
+        orderLineId: z.string().max(40).nullish(),
+        variantId: z.string().max(40).nullish(),
+        quantity: z.number().int().min(0).max(10_000),
+        isGift: z.boolean().default(false),
+      })
+    )
+    .min(1),
+  shipping: z.string().max(30).optional(),
+  waiveShipping: z.boolean().default(false),
+  /** Undefined re-judges the order's own code; null takes it off. */
+  discountCode: z.string().max(60).nullish(),
+  extraDiscount: z.string().max(30).optional(),
+  extraDiscountReason: z.string().max(200).optional(),
+  reason: z.string().max(500).optional(),
+})
+
+async function toOrderEditInput(
+  organizationId: string,
+  raw: unknown
+): Promise<{ ok: true; input: OrderEditInput } | { ok: false; error: string }> {
+  const parsed = orderEditSchema.safeParse(raw)
+  if (!parsed.success) return { ok: false, error: firstIssue(parsed.error) }
+
+  const currency = await organizationCurrency(organizationId)
+  const shipping = parsed.data.shipping?.trim()
+  const extra = parsed.data.extraDiscount?.trim()
+
+  return {
+    ok: true,
+    input: {
+      lines: parsed.data.lines as OrderEditLine[],
+      shippingCents: shipping ? parseMoneyInput(shipping, currency) : undefined,
+      waiveShipping: parsed.data.waiveShipping,
+      // A blank string is the merchant clearing the field, which is a removal;
+      // an absent key is them not touching it. Zod's nullish keeps the two
+      // apart and so must this.
+      discountCode:
+        parsed.data.discountCode === undefined
+          ? undefined
+          : parsed.data.discountCode?.trim() || null,
+      manualDiscountCents: extra ? parseMoneyInput(extra, currency) : 0,
+      manualDiscountReason: parsed.data.extraDiscountReason,
+      reason: parsed.data.reason,
+    },
+  }
+}
+
 export async function editOrderAction(
   orderId: string,
   _prev: StoreActionState,
   formData: FormData
 ): Promise<StoreActionState> {
-  let lines: OrderEditLine[]
+  let raw: unknown
   try {
-    lines = JSON.parse(String(formData.get('lines') ?? '[]'))
+    raw = JSON.parse(String(formData.get('edit') ?? '{}'))
   } catch {
     return { error: 'Could not read the form' }
   }
 
-  if (!Array.isArray(lines) || lines.length === 0) {
-    return { error: 'An order needs at least one item. Cancel it instead.' }
-  }
-
   try {
     const organizationId = await org()
-    const shippingRaw = String(formData.get('shipping') ?? '').trim()
+    const parsed = await toOrderEditInput(organizationId, raw)
+    if (!parsed.ok) return { error: parsed.error }
 
-    await editOrder(organizationId, orderId, {
-      lines,
-      shippingCents: shippingRaw
-        ? parseMoneyInput(
-            shippingRaw,
-            await organizationCurrency(organizationId)
-          )
-        : undefined,
-      reason: (formData.get('reason') as string) || undefined,
-    })
+    await editOrder(organizationId, orderId, parsed.input)
   } catch (cause) {
     return fail(cause)
   }
@@ -754,6 +803,39 @@ export async function editOrderAction(
   revalidatePath(`/orders/${orderId}`)
   revalidatePath('/orders')
   return { success: 'Order updated.' }
+}
+
+/**
+ * What the edit on screen would cost, without committing it.
+ *
+ * The offer and the discount code are re-judged against the basket as it now
+ * stands, so a merchant is told "SAVE500 no longer applies — the basket is
+ * below the minimum spend" while they can still do something about it, rather
+ * than discovering the total moved after they saved.
+ */
+export async function previewOrderEditAction(
+  orderId: string,
+  raw: unknown
+): Promise<
+  | { ok: true; quote: Awaited<ReturnType<typeof previewOrderEdit>> }
+  | { ok: false; error: string }
+> {
+  try {
+    const organizationId = await org()
+    const parsed = await toOrderEditInput(organizationId, raw)
+    if (!parsed.ok) return { ok: false, error: parsed.error }
+
+    return {
+      ok: true,
+      quote: await previewOrderEdit(organizationId, orderId, parsed.input),
+    }
+  } catch (cause) {
+    return {
+      ok: false,
+      error:
+        cause instanceof Error ? cause.message : 'Could not price the edit',
+    }
+  }
 }
 
 /**
@@ -844,9 +926,14 @@ const discountFormSchema = z.object({
   type: z.enum(['PERCENTAGE', 'FIXED_AMOUNT', 'FREE_SHIPPING', 'BUY_X_GET_Y']),
   percentage: z.string().optional(),
   amount: z.string().optional(),
-  appliesTo: z.enum(['ALL', 'PRODUCTS', 'COLLECTIONS']),
+  maxDiscount: z.string().optional(),
+  storeIds: z.array(z.string()).default([]),
+  appliesTo: z.enum(['ALL', 'PRODUCTS', 'COLLECTIONS', 'VARIANTS']),
   targetProductIds: z.array(z.string()).default([]),
   targetCollectionIds: z.array(z.string()).default([]),
+  targetVariantIds: z.array(z.string()).default([]),
+  excludedProductIds: z.array(z.string()).default([]),
+  excludedVariantIds: z.array(z.string()).default([]),
   minimumSubtotal: z.string().optional(),
   minimumQuantity: z.string().optional(),
   buyQuantity: z.string().optional(),
@@ -893,6 +980,12 @@ export async function saveDiscountAction(
         ? Math.round(Number(form.data.percentage) * 100)
         : null,
       valueCents: optionalMoney(form.data.amount),
+      // Only a percentage has a ceiling. Carrying one over from a campaign that
+      // used to be a percentage would silently shrink a "500 off" rule.
+      maxDiscountCents:
+        form.data.type === 'PERCENTAGE'
+          ? optionalMoney(form.data.maxDiscount)
+          : null,
       minimumSubtotalCents: optionalMoney(form.data.minimumSubtotal),
       minimumQuantity: optionalInt(form.data.minimumQuantity),
       buyQuantity: optionalInt(form.data.buyQuantity),

@@ -39,12 +39,7 @@ export async function createDiscount(
 ) {
   await requireOrgAccess(organizationId, 'EDITOR')
 
-  const store = await prisma.store.findFirst({
-    where: { id: organizationId },
-    select: { id: true },
-  })
-  if (!store) throw new Error('Store not found')
-
+  await assertStoresInOrg(organizationId, input.storeIds)
   await assertCodesAreFree(organizationId, input.codes)
 
   return prisma.discount.create({
@@ -55,9 +50,14 @@ export async function createDiscount(
       type: input.type,
       valueBps: input.valueBps ?? null,
       valueCents: input.valueCents ?? null,
+      maxDiscountCents: input.maxDiscountCents ?? null,
+      storeIds: input.storeIds,
       appliesTo: input.appliesTo,
       targetProductIds: input.targetProductIds,
       targetCollectionIds: input.targetCollectionIds,
+      targetVariantIds: input.targetVariantIds,
+      excludedProductIds: input.excludedProductIds,
+      excludedVariantIds: input.excludedVariantIds,
       minimumSubtotalCents: input.minimumSubtotalCents ?? null,
       minimumQuantity: input.minimumQuantity ?? null,
       buyQuantity: input.buyQuantity ?? null,
@@ -91,6 +91,7 @@ export async function updateDiscount(
   })
   if (!existing) throw new Error('Discount not found')
 
+  await assertStoresInOrg(organizationId, input.storeIds)
   await assertCodesAreFree(organizationId, input.codes, discountId)
 
   return prisma.$transaction(async (tx) => {
@@ -126,9 +127,14 @@ export async function updateDiscount(
         type: input.type,
         valueBps: input.valueBps ?? null,
         valueCents: input.valueCents ?? null,
+        maxDiscountCents: input.maxDiscountCents ?? null,
+        storeIds: input.storeIds,
         appliesTo: input.appliesTo,
         targetProductIds: input.targetProductIds,
         targetCollectionIds: input.targetCollectionIds,
+        targetVariantIds: input.targetVariantIds,
+        excludedProductIds: input.excludedProductIds,
+        excludedVariantIds: input.excludedVariantIds,
         minimumSubtotalCents: input.minimumSubtotalCents ?? null,
         minimumQuantity: input.minimumQuantity ?? null,
         buyQuantity: input.buyQuantity ?? null,
@@ -143,6 +149,25 @@ export async function updateDiscount(
       include: { codes: true },
     })
   })
+}
+
+/**
+ * Every store a discount is limited to must be one of this workspace's.
+ *
+ * An empty list means "all of them" and needs no check. A non-empty one names
+ * ids the browser supplied, so without this a merchant could scope a campaign
+ * onto another tenant's storefront — which would not let them read anything,
+ * but would make the discount silently apply nowhere and be undebuggable.
+ */
+async function assertStoresInOrg(organizationId: string, storeIds: string[]) {
+  if (storeIds.length === 0) return
+
+  const count = await prisma.store.count({
+    where: { id: { in: storeIds }, organizationId },
+  })
+  if (count !== storeIds.length) {
+    throw new Error('One of the chosen stores is not part of this workspace')
+  }
 }
 
 /**

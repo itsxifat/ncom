@@ -6,6 +6,7 @@ import { emitOrderWebhook } from './orderService'
 import { verifyPayment } from './paymentService'
 import { scheduleCourierEvaluation } from './courierService'
 import type { PlaceOrderInput } from '@/lib/validation/cart'
+import type { TaxLine } from '@/lib/pricing'
 import type { Prisma } from '@/generated/prisma/client'
 import type { PaymentProvider } from '@/generated/prisma/enums'
 
@@ -73,6 +74,19 @@ export interface CampaignContext {
   discountCents: number
   /** Names the winning promotion for the order record. */
   discountLabel: string | null
+  /** The code the buyer typed, once the server has agreed it applies. */
+  discountCode?: string | null
+  /** What that code alone was worth, of the `discountCents` above. */
+  couponDiscountCents?: number
+  /**
+   * Variants the campaign is giving away, and how many of each.
+   *
+   * The units are in the cart like any other, so they are picked and their
+   * stock moves; this only marks the resulting lines as gifts so the order
+   * reads "Gift" rather than showing a price the customer is not paying. The
+   * money is already inside `discountCents`.
+   */
+  giftVariants?: Map<string, number>
 }
 
 export async function placeOrder(
@@ -260,37 +274,20 @@ export async function placeOrder(
         billingAddress: cart.billingAddress ?? shippingAddress ?? undefined,
         shippingCountryCode: readCountryCode(shippingAddress),
         shippingMethodTitle: campaign?.shippingTitle ?? undefined,
-        discountCode: cart.discountCode ?? campaign?.discountLabel ?? undefined,
+        discountCode:
+          cart.discountCode ??
+          campaign?.discountCode ??
+          campaign?.discountLabel ??
+          undefined,
+        couponDiscountCents: Math.max(
+          0,
+          Math.round(campaign?.couponDiscountCents ?? 0)
+        ),
         note: cart.note,
         lines: {
-          create: cart.lines.map((line) => {
-            const priced = pricedById.get(line.id)
-
-            // Every descriptive field is copied, not referenced — see the
-            // snapshot rule in schema.prisma. An order must still read
-            // correctly after the product is renamed or deleted.
-            return {
-              productId: line.variant.product.id,
-              variantId: line.variantId,
-              title: line.variant.product.title,
-              variantTitle: line.variant.title,
-              sku: line.variant.sku,
-              vendor: line.variant.product.vendor,
-              quantity: line.quantity,
-              unitPriceCents: line.variant.priceCents,
-              totalDiscountCents: priced?.discountCents ?? 0,
-              taxTotalCents: priced?.taxCents ?? 0,
-              // TaxLine[] is a structurally plain array of records, but
-              // Prisma's InputJsonValue only accepts types with an index
-              // signature, which a named interface does not have.
-              taxLines: (priced?.taxLines ??
-                []) as unknown as Prisma.InputJsonValue,
-              totalCents: priced?.totalCents ?? 0,
-              requiresShipping: line.variant.requiresShipping,
-              weightGrams: line.variant.weightGrams,
-              properties: line.properties ?? undefined,
-            }
-          }),
+          create: cart.lines.flatMap((line) =>
+            toOrderLines(line, pricedById.get(line.id), campaign)
+          ),
         },
       },
       select: {
@@ -423,6 +420,116 @@ type Tx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0]
  * sequence — a merchant's first order should be #1001 whatever the platform's
  * total volume is.
  */
+/**
+ * One cart line as the order should record it — usually one row, two when part
+ * of it is a gift.
+ *
+ * A cart cannot hold the same variant twice: CartLine is unique on
+ * (cart, variant), so a campaign that sells a cap and throws a second cap in
+ * free arrives here as one line of two. Recording that as a single gift line
+ * would mark a unit the customer paid for as free, and as a single sold line
+ * would charge them for the gift. So it is split.
+ *
+ * The gift half is worth its list price and carries an equal discount, which is
+ * what keeps the subtotal honest about what left the shelf — see the note on
+ * OrderLine.isGift in schema.prisma. Its value is already inside the campaign's
+ * discount total, so recording it here moves it from the order level to the
+ * line level rather than counting it twice.
+ */
+function toOrderLines(
+  line: {
+    id: string
+    variantId: string
+    quantity: number
+    properties: unknown
+    variant: {
+      priceCents: number
+      title: string
+      sku: string | null
+      requiresShipping: boolean
+      weightGrams: number
+      product: { id: string; title: string; vendor: string | null }
+    }
+  },
+  priced:
+    | {
+        discountCents: number
+        taxCents: number
+        taxLines: TaxLine[]
+        totalCents: number
+      }
+    | undefined,
+  campaign: CampaignContext | undefined
+) {
+  const giftQuantity = Math.min(
+    line.quantity,
+    Math.max(0, campaign?.giftVariants?.get(line.variantId) ?? 0)
+  )
+  const soldQuantity = line.quantity - giftQuantity
+
+  // Every descriptive field is copied, not referenced — see the snapshot rule
+  // in schema.prisma. An order must still read correctly after the product is
+  // renamed or deleted.
+  const base = {
+    productId: line.variant.product.id,
+    variantId: line.variantId,
+    title: line.variant.product.title,
+    variantTitle: line.variant.title,
+    sku: line.variant.sku,
+    vendor: line.variant.product.vendor,
+    unitPriceCents: line.variant.priceCents,
+    requiresShipping: line.variant.requiresShipping,
+    weightGrams: line.variant.weightGrams,
+    properties: (line.properties ?? undefined) as
+      Prisma.InputJsonValue | undefined,
+  }
+
+  const rows: Prisma.OrderLineCreateWithoutOrderInput[] = []
+
+  if (soldQuantity > 0) {
+    // The priced figures are for the whole line, so the sold half takes its
+    // share. Rounding down on the discount cannot overcharge: the remainder
+    // lands on the gift half, which the customer is not paying for anyway.
+    const share = soldQuantity / line.quantity
+    const discountCents = Math.floor((priced?.discountCents ?? 0) * share)
+    const taxCents = Math.floor((priced?.taxCents ?? 0) * share)
+
+    rows.push({
+      ...base,
+      quantity: soldQuantity,
+      totalDiscountCents: discountCents,
+      taxTotalCents: taxCents,
+      // TaxLine[] is a structurally plain array of records, but Prisma's
+      // InputJsonValue only accepts types with an index signature, which a
+      // named interface does not have.
+      taxLines: (priced?.taxLines ?? []) as unknown as Prisma.InputJsonValue,
+      totalCents:
+        giftQuantity > 0
+          ? Math.max(
+              0,
+              line.variant.priceCents * soldQuantity - discountCents + taxCents
+            )
+          : (priced?.totalCents ?? 0),
+      isGift: false,
+    })
+  }
+
+  if (giftQuantity > 0) {
+    const value = line.variant.priceCents * giftQuantity
+    rows.push({
+      ...base,
+      quantity: giftQuantity,
+      totalDiscountCents: value,
+      taxTotalCents: 0,
+      taxLines: [] as unknown as Prisma.InputJsonValue,
+      totalCents: 0,
+      isGift: true,
+    })
+  }
+
+  return rows
+}
+
 async function nextOrderNumber(
   tx: Tx,
   organizationId: string

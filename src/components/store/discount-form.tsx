@@ -28,9 +28,16 @@ export interface DiscountFormInitial {
   type: 'PERCENTAGE' | 'FIXED_AMOUNT' | 'FREE_SHIPPING' | 'BUY_X_GET_Y'
   percentage: string
   amount: string
-  appliesTo: 'ALL' | 'PRODUCTS' | 'COLLECTIONS'
+  /** A ceiling on a percentage. Blank is no ceiling. */
+  maxDiscount: string
+  /** Which storefronts honour this. Empty means all of them. */
+  storeIds: string[]
+  appliesTo: 'ALL' | 'PRODUCTS' | 'COLLECTIONS' | 'VARIANTS'
   targetProductIds: string[]
   targetCollectionIds: string[]
+  targetVariantIds: string[]
+  excludedProductIds: string[]
+  excludedVariantIds: string[]
   minimumSubtotal: string
   minimumQuantity: string
   buyQuantity: string
@@ -42,6 +49,96 @@ export interface DiscountFormInitial {
   endsAt: string
   isActive: boolean
   codes: string[]
+}
+
+/**
+ * A scrolling list of ticked ids.
+ *
+ * Collapsed behind a summary once there are more than a handful, because the
+ * size list on a real catalogue is hundreds of rows and an always-open one
+ * pushes every field below it off the screen.
+ */
+function IdChecklist({
+  options,
+  selected,
+  empty,
+  heading,
+  onChange,
+}: {
+  options: { id: string; label: string }[]
+  selected: string[]
+  empty: string
+  heading?: string
+  onChange: (next: string[]) => void
+}) {
+  const [query, setQuery] = useState('')
+  const needle = query.trim().toLowerCase()
+  const shown = needle
+    ? options.filter((option) => option.label.toLowerCase().includes(needle))
+    : options
+
+  if (options.length === 0) {
+    return <p className="text-muted-foreground text-sm">{empty}</p>
+  }
+
+  return (
+    <div className="rounded-lg border">
+      {(heading || options.length > 8) && (
+        <div className="flex items-center gap-2 border-b p-2">
+          {heading && (
+            <span className="text-muted-foreground shrink-0 text-xs font-medium">
+              {heading}
+            </span>
+          )}
+          {options.length > 8 && (
+            <Input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search"
+              aria-label={heading ? `Search ${heading}` : 'Search'}
+              className="h-8 text-xs"
+            />
+          )}
+          {selected.length > 0 && (
+            <button
+              type="button"
+              onClick={() => onChange([])}
+              className="text-muted-foreground hover:text-foreground shrink-0 text-xs"
+            >
+              Clear {selected.length}
+            </button>
+          )}
+        </div>
+      )}
+
+      <div className="max-h-56 overflow-y-auto p-2">
+        {shown.length === 0 ? (
+          <p className="text-muted-foreground px-2 py-1.5 text-sm">
+            Nothing matches that search.
+          </p>
+        ) : (
+          shown.map((option) => (
+            <label
+              key={option.id}
+              className="hover:bg-muted flex items-center gap-2 rounded px-2 py-1.5 text-sm"
+            >
+              <Checkbox
+                checked={selected.includes(option.id)}
+                onCheckedChange={(checked) =>
+                  onChange(
+                    checked
+                      ? [...selected, option.id]
+                      : selected.filter((id) => id !== option.id)
+                  )
+                }
+              />
+              {option.label}
+            </label>
+          ))
+        )}
+      </div>
+    </div>
+  )
 }
 
 /** Generates a readable, unambiguous code — no O/0 or I/1 confusion. */
@@ -59,11 +156,17 @@ export function DiscountForm({
   initial,
   products,
   collections,
+  stores = [],
+  variants = [],
 }: {
   currencyCode: string
   initial: DiscountFormInitial
   products: { id: string; title: string }[]
   collections: { id: string; title: string }[]
+  /** Storefronts this workspace runs, for limiting the campaign to some. */
+  stores?: { id: string; name: string }[]
+  /** Every sellable size, for size-level targeting and exclusions. */
+  variants?: { id: string; productTitle: string; title: string }[]
 }) {
   const boundAction = saveDiscountAction.bind(null, initial.id ?? null)
   const [state, action, pending] = useActionState<StoreActionState, FormData>(
@@ -147,6 +250,26 @@ export function DiscountForm({
                 onChange={(event) => set('percentage', event.target.value)}
                 placeholder="10"
               />
+            </Field>
+          )}
+
+          {form.type === 'PERCENTAGE' && (
+            <Field>
+              <FieldLabel htmlFor="maxDiscount">
+                Cap the discount (optional)
+              </FieldLabel>
+              <MoneyInput
+                id="maxDiscount"
+                currencyCode={currencyCode}
+                value={form.maxDiscount}
+                onChange={(event) => set('maxDiscount', event.target.value)}
+                placeholder="No cap"
+              />
+              <FieldDescription>
+                &ldquo;20% off, up to 500&rdquo;. An uncapped percentage costs
+                the most on the one order of the month that is ten times the
+                average.
+              </FieldDescription>
             </Field>
           )}
 
@@ -269,8 +392,27 @@ export function DiscountForm({
               <option value="ALL">Everything in the store</option>
               <option value="PRODUCTS">Specific products</option>
               <option value="COLLECTIONS">Specific collections</option>
+              <option value="VARIANTS">Specific sizes</option>
             </FormSelect>
+            <FieldDescription>
+              Sizes are for catalogues where the price varies by size and the
+              promotion does not cover all of them.
+            </FieldDescription>
           </Field>
+
+          {form.appliesTo === 'VARIANTS' && (
+            <Field>
+              <IdChecklist
+                options={variants.map((variant) => ({
+                  id: variant.id,
+                  label: `${variant.productTitle} · ${variant.title}`,
+                }))}
+                selected={form.targetVariantIds}
+                empty="No sizes in the catalogue yet."
+                onChange={(next) => set('targetVariantIds', next)}
+              />
+            </Field>
+          )}
 
           {form.appliesTo === 'PRODUCTS' && (
             <Field>
@@ -327,8 +469,60 @@ export function DiscountForm({
               </div>
             </Field>
           )}
+
+          {/* Exclusions are checked after the scope above picks a line up, so
+              "everything except these two sizes" is one rule rather than a
+              checklist of every size that *is* on offer. */}
+          <Field>
+            <FieldLabel>Never applies to</FieldLabel>
+            <FieldDescription>
+              Carved out of whatever the scope above selected — the thin-margin
+              size, the loss leader, the item already on clearance.
+            </FieldDescription>
+            <IdChecklist
+              options={products.map((product) => ({
+                id: product.id,
+                label: product.title,
+              }))}
+              selected={form.excludedProductIds}
+              empty="No products yet."
+              heading="Products"
+              onChange={(next) => set('excludedProductIds', next)}
+            />
+            <IdChecklist
+              options={variants.map((variant) => ({
+                id: variant.id,
+                label: `${variant.productTitle} · ${variant.title}`,
+              }))}
+              selected={form.excludedVariantIds}
+              empty="No sizes yet."
+              heading="Sizes"
+              onChange={(next) => set('excludedVariantIds', next)}
+            />
+          </Field>
         </FieldGroup>
       </SettingsSection>
+
+      {stores.length > 1 && (
+        <SettingsSection
+          title="Which storefronts"
+          description="One catalogue can be sold through several sites. Leave everything unticked to honour the code on all of them."
+        >
+          <FieldGroup>
+            <Field>
+              <IdChecklist
+                options={stores.map((store) => ({
+                  id: store.id,
+                  label: store.name,
+                }))}
+                selected={form.storeIds}
+                empty="No stores yet."
+                onChange={(next) => set('storeIds', next)}
+              />
+            </Field>
+          </FieldGroup>
+        </SettingsSection>
+      )}
 
       <SettingsSection
         title="Conditions and limits"

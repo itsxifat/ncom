@@ -18,7 +18,7 @@ import { Canvas } from './Canvas'
 import { OutlinePanel } from './OutlinePanel'
 import { SectionPalette } from './SectionPalette'
 import { InspectorPanel } from './InspectorPanel'
-import { OffersPanel, type OffersPanelProps } from './OffersPanel'
+import { DeliveryPanel, type DeliveryPanelProps } from './DeliveryPanel'
 import {
   ProductCatalogProvider,
   type SellableVariant,
@@ -47,7 +47,7 @@ export function BuilderShell({
   initialSections,
   products = [],
   catalog,
-  offers,
+  delivery,
   canvasSrc,
   onSave,
 }: {
@@ -62,18 +62,19 @@ export function BuilderShell({
   /** The same catalogue with photos, prices and stock, for the product picker. */
   catalog?: { products: PickerProduct[]; currencyCode: string }
   /**
-   * What this page sells. Absent for the template builder, which designs a
-   * layout with no store, no catalogue and therefore nothing to sell — the
-   * Offers tab is hidden entirely there rather than shown empty.
+   * How this page charges for delivery, and what it rewards a big basket with.
+   * Absent for the template builder, which designs a layout with no store
+   * behind it — the tab is hidden entirely there rather than shown empty.
    */
-  offers?: OffersPanelProps
+  delivery?: DeliveryPanelProps
   canvasSrc: string
   onSave: (
     sections: SectionSavePayload[]
   ) => Promise<{ idMapping: Record<string, string> }>
 }) {
-  // The order form quotes the page's offers, so the canvas has to reload when
-  // they change even though no block's own content did.
+  // The order form quotes the page's delivery rates and promotions, so the
+  // canvas has to reload when they change even though no block's own content
+  // did.
   const [offersRevision, setOffersRevision] = useState(0)
 
   const setSections = useBuilderStore((s) => s.setSections)
@@ -166,14 +167,14 @@ export function BuilderShell({
           </main>
 
           <aside className="flex flex-col overflow-hidden border-l">
-            {offers ? (
+            {delivery ? (
               <Tabs
                 defaultValue="section"
                 className="flex min-h-0 flex-1 flex-col gap-0"
               >
                 <TabsList className="mx-3 mt-3">
                   <TabsTrigger value="section">Section</TabsTrigger>
-                  <TabsTrigger value="offers">Offers</TabsTrigger>
+                  <TabsTrigger value="delivery">Delivery</TabsTrigger>
                 </TabsList>
                 <TabsContent
                   value="section"
@@ -182,12 +183,12 @@ export function BuilderShell({
                   <InspectorPanel />
                 </TabsContent>
                 <TabsContent
-                  value="offers"
+                  value="delivery"
                   className="min-h-0 flex-1 overflow-y-auto p-3"
                 >
-                  <OffersPanel
-                    {...offers}
-                    onOffersChange={() =>
+                  <DeliveryPanel
+                    {...delivery}
+                    onChange={() =>
                       setOffersRevision((revision) => revision + 1)
                     }
                   />

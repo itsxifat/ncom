@@ -3,21 +3,16 @@ import { getActiveOrganization } from '@/server/services/organizationService'
 import { getPageWithSections } from '@/server/services/pageService'
 import { BuilderShell } from '@/modules/builder/BuilderShell'
 import {
-  listOfferProducts,
   listPickerProducts,
   listSellableVariants,
 } from '@/server/services/productService'
 import {
-  listOffers,
+  listOffersForPage,
   getPageCheckout,
 } from '@/server/services/offerAdminService'
-import { toOfferDrafts, toCheckoutDraft } from '@/modules/builder/offer-drafts'
-import {
-  deleteOfferAction,
-  reorderOffersAction,
-  saveCheckoutAction,
-  saveOfferAction,
-} from './offer-actions'
+import { getOrganizationSettings } from '@/server/services/organizationSettingsService'
+import { toCheckoutDraft } from '@/modules/builder/offer-drafts'
+import { saveCheckoutAction } from './offer-actions'
 import { saveSectionsAction } from './actions'
 
 export default async function PageEditPage({
@@ -52,13 +47,17 @@ export default async function PageEditPage({
     isVisible: section.isVisible,
   }))
 
-  // The Offers tab: what this page sells, and how it charges for delivery.
-  const [catalogue, offerRows, checkout, picker] = await Promise.all([
-    listOfferProducts(organization.id),
-    listOffers(organization.id, storeId, pageId),
+  // The Delivery tab: how this page charges to ship, what it rewards a big
+  // basket with, and how many offers currently cover it — the last only so the
+  // tab can say whether the order form has anything to sell.
+  const [settings, offerRows, checkout, picker] = await Promise.all([
+    getOrganizationSettings(organization.id),
+    listOffersForPage(organization.id, pageId),
     getPageCheckout(organization.id, storeId, pageId),
     listPickerProducts(organization.id),
   ])
+
+  const currencyCode = settings?.currencyCode ?? picker.currencyCode
 
   return (
     <BuilderShell
@@ -72,17 +71,12 @@ export default async function PageEditPage({
         products: picker.products,
         currencyCode: picker.currencyCode,
       }}
-      offers={{
+      delivery={{
         storeId,
         pageId,
-        products: catalogue.products,
-        currencyCode: catalogue.currencyCode,
-        pickerProducts: picker.products,
-        initialOffers: toOfferDrafts(offerRows, catalogue.currencyCode),
-        initialCheckout: toCheckoutDraft(checkout, catalogue.currencyCode),
-        saveOffer: saveOfferAction,
-        deleteOffer: deleteOfferAction,
-        reorderOffers: reorderOffersAction,
+        currencyCode,
+        initialCheckout: toCheckoutDraft(checkout, currencyCode),
+        offerCount: offerRows.filter((offer) => offer.isActive).length,
         saveCheckout: saveCheckoutAction,
       }}
       canvasSrc={`/builder-canvas/${pageId}`}

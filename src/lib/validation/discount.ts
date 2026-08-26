@@ -24,9 +24,27 @@ export const createDiscountSchema = z
     valueBps: z.number().int().min(0).max(10000).optional().nullable(),
     valueCents: z.number().int().min(0).max(100_000_000).optional().nullable(),
 
-    appliesTo: z.enum(['ALL', 'PRODUCTS', 'COLLECTIONS']).default('ALL'),
+    /** A ceiling on a percentage discount. Null is no ceiling. */
+    maxDiscountCents: z
+      .number()
+      .int()
+      .min(0)
+      .max(100_000_000)
+      .optional()
+      .nullable(),
+
+    /** Which storefronts honour this. Empty means all of them. */
+    storeIds: z.array(z.string()).max(100).default([]),
+
+    appliesTo: z
+      .enum(['ALL', 'PRODUCTS', 'COLLECTIONS', 'VARIANTS'])
+      .default('ALL'),
     targetProductIds: z.array(z.string()).max(500).default([]),
     targetCollectionIds: z.array(z.string()).max(100).default([]),
+    targetVariantIds: z.array(z.string()).max(1000).default([]),
+
+    excludedProductIds: z.array(z.string()).max(500).default([]),
+    excludedVariantIds: z.array(z.string()).max(1000).default([]),
 
     minimumSubtotalCents: z.number().int().min(0).optional().nullable(),
     minimumQuantity: z.number().int().min(0).optional().nullable(),
@@ -86,6 +104,11 @@ export const createDiscountSchema = z
     (value) =>
       value.appliesTo !== 'COLLECTIONS' || value.targetCollectionIds.length > 0,
     { message: 'Choose at least one collection', path: ['targetCollectionIds'] }
+  )
+  .refine(
+    (value) =>
+      value.appliesTo !== 'VARIANTS' || value.targetVariantIds.length > 0,
+    { message: 'Choose at least one size', path: ['targetVariantIds'] }
   )
   .refine((value) => !value.endsAt || value.endsAt > value.startsAt, {
     message: 'The end date must be after the start date',

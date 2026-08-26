@@ -54,6 +54,18 @@ export const offerOrderSchema = z.object({
     .optional()
     .transform((value) => value || undefined),
 
+  /**
+   * A code the buyer typed. Only a *claim* — the server looks the rule up, tests
+   * it against the basket it just priced, and ignores anything that does not
+   * qualify. Nothing about what it is worth is accepted from here.
+   */
+  discountCode: z
+    .string()
+    .trim()
+    .max(60)
+    .optional()
+    .transform((value) => value || undefined),
+
   note: z
     .string()
     .trim()

@@ -3,6 +3,7 @@
 import {
   useActionState,
   useEffect,
+  useMemo,
   useRef,
   useState,
   useTransition,
@@ -10,17 +11,21 @@ import {
 import {
   AlertTriangle,
   Check,
+  Gift,
+  Info,
   Loader2,
   Minus,
   Package,
   Pencil,
   Plus,
   Search,
+  Tag,
   Trash2,
   Undo2,
 } from 'lucide-react'
 import {
   editOrderAction,
+  previewOrderEditAction,
   searchCatalogAction,
   type StoreActionState,
 } from '@/app/(dashboard)/commerce-actions'
@@ -57,9 +62,15 @@ import { cn } from '@/lib/utils'
  * "so what's my total now" without hanging up.
  *
  * Nothing commits until Save. Every quantity change, removal and addition is
- * local state, the running total is recomputed as they go, and a removed line
- * can be put back — because the person making these edits is repeating numbers
- * back to someone and will get one wrong.
+ * local state, and a removed line can be put back — because the person making
+ * these edits is repeating numbers back to someone and will get one wrong.
+ *
+ * The totals are quoted by the server rather than added up here, and that is
+ * the important part. Whether the bundle still prices this basket, and whether
+ * the code the customer used still qualifies for it, are questions only the
+ * rules can answer — so the same quote the save will use is fetched as the
+ * merchant types, and the reason a discount fell away is on screen while they
+ * can still do something about it.
  */
 
 export interface EditableOrderLine {
@@ -73,6 +84,8 @@ export interface EditableOrderLine {
   quantity: number
   unitPriceCents: number
   totalDiscountCents: number
+  /** Given away rather than sold. Shows "Gift" where a price would be. */
+  isGift: boolean
   /** Units already returned or refunded — the floor this line cannot go below. */
   settledQuantity: number
 }
@@ -87,11 +100,21 @@ interface DraftLine {
   imageUrl: string | null
   unitPriceCents: number
   quantity: number
+  isGift: boolean
   /** Null when the variant does not track stock. */
   available: number | null
 }
 
 const SEARCH_DELAY_MS = 250
+
+/**
+ * How long to sit on a change before asking the server what it costs.
+ *
+ * Long enough that holding the "+" button is one round trip rather than eight,
+ * short enough that the number has settled before the merchant finishes saying
+ * the sentence they are in the middle of.
+ */
+const QUOTE_DELAY_MS = 350
 
 export function OrderEditor({
   orderId,
@@ -99,8 +122,11 @@ export function OrderEditor({
   currencyCode,
   lines,
   shippingCents,
-  discountTotalCents,
+  shippingWaived,
+  discountCode,
+  manualDiscountCents,
   taxTotalCents,
+  totalCents,
   editable,
   notEditableReason,
 }: {
@@ -109,8 +135,12 @@ export function OrderEditor({
   currencyCode: string
   lines: EditableOrderLine[]
   shippingCents: number
-  discountTotalCents: number
+  shippingWaived: boolean
+  /** The code the customer used, re-judged against whatever they end up with. */
+  discountCode: string | null
+  manualDiscountCents: number
   taxTotalCents: number
+  totalCents: number
   editable: boolean
   notEditableReason: string | null
 }) {
@@ -148,8 +178,11 @@ export function OrderEditor({
             currencyCode={currencyCode}
             lines={lines}
             shippingCents={shippingCents}
-            discountTotalCents={discountTotalCents}
+            shippingWaived={shippingWaived}
+            discountCode={discountCode}
+            manualDiscountCents={manualDiscountCents}
             taxTotalCents={taxTotalCents}
+            totalCents={totalCents}
             onDone={() => setOpen(false)}
           />
         )}
@@ -164,8 +197,11 @@ function EditorBody({
   currencyCode,
   lines,
   shippingCents,
-  discountTotalCents,
+  shippingWaived,
+  discountCode,
+  manualDiscountCents,
   taxTotalCents,
+  totalCents,
   onDone,
 }: {
   orderId: string
@@ -173,8 +209,11 @@ function EditorBody({
   currencyCode: string
   lines: EditableOrderLine[]
   shippingCents: number
-  discountTotalCents: number
+  shippingWaived: boolean
+  discountCode: string | null
+  manualDiscountCents: number
   taxTotalCents: number
+  totalCents: number
   onDone: () => void
 }) {
   // Existing lines, by id. Quantity 0 is not a valid save — it is how a row
@@ -182,12 +221,22 @@ function EditorBody({
   const [quantities, setQuantities] = useState<Record<string, number>>(() =>
     Object.fromEntries(lines.map((line) => [line.id, line.quantity]))
   )
+  const [gifts, setGifts] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(lines.map((line) => [line.id, line.isGift]))
+  )
   const [drafts, setDrafts] = useState<DraftLine[]>([])
   // Through the currency's real exponent, not a hardcoded 100 — a yen delivery
   // charge divided by a hundred would come back as one-hundredth of itself.
   const [shipping, setShipping] = useState(() =>
     centsToMajorString(shippingCents, currencyCode)
   )
+  const [waived, setWaived] = useState(shippingWaived)
+  const [code, setCode] = useState(discountCode ?? '')
+  const [extra, setExtra] = useState(() =>
+    centsToMajorString(manualDiscountCents, currencyCode)
+  )
+  const [extraReason, setExtraReason] = useState('')
+  const [reason, setReason] = useState('')
 
   const boundAction = editOrderAction.bind(null, orderId)
   const [state, action, pending] = useActionState<StoreActionState, FormData>(
@@ -205,7 +254,14 @@ function EditorBody({
   const setQuantity = (id: string, next: number) =>
     setQuantities((current) => ({ ...current, [id]: Math.max(0, next) }))
 
-  const addVariant = (product: PickerProduct, variantId: string) => {
+  const setGift = (id: string, next: boolean) =>
+    setGifts((current) => ({ ...current, [id]: next }))
+
+  const addVariant = (
+    product: PickerProduct,
+    variantId: string,
+    asGift = false
+  ) => {
     const variant = product.variants.find((entry) => entry.id === variantId)
     if (!variant) return
 
@@ -214,27 +270,35 @@ function EditorBody({
     // waiting to happen. Matched on the variant id rather than the SKU, which
     // is optional in this catalogue: two variants with no SKU are both null,
     // and matching on that would merge the small one into the large one.
-    const existing = lines.find(
-      (line) => line.variantId === variantId && (quantities[line.id] ?? 0) > 0
-    )
+    // A gift is a different line from the same thing sold, so it never merges
+    // into one — "two shirts, one of them free" is two rows on the packing slip
+    // and one of them says Gift.
+    const existing = asGift
+      ? undefined
+      : lines.find(
+          (line) =>
+            line.variantId === variantId &&
+            (quantities[line.id] ?? 0) > 0 &&
+            !(gifts[line.id] ?? false)
+        )
     if (existing) {
       setQuantity(existing.id, (quantities[existing.id] ?? 0) + 1)
       return
     }
 
     setDrafts((current) => {
-      const already = current.find((draft) => draft.variantId === variantId)
+      const already = current.find(
+        (draft) => draft.variantId === variantId && draft.isGift === asGift
+      )
       if (already) {
         return current.map((draft) =>
-          draft.variantId === variantId
-            ? { ...draft, quantity: draft.quantity + 1 }
-            : draft
+          draft === already ? { ...draft, quantity: draft.quantity + 1 } : draft
         )
       }
       return [
         ...current,
         {
-          key: `${variantId}-${Date.now()}`,
+          key: `${variantId}-${asGift ? 'gift' : 'sold'}-${Date.now()}`,
           variantId,
           productTitle: product.title,
           variantTitle:
@@ -245,49 +309,12 @@ function EditorBody({
           imageUrl: product.imageUrl,
           unitPriceCents: variant.priceCents,
           quantity: 1,
+          isGift: asGift,
           available: variant.tracksInventory ? variant.available : null,
         },
       ]
     })
   }
-
-  // ── Running totals, recomputed on every keystroke ────────────────────────
-  //
-  // Tax is carried, not recomputed: the rates live on the server and a number
-  // that moved in the browser and then landed differently on save would be
-  // worse than one that visibly does not move. The subtotal and the delta are
-  // what the merchant is actually reading out.
-  const keptSubtotal = lines.reduce(
-    (sum, line) => sum + line.unitPriceCents * (quantities[line.id] ?? 0),
-    0
-  )
-  const draftSubtotal = drafts.reduce(
-    (sum, draft) => sum + draft.unitPriceCents * draft.quantity,
-    0
-  )
-  const subtotalCents = keptSubtotal + draftSubtotal
-
-  const shippingParsed = Math.max(
-    0,
-    Math.round(
-      (Number.parseFloat(shipping) || 0) * minorUnitsPerMajor(currencyCode)
-    )
-  )
-  const newTotal = Math.max(
-    0,
-    subtotalCents -
-      Math.min(discountTotalCents, subtotalCents) +
-      shippingParsed +
-      taxTotalCents
-  )
-  const originalTotal = Math.max(
-    0,
-    lines.reduce((sum, line) => sum + line.unitPriceCents * line.quantity, 0) -
-      discountTotalCents +
-      shippingCents +
-      taxTotalCents
-  )
-  const delta = newTotal - originalTotal
 
   const keptCount = lines.filter(
     (line) => (quantities[line.id] ?? 0) > 0
@@ -298,28 +325,87 @@ function EditorBody({
 
   const emptied = keptCount === 0 && drafts.length === 0
 
-  const payload = JSON.stringify([
-    ...lines
-      .filter((line) => (quantities[line.id] ?? 0) > 0)
-      .map((line) => ({
-        orderLineId: line.id,
-        quantity: quantities[line.id] ?? line.quantity,
-      })),
-    ...drafts.map((draft) => ({
-      variantId: draft.variantId,
-      quantity: draft.quantity,
-    })),
-  ])
+  const shippingParsed = Math.max(
+    0,
+    Math.round(
+      (Number.parseFloat(shipping) || 0) * minorUnitsPerMajor(currencyCode)
+    )
+  )
+
+  // The exact payload the save will post. Previewing anything else would let
+  // the number on screen and the number that lands drift apart.
+  const payload = useMemo(
+    () => ({
+      lines: [
+        ...lines
+          .filter((line) => (quantities[line.id] ?? 0) > 0)
+          .map((line) => ({
+            orderLineId: line.id,
+            quantity: quantities[line.id] ?? line.quantity,
+            isGift: gifts[line.id] ?? line.isGift,
+          })),
+        ...drafts.map((draft) => ({
+          variantId: draft.variantId,
+          quantity: draft.quantity,
+          isGift: draft.isGift,
+        })),
+      ],
+      shipping,
+      waiveShipping: waived,
+      discountCode: code.trim() || null,
+      extraDiscount: extra,
+      extraDiscountReason: extraReason,
+      reason,
+    }),
+    [
+      lines,
+      quantities,
+      gifts,
+      drafts,
+      shipping,
+      waived,
+      code,
+      extra,
+      extraReason,
+      reason,
+    ]
+  )
+
+  const { quote, quoting } = useEditQuote(orderId, payload, emptied)
+
+  // What is on screen until the first quote lands, and whenever one cannot be
+  // taken. Deliberately the *old* totals rather than a browser-side guess: a
+  // number that moves and then moves again on save is worse than one that
+  // visibly has not caught up yet.
+  const subtotalCents =
+    quote?.subtotalCents ??
+    lines.reduce(
+      (sum, line) => sum + line.unitPriceCents * (quantities[line.id] ?? 0),
+      0
+    ) +
+      drafts.reduce(
+        (sum, draft) => sum + draft.unitPriceCents * draft.quantity,
+        0
+      )
+
+  const newTotal = quote ? quote.totalCents + taxTotalCents : totalCents
+  const delta = newTotal - totalCents
 
   const dirty =
-    lines.some((line) => (quantities[line.id] ?? 0) !== line.quantity) ||
+    lines.some(
+      (line) =>
+        (quantities[line.id] ?? 0) !== line.quantity ||
+        (gifts[line.id] ?? line.isGift) !== line.isGift
+    ) ||
     drafts.length > 0 ||
-    shippingParsed !== shippingCents
+    shippingParsed !== shippingCents ||
+    waived !== shippingWaived ||
+    (code.trim() || null) !== discountCode ||
+    (quote?.manualDiscountCents ?? manualDiscountCents) !== manualDiscountCents
 
   return (
     <form action={action} className="flex max-h-[92vh] min-h-0 flex-col">
-      <input type="hidden" name="lines" value={payload} />
-      <input type="hidden" name="shipping" value={shipping} />
+      <input type="hidden" name="edit" value={JSON.stringify(payload)} />
 
       <DialogHeader className="border-b px-5 py-4">
         <DialogTitle className="font-display text-lg font-semibold tracking-tight">
@@ -352,6 +438,7 @@ function EditorBody({
               const quantity = quantities[line.id] ?? 0
               const removed = quantity === 0
               const floor = line.settledQuantity
+              const gift = gifts[line.id] ?? line.isGift
 
               return (
                 <div
@@ -370,14 +457,22 @@ function EditorBody({
                   />
 
                   <div className="min-w-0 flex-1">
-                    <p
-                      className={cn(
-                        'truncate text-sm font-medium',
-                        removed && 'line-through'
+                    <div className="flex items-center gap-2">
+                      <p
+                        className={cn(
+                          'truncate text-sm font-medium',
+                          removed && 'line-through'
+                        )}
+                      >
+                        {line.title}
+                      </p>
+                      {gift && !removed && (
+                        <Badge variant="lime">
+                          <Gift className="size-3" />
+                          Gift
+                        </Badge>
                       )}
-                    >
-                      {line.title}
-                    </p>
+                    </div>
                     <p className="text-muted-foreground truncate text-xs">
                       {line.variantTitle &&
                         line.variantTitle !== 'Default Title' && (
@@ -407,19 +502,24 @@ function EditorBody({
                         onChange={(next) => setQuantity(line.id, next)}
                         label={line.title}
                       />
-                      <p className="w-20 shrink-0 text-right text-sm font-medium tabular-nums">
-                        {formatMoneyAmount(
-                          line.unitPriceCents * quantity,
-                          currencyCode
-                        )}
-                      </p>
+                      <LinePrice
+                        gift={gift}
+                        amountCents={line.unitPriceCents * quantity}
+                        currencyCode={currencyCode}
+                      />
+                      <GiftToggle
+                        gift={gift}
+                        // A line with returns or refunds against it points at
+                        // money that has already moved against a price, so the
+                        // server refuses to turn it into a gift.
+                        disabled={floor > 0}
+                        label={line.title}
+                        onToggle={() => setGift(line.id, !gift)}
+                      />
                       <Button
                         type="button"
                         size="icon-sm"
                         variant="ghost"
-                        // A line with returns or refunds against it points at
-                        // quantities that have to stay real, so the server
-                        // refuses to drop it. Saying so here beats a failed save.
                         disabled={floor > 0}
                         title={
                           floor > 0
@@ -454,7 +554,16 @@ function EditorBody({
                     <p className="truncate text-sm font-medium">
                       {draft.productTitle}
                     </p>
-                    <Badge variant="lime">New</Badge>
+                    <Badge variant="lime">
+                      {draft.isGift ? (
+                        <>
+                          <Gift className="size-3" />
+                          Gift
+                        </>
+                      ) : (
+                        'New'
+                      )}
+                    </Badge>
                   </div>
                   <p className="text-muted-foreground truncate text-xs">
                     {draft.variantTitle && <>{draft.variantTitle} · </>}
@@ -479,12 +588,25 @@ function EditorBody({
                   }
                   label={draft.productTitle}
                 />
-                <p className="w-20 shrink-0 text-right text-sm font-medium tabular-nums">
-                  {formatMoneyAmount(
-                    draft.unitPriceCents * draft.quantity,
-                    currencyCode
-                  )}
-                </p>
+                <LinePrice
+                  gift={draft.isGift}
+                  amountCents={draft.unitPriceCents * draft.quantity}
+                  currencyCode={currencyCode}
+                />
+                <GiftToggle
+                  gift={draft.isGift}
+                  disabled={false}
+                  label={draft.productTitle}
+                  onToggle={() =>
+                    setDrafts((current) =>
+                      current.map((entry) =>
+                        entry.key === draft.key
+                          ? { ...entry, isGift: !entry.isGift }
+                          : entry
+                      )
+                    )
+                  }
+                />
                 <Button
                   type="button"
                   size="icon-sm"
@@ -510,24 +632,97 @@ function EditorBody({
             </p>
           )}
 
-          {/* Delivery sits with the basket rather than in a settings panel
-              because "I'll waive the delivery for the trouble" is part of the
-              same conversation as "make it three". */}
-          <div className="mt-5 flex items-center justify-between gap-4 border-t pt-4">
-            <div>
-              <label htmlFor="edit-shipping" className="text-sm font-medium">
-                Delivery charge
-              </label>
-              <p className="text-muted-foreground text-xs">
-                Was {formatMoney(shippingCents, currencyCode)}
-              </p>
+          {/* Delivery and discounts sit with the basket rather than in a
+              settings panel, because "I'll waive the delivery for the trouble"
+              and "take another hundred off" are part of the same conversation
+              as "make it three". */}
+          <div className="mt-5 flex flex-col gap-4 border-t pt-4">
+            <div className="flex items-center justify-between gap-4">
+              <div className="min-w-0">
+                <label htmlFor="edit-shipping" className="text-sm font-medium">
+                  Delivery charge
+                </label>
+                <p className="text-muted-foreground text-xs">
+                  Was {formatMoney(shippingCents, currencyCode)}
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={waived ? 'default' : 'outline'}
+                  onClick={() => setWaived(!waived)}
+                  aria-pressed={waived}
+                >
+                  {waived ? 'Waived' : 'Waive'}
+                </Button>
+                <MoneyInput
+                  id="edit-shipping"
+                  value={shipping}
+                  onChange={(event) => setShipping(event.target.value)}
+                  currencyCode={currencyCode}
+                  // A waived charge is not an amount to be typed. Leaving the
+                  // field live beside a "Waived" button invites someone to set
+                  // a number that is then ignored.
+                  disabled={waived}
+                  className="w-32"
+                />
+              </div>
             </div>
-            <MoneyInput
-              id="edit-shipping"
-              value={shipping}
-              onChange={(event) => setShipping(event.target.value)}
-              currencyCode={currencyCode}
-              className="w-32"
+
+            <div className="flex items-center justify-between gap-4">
+              <div className="min-w-0">
+                <label htmlFor="edit-code" className="text-sm font-medium">
+                  Discount code
+                </label>
+                <p className="text-muted-foreground text-xs">
+                  Re-checked against the basket as it now stands.
+                </p>
+              </div>
+              <Input
+                id="edit-code"
+                value={code}
+                onChange={(event) => setCode(event.target.value.toUpperCase())}
+                placeholder="None"
+                autoCapitalize="characters"
+                spellCheck={false}
+                className="w-40 shrink-0 font-mono"
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-4">
+              <div className="min-w-0">
+                <label htmlFor="edit-extra" className="text-sm font-medium">
+                  Extra discount
+                </label>
+                <p className="text-muted-foreground text-xs">
+                  Goodwill, on top of every rule.
+                </p>
+              </div>
+              <MoneyInput
+                id="edit-extra"
+                value={extra}
+                onChange={(event) => setExtra(event.target.value)}
+                currencyCode={currencyCode}
+                className="w-32 shrink-0"
+              />
+            </div>
+
+            {extra.trim() !== '' &&
+              extra.trim() !== centsToMajorString(0, currencyCode) && (
+                <Input
+                  value={extraReason}
+                  onChange={(event) => setExtraReason(event.target.value)}
+                  placeholder="Why — goes on the order's timeline"
+                  className="text-sm"
+                />
+              )}
+
+            <Input
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+              placeholder="Note for the timeline — optional"
+              className="text-sm"
             />
           </div>
         </div>
@@ -539,19 +734,80 @@ function EditorBody({
       </div>
 
       <DialogFooter className="mx-0 mb-0 flex-col items-stretch gap-3 rounded-none border-t px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-col gap-0.5 text-sm">
+        <div className="flex min-w-0 flex-col gap-1 text-sm">
+          {/* What the rules did to this basket, itemised. A merchant reading a
+              total back to a customer has to be able to answer "why is it
+              that", and the discounts are exactly where that question lands. */}
+          <div className="text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs tabular-nums">
+            <span>
+              Subtotal {formatMoneyAmount(subtotalCents, currencyCode)}
+            </span>
+            {quote && quote.offerDiscountCents > 0 && (
+              <span>
+                {quote.offerLabel ?? 'Offer'} −
+                {formatMoneyAmount(quote.offerDiscountCents, currencyCode)}
+              </span>
+            )}
+            {quote && quote.giftDiscountCents > 0 && (
+              <span className="flex items-center gap-1">
+                <Gift className="size-3" />−
+                {formatMoneyAmount(quote.giftDiscountCents, currencyCode)}
+              </span>
+            )}
+            {quote && quote.couponDiscountCents > 0 && (
+              <span className="flex items-center gap-1">
+                <Tag className="size-3" />
+                {quote.couponCode} −
+                {formatMoneyAmount(quote.couponDiscountCents, currencyCode)}
+              </span>
+            )}
+            {quote && quote.manualDiscountCents > 0 && (
+              <span>
+                Extra −
+                {formatMoneyAmount(quote.manualDiscountCents, currencyCode)}
+              </span>
+            )}
+            <span>
+              Delivery{' '}
+              {quote
+                ? quote.shippingTotalCents === 0
+                  ? 'free'
+                  : formatMoneyAmount(quote.shippingTotalCents, currencyCode)
+                : formatMoneyAmount(shippingCents, currencyCode)}
+            </span>
+          </div>
+
           <div className="flex items-baseline gap-2">
             <span className="text-muted-foreground">New total</span>
             <span className="font-display text-lg font-semibold tabular-nums">
               {formatMoney(newTotal, currencyCode)}
             </span>
-            {delta !== 0 && (
+            {quoting && (
+              <Loader2 className="text-muted-foreground size-3.5 animate-spin" />
+            )}
+            {!quoting && delta !== 0 && (
               <Badge variant={delta > 0 ? 'lime' : 'secondary'}>
                 {delta > 0 ? '+' : '−'}
                 {formatMoneyAmount(Math.abs(delta), currencyCode)}
               </Badge>
             )}
           </div>
+
+          {/* The reason a discount fell away, while the merchant can still act
+              on it — put the item back, or grant the difference by hand. */}
+          {quote?.offerNote && (
+            <p className="text-muted-foreground flex items-start gap-1.5 text-xs">
+              <Info className="mt-0.5 size-3 shrink-0" />
+              {quote.offerNote}
+            </p>
+          )}
+          {quote?.couponNote && (
+            <p className="text-muted-foreground flex items-start gap-1.5 text-xs">
+              <Info className="mt-0.5 size-3 shrink-0" />
+              {quote.couponNote}
+            </p>
+          )}
+
           {state?.error && (
             <p className="text-destructive text-xs">{state.error}</p>
           )}
@@ -569,6 +825,126 @@ function EditorBody({
       </DialogFooter>
     </form>
   )
+}
+
+/**
+ * A line's money, or the word Gift where it would be.
+ *
+ * The price is not struck through and replaced by zero: a gift is not a line
+ * sold at nothing, it is a line not sold, and the packer reading this needs to
+ * know to put it in the box without asking why it costs nothing.
+ */
+function LinePrice({
+  gift,
+  amountCents,
+  currencyCode,
+}: {
+  gift: boolean
+  amountCents: number
+  currencyCode: string
+}) {
+  if (gift) {
+    return (
+      <p className="text-lime-foreground w-20 shrink-0 text-right text-sm font-semibold">
+        Gift
+      </p>
+    )
+  }
+
+  return (
+    <p className="w-20 shrink-0 text-right text-sm font-medium tabular-nums">
+      {formatMoneyAmount(amountCents, currencyCode)}
+    </p>
+  )
+}
+
+function GiftToggle({
+  gift,
+  disabled,
+  label,
+  onToggle,
+}: {
+  gift: boolean
+  disabled: boolean
+  label: string
+  onToggle: () => void
+}) {
+  return (
+    <Button
+      type="button"
+      size="icon-sm"
+      variant="ghost"
+      disabled={disabled}
+      aria-pressed={gift}
+      onClick={onToggle}
+      title={
+        disabled
+          ? 'Some of this line has already been returned or refunded'
+          : gift
+            ? `Charge for ${label}`
+            : `Send ${label} as a gift`
+      }
+      className={cn(
+        'text-muted-foreground',
+        gift && 'text-lime-foreground bg-lime/15'
+      )}
+    >
+      <Gift />
+      <span className="sr-only">
+        {gift ? `Charge for ${label}` : `Send ${label} as a gift`}
+      </span>
+    </Button>
+  )
+}
+
+type EditQuote = Extract<
+  Awaited<ReturnType<typeof previewOrderEditAction>>,
+  { ok: true }
+>['quote']
+
+/**
+ * Asks the server what the edit on screen costs, as the merchant makes it.
+ *
+ * Debounced, and guarded against a slower earlier answer landing on top of a
+ * later one — the classic way a running total ends up showing the price of a
+ * basket the merchant has already changed.
+ *
+ * A failed quote leaves the previous one on screen rather than blanking the
+ * total. The merchant is mid-sentence; a momentarily stale number is far less
+ * disruptive than an empty one, and the save re-quotes from scratch anyway.
+ */
+function useEditQuote(orderId: string, payload: unknown, skip: boolean) {
+  const [quote, setQuote] = useState<EditQuote | null>(null)
+  const [quoting, setQuoting] = useState(false)
+  const latest = useRef(0)
+  const serialized = JSON.stringify(payload)
+
+  useEffect(() => {
+    if (skip) return
+    const token = ++latest.current
+
+    // The spinner is raised inside the timer rather than beside it: raising it
+    // in the effect body sets state during render and, at one keystroke per
+    // 40ms, spends more renders on the spinner than on the number.
+    const timer = window.setTimeout(() => {
+      if (token !== latest.current) return
+      setQuoting(true)
+
+      previewOrderEditAction(orderId, JSON.parse(serialized))
+        .then((result) => {
+          if (token !== latest.current) return
+          if (result.ok) setQuote(result.quote)
+          setQuoting(false)
+        })
+        .catch(() => {
+          if (token === latest.current) setQuoting(false)
+        })
+    }, QUOTE_DELAY_MS)
+
+    return () => window.clearTimeout(timer)
+  }, [orderId, serialized, skip])
+
+  return { quote, quoting }
 }
 
 /**

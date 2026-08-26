@@ -40,6 +40,14 @@ export interface PricingLine {
   weightGrams: number
   /** Collection ids this product belongs to, for scoped discounts. */
   collectionIds: string[]
+  /**
+   * Already given away, so nothing may be discounted off it twice.
+   *
+   * A gift line is worth its list price on the subtotal and is cancelled out by
+   * its own discount; letting a code take a further percentage off it would
+   * push the order total below what the customer actually owes.
+   */
+  isGift?: boolean
 }
 
 export interface PricingDiscount {
@@ -48,9 +56,16 @@ export interface PricingDiscount {
   type: 'PERCENTAGE' | 'FIXED_AMOUNT' | 'FREE_SHIPPING' | 'BUY_X_GET_Y'
   valueBps: number | null
   valueCents: number | null
-  appliesTo: 'ALL' | 'PRODUCTS' | 'COLLECTIONS'
+  /** A ceiling on what a percentage may take off. Null is no ceiling. */
+  maxDiscountCents?: number | null
+  appliesTo: 'ALL' | 'PRODUCTS' | 'COLLECTIONS' | 'VARIANTS'
   targetProductIds: string[]
   targetCollectionIds: string[]
+  /** Size-level targeting: the M and the L are on offer, the XL is not. */
+  targetVariantIds?: string[]
+  /** Carved back out of whatever the scope above selected. */
+  excludedProductIds?: string[]
+  excludedVariantIds?: string[]
   minimumSubtotalCents: number | null
   minimumQuantity: number | null
   buyQuantity: number | null
@@ -127,26 +142,11 @@ export function priceCart(input: PricingInput): PricingResult {
   const totalQuantity = lines.reduce((sum, line) => sum + line.quantity, 0)
 
   // 2. Discounts.
-  const eligibility = lines.map((line) => isLineEligible(line, discount))
-  const eligibleSubtotal = subtotals.reduce(
-    (sum, value, index) => (eligibility[index] ? sum + value : sum),
-    0
-  )
-
-  const rejection = discount
-    ? rejectionReason(discount, subtotalCents, totalQuantity, eligibleSubtotal)
-    : null
-
-  const activeDiscount = rejection ? null : discount
-
-  const discountPerLine = allocateDiscount(
-    activeDiscount,
-    lines,
-    subtotals,
-    eligibility,
-    eligibleSubtotal
-  )
-  const discountTotalCents = discountPerLine.reduce((sum, v) => sum + v, 0)
+  const evaluated = evaluateDiscount(lines, discount)
+  const activeDiscount = evaluated.rejection ? null : discount
+  const discountPerLine = evaluated.perLine
+  const discountTotalCents = evaluated.totalCents
+  const rejection = evaluated.rejection
 
   // 3. Shipping.
   const shippingRequired = lines.some((line) => line.requiresShipping)
@@ -226,11 +226,86 @@ export function priceCart(input: PricingInput): PricingResult {
 
 // ── Discount helpers ─────────────────────────────────────────────────────
 
+export interface DiscountEvaluation {
+  /** What each line, in order, has taken off it. Sums to `totalCents`. */
+  perLine: number[]
+  totalCents: number
+  /** Why the code earned nothing, or null when it applied. */
+  rejection: string | null
+}
+
+/**
+ * What a discount is worth against exactly these lines.
+ *
+ * Split out of `priceCart` because three callers have to reach the same answer
+ * and one of them is not pricing a cart at all: the order editor revalidates a
+ * code against a basket the merchant just changed on the phone, and has no
+ * shipping rate or tax table in hand at that moment. A second implementation of
+ * "does this code still qualify" is how a customer gets told yes on the
+ * storefront and no on the callback.
+ */
+export function evaluateDiscount(
+  lines: PricingLine[],
+  discount: PricingDiscount | null
+): DiscountEvaluation {
+  const subtotals = lines.map((line) => line.unitPriceCents * line.quantity)
+  const subtotalCents = subtotals.reduce((sum, value) => sum + value, 0)
+  const totalQuantity = lines.reduce((sum, line) => sum + line.quantity, 0)
+
+  const eligibility = lines.map((line) => isLineEligible(line, discount))
+  const eligibleSubtotal = subtotals.reduce(
+    (sum, value, index) => (eligibility[index] ? sum + value : sum),
+    0
+  )
+
+  const rejection = discount
+    ? rejectionReason(discount, subtotalCents, totalQuantity, eligibleSubtotal)
+    : null
+
+  const perLine = allocateDiscount(
+    rejection ? null : discount,
+    lines,
+    subtotals,
+    eligibility,
+    eligibleSubtotal
+  )
+
+  return {
+    perLine,
+    totalCents: perLine.reduce((sum, value) => sum + value, 0),
+    rejection,
+  }
+}
+
+/** The rejection reason in the merchant's and the shopper's language. */
+export function discountRejectionMessage(reason: string | null): string | null {
+  switch (reason) {
+    case 'MINIMUM_SUBTOTAL_NOT_MET':
+      return 'This basket is below the minimum spend for that code.'
+    case 'MINIMUM_QUANTITY_NOT_MET':
+      return 'This basket has too few items for that code.'
+    case 'NO_ELIGIBLE_ITEMS':
+      return 'That code does not apply to anything in this basket.'
+    default:
+      return reason
+  }
+}
+
 function isLineEligible(
   line: PricingLine,
   discount: PricingDiscount | null
 ): boolean {
   if (!discount) return false
+
+  // Something already given away cannot be discounted again — see the note on
+  // PricingLine.isGift.
+  if (line.isGift) return false
+
+  // Exclusions are checked after the scope below picks the line up, so
+  // "everything except the XL" is one rule rather than a list of every size
+  // that *is* on offer.
+  if (discount.excludedProductIds?.includes(line.productId)) return false
+  if (discount.excludedVariantIds?.includes(line.variantId)) return false
 
   switch (discount.appliesTo) {
     case 'ALL':
@@ -241,6 +316,8 @@ function isLineEligible(
       return line.collectionIds.some((id) =>
         discount.targetCollectionIds.includes(id)
       )
+    case 'VARIANTS':
+      return (discount.targetVariantIds ?? []).includes(line.variantId)
   }
 }
 
@@ -277,6 +354,17 @@ function rejectionReason(
   return null
 }
 
+/** A percentage discount's ceiling, when the campaign carries one. */
+function capPercentage(
+  amountCents: number,
+  maxDiscountCents: number | null | undefined
+): number {
+  if (maxDiscountCents === null || maxDiscountCents === undefined) {
+    return amountCents
+  }
+  return Math.min(amountCents, clampNonNegative(Math.round(maxDiscountCents)))
+}
+
 /**
  * Splits the discount across lines so the per-line amounts sum to exactly the
  * order-level discount.
@@ -304,7 +392,14 @@ function allocateDiscount(
 
   const amount =
     discount.type === 'PERCENTAGE'
-      ? applyBps(eligibleSubtotal, discount.valueBps ?? 0)
+      ? // The cap is applied to the percentage, not to the whole discount: a
+        // fixed-amount discount already *is* its own ceiling, and clamping it
+        // here would silently shrink a "500 off" campaign that also happened
+        // to carry a leftover cap from an earlier percentage one.
+        capPercentage(
+          applyBps(eligibleSubtotal, discount.valueBps ?? 0),
+          discount.maxDiscountCents
+        )
       : // A fixed-amount discount larger than the cart must not create a
         // negative total or a partial refund of money never taken.
         Math.min(discount.valueCents ?? 0, eligibleSubtotal)

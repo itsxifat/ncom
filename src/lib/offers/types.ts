@@ -20,6 +20,15 @@ export interface OfferVariantChoice {
   priceCents: number
   /** False when tracked stock has run out and the policy is to deny. */
   available: boolean
+  /**
+   * This size's own terms inside the offer, when the merchant gave it any.
+   *
+   * Null — the ordinary case — means the offer's rule applies. A rule here is
+   * how "20% off, but only 10% on the XL" is expressed, and it is carried to
+   * the browser rather than pre-applied so the running total still updates
+   * without a round trip when the buyer switches size.
+   */
+  pricing: OfferPricingRule | null
 }
 
 /**
@@ -44,6 +53,31 @@ export interface OfferLine {
 /** One rung of a COLLECTION offer's manual price ladder. */
 export interface OfferTierChoice {
   quantity: number
+  /** PRICE reads priceCents as the total; PERCENT reads discountBps. */
+  reward: OfferTierRewardValue
+  priceCents: number
+  discountBps: number
+}
+
+export type OfferTierRewardValue = 'PRICE' | 'PERCENT'
+
+/**
+ * How a ladder answers a quantity it has no rung for.
+ *
+ * EXACT refuses — three and five were priced, four was not. THRESHOLD applies
+ * the highest rung at or below the quantity and charges the overflow at list,
+ * which is what a merchant means by "3 for 1000" when a buyer takes four.
+ */
+export type OfferTierModeValue = 'EXACT' | 'THRESHOLD'
+
+/** Something thrown in free with the offer. */
+export interface OfferGift {
+  variantId: string
+  title: string
+  variantTitle: string | null
+  imageUrl: string | null
+  quantity: number
+  /** What it lists for, so the page can say what the gift is worth. */
   priceCents: number
 }
 
@@ -77,6 +111,10 @@ export interface PublicOffer {
   pool: OfferLine[]
   /** COLLECTION: the quantity→price ladder, ascending. */
   tiers: OfferTierChoice[]
+  tierMode: OfferTierModeValue
+
+  /** Thrown in free when the offer is ordered. Null when there is none. */
+  gift: OfferGift | null
 
   minQuantity: number
   /** 0 means unbounded. */

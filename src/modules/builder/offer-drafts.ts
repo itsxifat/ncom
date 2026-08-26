@@ -1,8 +1,8 @@
 import { minorUnitsPerMajor } from '@/lib/money'
-import type { CheckoutDraft, OfferDraft } from './OffersPanel'
+import type { CheckoutDraft } from './DeliveryPanel'
 
 /**
- * Database rows → the strings the Offers form edits.
+ * Database rows → the strings the Delivery form edits.
  *
  * The panel keeps money as the text the merchant typed rather than as a number,
  * because a controlled numeric input that reformats mid-keystroke is unusable —
@@ -17,54 +17,6 @@ function toMajor(cents: number, currencyCode: string): string {
   if (!cents) return ''
   const major = cents / minorUnitsPerMajor(currencyCode)
   return Number.isInteger(major) ? String(major) : major.toFixed(2)
-}
-
-interface OfferRow {
-  id: string
-  label: string
-  description: string | null
-  badge: string | null
-  kind: string
-  pricingMode: string
-  priceCents: number
-  discountBps: number
-  compareAtCents: number
-  minQuantity: number
-  maxQuantity: number
-  isDefault: boolean
-  isActive: boolean
-  items: { productId: string; variantId: string | null; quantity: number }[]
-  tiers: { quantity: number; priceCents: number }[]
-}
-
-export function toOfferDrafts(
-  rows: OfferRow[],
-  currencyCode: string
-): OfferDraft[] {
-  return rows.map((row) => ({
-    id: row.id,
-    label: row.label,
-    description: row.description ?? '',
-    badge: row.badge ?? '',
-    kind: row.kind as OfferDraft['kind'],
-    pricingMode: row.pricingMode as OfferDraft['pricingMode'],
-    price: toMajor(row.priceCents, currencyCode),
-    discountPercent: row.discountBps ? String(row.discountBps / 100) : '',
-    compareAt: toMajor(row.compareAtCents, currencyCode),
-    minQuantity: row.minQuantity ? String(row.minQuantity) : '',
-    maxQuantity: row.maxQuantity ? String(row.maxQuantity) : '',
-    isDefault: row.isDefault,
-    isActive: row.isActive,
-    items: row.items.map((item) => ({
-      productId: item.productId,
-      variantId: item.variantId,
-      quantity: item.quantity,
-    })),
-    tiers: row.tiers.map((tier) => ({
-      quantity: String(tier.quantity),
-      price: toMajor(tier.priceCents, currencyCode),
-    })),
-  }))
 }
 
 interface CheckoutRow {

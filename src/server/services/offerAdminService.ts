@@ -1,27 +1,71 @@
 import 'server-only'
 import { prisma } from '@/server/db/client'
 import { requireOrgAccess } from '@/server/auth/rbac'
-import { publishPage } from './publishService'
 import type {
   OfferKind,
   OfferPricingMode,
+  OfferScope,
+  OfferTierMode,
+  OfferTierReward,
   PageShippingMode,
   PromotionBasis,
   PromotionReward,
 } from '@/generated/prisma/enums'
 
 /**
- * Reading and writing a landing page's offers, delivery rates and promotions.
+ * Reading and writing offers, and a landing page's delivery rates and
+ * promotions.
  *
- * Every mutation here ends in `refreshPublishedSnapshot`, and that is the point
- * of the module rather than an afterthought.
+ * An offer belongs to the workspace and is *scoped* to a page, a store, or
+ * everything. That is the whole shape of this module: every mutation resolves
+ * the scope to a concrete (storeId, pageId) pair, checks the caller owns both,
+ * and writes one row. A merchant running six campaign pages off one catalogue
+ * types "any 3 for 1500" once rather than six times, and a page that needs its
+ * own headline bundle still gets one.
  *
- * The public site serves a PageVersion snapshot, not live rows, so a page
- * published before an offer changed keeps quoting the old terms until it is
- * republished. Republishing on every offer change is a few hundred
- * milliseconds of work that removes an entire class of "the price on the page
- * was wrong" support ticket.
+ * Nothing here republishes a page. The public site resolves offers, delivery
+ * and promotions live on every render — `getStorefrontCommerce` is called by
+ * the storefront route itself, not baked into the published snapshot — so an
+ * offer change is visible on the next request without a republish. Snapshotting
+ * them would additionally mean that editing one workspace-wide offer had to
+ * recompile every page in the workspace, which is work proportional to how
+ * successful the merchant is.
  */
+
+/**
+ * Resolves an offer's scope to the rows it hangs off, and proves the caller
+ * owns them.
+ *
+ * A PAGE offer records its store too, so "everything this shop sells" stays one
+ * indexed read rather than a join through pages. A STORE offer records no page.
+ * An ORGANIZATION offer records neither.
+ */
+async function resolveScope(
+  organizationId: string,
+  scope: OfferScope,
+  storeId: string | null,
+  pageId: string | null
+): Promise<{ storeId: string | null; pageId: string | null }> {
+  if (scope === 'ORGANIZATION') return { storeId: null, pageId: null }
+
+  if (scope === 'STORE') {
+    if (!storeId) throw new Error('Choose which store this offer runs on')
+    const store = await prisma.store.findFirst({
+      where: { id: storeId, organizationId },
+      select: { id: true },
+    })
+    if (!store) throw new Error('Store not found')
+    return { storeId: store.id, pageId: null }
+  }
+
+  if (!pageId) throw new Error('Choose which page this offer runs on')
+  const page = await prisma.page.findFirst({
+    where: { id: pageId, store: { organizationId } },
+    select: { id: true, storeId: true },
+  })
+  if (!page) throw new Error('Page not found')
+  return { storeId: page.storeId, pageId: page.id }
+}
 
 async function assertPageInOrg(
   organizationId: string,
@@ -37,42 +81,14 @@ async function assertPageInOrg(
 }
 
 /**
- * Re-snapshots the live page so what is published matches the offers.
+ * One offer as the editor works with it.
  *
- * A draft page has no snapshot to refresh, and a failure here must not lose the
- * merchant's edit — the offer is already saved by the time this runs, so the
- * worst case is a stale card until the next publish, which is recoverable.
- */
-async function refreshPublishedSnapshot(
-  organizationId: string,
-  storeId: string,
-  pageId: string
-) {
-  const page = await prisma.page.findUnique({
-    where: { id: pageId },
-    select: { status: true },
-  })
-  if (page?.status !== 'PUBLISHED') return
-
-  try {
-    await publishPage(organizationId, storeId, pageId)
-  } catch (cause) {
-    console.error(
-      `Offer change saved but republishing page ${pageId} failed:`,
-      cause
-    )
-  }
-}
-
-/**
- * One offer as the builder's Offers tab edits it.
- *
- * Only ids of products and variants, not the products themselves: the panel is
- * rendered with the whole catalogue already and resolves titles, photos and
- * prices from it. That matters because this shape is also what a save returns
- * to the browser — the panel replaces its list with the server's answer so a
- * freshly created offer knows its own id — and shipping the full product graph
- * back on every keystroke-sized edit would be paying for data already on screen.
+ * Only ids of products and variants, not the products themselves: the editor is
+ * rendered with the catalogue already and resolves titles, photos and prices
+ * from it. That matters because this shape is also what a save returns to the
+ * browser — the panel replaces its list with the server's answer so a freshly
+ * created offer knows its own id — and shipping the full product graph back on
+ * every keystroke-sized edit would be paying for data already on screen.
  */
 export interface OfferSummaryRow {
   id: string
@@ -80,6 +96,9 @@ export interface OfferSummaryRow {
   label: string
   description: string | null
   badge: string | null
+  scope: OfferScope
+  storeId: string | null
+  pageId: string | null
   kind: OfferKind
   pricingMode: OfferPricingMode
   priceCents: number
@@ -90,53 +109,170 @@ export interface OfferSummaryRow {
   isDefault: boolean
   isActive: boolean
   position: number
-  items: { productId: string; variantId: string | null; quantity: number }[]
-  tiers: { quantity: number; priceCents: number }[]
+  tierMode: OfferTierMode
+  startsAt: Date | null
+  endsAt: Date | null
+  giftVariantId: string | null
+  giftQuantity: number
+  items: {
+    productId: string
+    variantId: string | null
+    variantIds: string[]
+    quantity: number
+  }[]
+  tiers: {
+    quantity: number
+    reward: OfferTierReward
+    priceCents: number
+    discountBps: number
+  }[]
+  variantRules: {
+    variantId: string
+    excluded: boolean
+    pricingMode: OfferPricingMode | null
+    priceCents: number
+    discountBps: number
+  }[]
 }
 
-export async function listOffers(
-  organizationId: string,
-  storeId: string,
-  pageId: string
-): Promise<OfferSummaryRow[]> {
-  await requireOrgAccess(organizationId, 'VIEWER')
-  await assertPageInOrg(organizationId, storeId, pageId)
-
-  return prisma.offer.findMany({
-    where: { pageId },
+const offerSelect = {
+  id: true,
+  key: true,
+  label: true,
+  description: true,
+  badge: true,
+  scope: true,
+  storeId: true,
+  pageId: true,
+  kind: true,
+  pricingMode: true,
+  priceCents: true,
+  discountBps: true,
+  compareAtCents: true,
+  minQuantity: true,
+  maxQuantity: true,
+  isDefault: true,
+  isActive: true,
+  position: true,
+  tierMode: true,
+  startsAt: true,
+  endsAt: true,
+  giftVariantId: true,
+  giftQuantity: true,
+  items: {
     orderBy: { position: 'asc' },
     select: {
-      id: true,
-      key: true,
-      label: true,
-      description: true,
-      badge: true,
-      kind: true,
+      productId: true,
+      variantId: true,
+      variantIds: true,
+      quantity: true,
+    },
+  },
+  tiers: {
+    orderBy: { quantity: 'asc' },
+    select: {
+      quantity: true,
+      reward: true,
+      priceCents: true,
+      discountBps: true,
+    },
+  },
+  variantRules: {
+    select: {
+      variantId: true,
+      excluded: true,
       pricingMode: true,
       priceCents: true,
       discountBps: true,
-      compareAtCents: true,
-      minQuantity: true,
-      maxQuantity: true,
-      isDefault: true,
-      isActive: true,
-      position: true,
-      items: {
-        orderBy: { position: 'asc' },
-        select: { productId: true, variantId: true, quantity: true },
-      },
-      tiers: {
-        orderBy: { quantity: 'asc' },
-        select: { quantity: true, priceCents: true },
-      },
     },
+  },
+} as const
+
+export interface OfferFilter {
+  scope?: OfferScope
+  storeId?: string
+  pageId?: string
+}
+
+/**
+ * Every offer in the workspace, most specific scope first.
+ *
+ * Filtered by scope when the caller is looking at one shop or one page, and
+ * unfiltered for the workspace list — which is the screen a merchant opens to
+ * answer "what am I running right now", a question that has no useful answer
+ * if it can only be asked one page at a time.
+ */
+export async function listOffers(
+  organizationId: string,
+  filter: OfferFilter = {}
+): Promise<OfferSummaryRow[]> {
+  await requireOrgAccess(organizationId, 'VIEWER')
+
+  return prisma.offer.findMany({
+    where: {
+      organizationId,
+      scope: filter.scope,
+      storeId: filter.storeId,
+      pageId: filter.pageId,
+    },
+    orderBy: [{ scope: 'asc' }, { position: 'asc' }],
+    select: offerSelect,
+  })
+}
+
+/** Everything one page sells, in the order a buyer sees it. */
+export async function listOffersForPage(
+  organizationId: string,
+  pageId: string
+): Promise<OfferSummaryRow[]> {
+  await requireOrgAccess(organizationId, 'VIEWER')
+
+  const page = await prisma.page.findFirst({
+    where: { id: pageId, store: { organizationId } },
+    select: { storeId: true },
+  })
+  if (!page) throw new Error('Page not found')
+
+  return prisma.offer.findMany({
+    where: {
+      organizationId,
+      OR: [
+        { scope: 'PAGE', pageId },
+        { scope: 'STORE', storeId: page.storeId },
+        { scope: 'ORGANIZATION' },
+      ],
+    },
+    orderBy: [{ scope: 'asc' }, { position: 'asc' }],
+    select: offerSelect,
+  })
+}
+
+export async function getOffer(
+  organizationId: string,
+  offerId: string
+): Promise<OfferSummaryRow | null> {
+  await requireOrgAccess(organizationId, 'VIEWER')
+
+  return prisma.offer.findFirst({
+    where: { id: offerId, organizationId },
+    select: offerSelect,
   })
 }
 
 export interface OfferItemInput {
   productId: string
   variantId: string | null
+  /** Which sizes this line covers. Empty means all of them. */
+  variantIds?: string[]
   quantity: number
+}
+
+export interface OfferVariantRuleInput {
+  variantId: string
+  excluded: boolean
+  pricingMode: OfferPricingMode | null
+  priceCents: number
+  discountBps: number
 }
 
 export interface OfferInput {
@@ -144,6 +280,9 @@ export interface OfferInput {
   label: string
   description?: string | null
   badge?: string | null
+  scope: OfferScope
+  storeId?: string | null
+  pageId?: string | null
   kind: OfferKind
   pricingMode: OfferPricingMode
   priceCents: number
@@ -153,19 +292,33 @@ export interface OfferInput {
   maxQuantity: number
   isDefault: boolean
   isActive: boolean
+  tierMode: OfferTierMode
+  startsAt?: Date | null
+  endsAt?: Date | null
+  giftVariantId?: string | null
+  giftQuantity?: number
   items: OfferItemInput[]
-  tiers: { quantity: number; priceCents: number }[]
+  tiers: {
+    quantity: number
+    reward: OfferTierReward
+    priceCents: number
+    discountBps: number
+  }[]
+  variantRules?: OfferVariantRuleInput[]
 }
 
 /**
- * A URL-safe, human-readable key derived from the label.
+ * A URL-safe, human-readable key, unique across the workspace.
  *
  * Readable because it ends up in order records a merchant reads — "family-pack"
- * tells them what sold, a cuid does not. Uniqueness within the page is enforced
- * by the database, so a collision is resolved by suffixing rather than by
- * hoping.
+ * tells them what sold, a cuid does not. Uniqueness is enforced by the
+ * database, so a collision is resolved by suffixing rather than by hoping.
  */
-async function uniqueOfferKey(pageId: string, label: string, exclude?: string) {
+async function uniqueOfferKey(
+  organizationId: string,
+  label: string,
+  exclude?: string
+) {
   const base =
     label
       .toLowerCase()
@@ -177,7 +330,7 @@ async function uniqueOfferKey(pageId: string, label: string, exclude?: string) {
     const candidate = attempt === 0 ? base : `${base}-${attempt + 1}`
     const clash = await prisma.offer.findFirst({
       where: {
-        pageId,
+        organizationId,
         key: candidate,
         NOT: exclude ? { id: exclude } : undefined,
       },
@@ -188,102 +341,121 @@ async function uniqueOfferKey(pageId: string, label: string, exclude?: string) {
   return `${base}-${Date.now()}`
 }
 
-export async function createOffer(
-  organizationId: string,
-  storeId: string,
-  pageId: string,
-  input: OfferInput
-) {
+export async function createOffer(organizationId: string, input: OfferInput) {
   await requireOrgAccess(organizationId, 'EDITOR')
-  await assertPageInOrg(organizationId, storeId, pageId)
-  await assertProductsInOrg(organizationId, input.items)
 
-  const position = await prisma.offer.count({ where: { pageId } })
-  const key = input.key ?? (await uniqueOfferKey(pageId, input.label))
+  const placement = await resolveScope(
+    organizationId,
+    input.scope,
+    input.storeId ?? null,
+    input.pageId ?? null
+  )
+  await assertProductsInOrg(organizationId, input.items)
+  await assertVariantsInOrg(organizationId, collectVariantIds(input))
+
+  const position = await prisma.offer.count({
+    where: { organizationId, scope: input.scope, pageId: placement.pageId },
+  })
+  const key = input.key ?? (await uniqueOfferKey(organizationId, input.label))
 
   const offer = await prisma.offer.create({
     data: {
-      pageId,
+      organizationId,
+      scope: input.scope,
+      storeId: placement.storeId,
+      pageId: placement.pageId,
       key,
       position,
       ...scalarFields(input),
       items: { create: input.items.map(toItemCreate) },
       tiers: { create: normalizeTierInput(input.tiers) },
+      variantRules: { create: normalizeRuleInput(input.variantRules) },
     },
     select: { id: true },
   })
 
-  if (input.isDefault) await clearOtherDefaults(pageId, offer.id)
-  await refreshPublishedSnapshot(organizationId, storeId, pageId)
+  if (input.isDefault) await clearOtherDefaults(offer.id, placement.pageId)
   return offer
 }
 
 export async function updateOffer(
   organizationId: string,
-  storeId: string,
-  pageId: string,
   offerId: string,
   input: OfferInput
 ) {
   await requireOrgAccess(organizationId, 'EDITOR')
-  await assertPageInOrg(organizationId, storeId, pageId)
-  await assertProductsInOrg(organizationId, input.items)
 
   const existing = await prisma.offer.findFirst({
-    where: { id: offerId, pageId },
+    where: { id: offerId, organizationId },
     select: { id: true },
   })
   if (!existing) throw new Error('Offer not found')
 
-  // Items and tiers are replaced wholesale rather than diffed. They carry no
-  // identity a merchant would recognise and nothing references them, so a
-  // replace is both simpler and free of the "edited a line that was deleted
-  // in another tab" class of bug.
+  const placement = await resolveScope(
+    organizationId,
+    input.scope,
+    input.storeId ?? null,
+    input.pageId ?? null
+  )
+  await assertProductsInOrg(organizationId, input.items)
+  await assertVariantsInOrg(organizationId, collectVariantIds(input))
+
+  // Items, tiers and per-size rules are replaced wholesale rather than diffed.
+  // They carry no identity a merchant would recognise and nothing references
+  // them, so a replace is both simpler and free of the "edited a line that was
+  // deleted in another tab" class of bug.
   await prisma.$transaction([
     prisma.offerItem.deleteMany({ where: { offerId } }),
     prisma.offerTier.deleteMany({ where: { offerId } }),
+    prisma.offerVariantRule.deleteMany({ where: { offerId } }),
     prisma.offer.update({
       where: { id: offerId },
       data: {
+        scope: input.scope,
+        storeId: placement.storeId,
+        pageId: placement.pageId,
         ...scalarFields(input),
         items: { create: input.items.map(toItemCreate) },
         tiers: { create: normalizeTierInput(input.tiers) },
+        variantRules: { create: normalizeRuleInput(input.variantRules) },
       },
     }),
   ])
 
-  if (input.isDefault) await clearOtherDefaults(pageId, offerId)
-  await refreshPublishedSnapshot(organizationId, storeId, pageId)
+  if (input.isDefault) await clearOtherDefaults(offerId, placement.pageId)
 }
 
-export async function deleteOffer(
+export async function deleteOffer(organizationId: string, offerId: string) {
+  await requireOrgAccess(organizationId, 'EDITOR')
+  await prisma.offer.deleteMany({ where: { id: offerId, organizationId } })
+}
+
+export async function setOfferActive(
   organizationId: string,
-  storeId: string,
-  pageId: string,
-  offerId: string
+  offerId: string,
+  isActive: boolean
 ) {
   await requireOrgAccess(organizationId, 'EDITOR')
-  await assertPageInOrg(organizationId, storeId, pageId)
-
-  await prisma.offer.deleteMany({ where: { id: offerId, pageId } })
-  await refreshPublishedSnapshot(organizationId, storeId, pageId)
+  await prisma.offer.updateMany({
+    where: { id: offerId, organizationId },
+    data: { isActive },
+  })
 }
 
 export async function reorderOffers(
   organizationId: string,
-  storeId: string,
-  pageId: string,
   orderedIds: string[]
 ) {
   await requireOrgAccess(organizationId, 'EDITOR')
-  await assertPageInOrg(organizationId, storeId, pageId)
 
   await prisma.$transaction(
     orderedIds.map((id, position) =>
-      prisma.offer.updateMany({ where: { id, pageId }, data: { position } })
+      prisma.offer.updateMany({
+        where: { id, organizationId },
+        data: { position },
+      })
     )
   )
-  await refreshPublishedSnapshot(organizationId, storeId, pageId)
 }
 
 /**
@@ -291,10 +463,31 @@ export async function reorderOffers(
  *
  * A form with nothing chosen asks the buyer to make a decision before they can
  * begin, which is the single most expensive moment on a landing page.
+ *
+ * Cleared across everything the same page can see, not just the same scope: a
+ * page shows its own offers next to its store's and its workspace's, and two of
+ * those three claiming to be the default is exactly the situation the rule
+ * exists to prevent.
  */
-async function clearOtherDefaults(pageId: string, keepId: string) {
+async function clearOtherDefaults(keepId: string, pageId: string | null) {
+  const offer = await prisma.offer.findUnique({
+    where: { id: keepId },
+    select: { organizationId: true, storeId: true },
+  })
+  if (!offer) return
+
   await prisma.offer.updateMany({
-    where: { pageId, NOT: { id: keepId } },
+    where: {
+      organizationId: offer.organizationId,
+      NOT: { id: keepId },
+      OR: [
+        ...(pageId ? [{ scope: 'PAGE' as const, pageId }] : []),
+        ...(offer.storeId
+          ? [{ scope: 'STORE' as const, storeId: offer.storeId }]
+          : []),
+        { scope: 'ORGANIZATION' as const },
+      ],
+    },
     data: { isDefault: false },
   })
 }
@@ -302,8 +495,8 @@ async function clearOtherDefaults(pageId: string, keepId: string) {
 /**
  * Every product in an offer must belong to this organisation.
  *
- * Offers are page-scoped but products are organisation-scoped, so without this
- * an editor could attach another tenant's product id and sell their stock.
+ * Offers name products by id, so without this an editor could attach another
+ * tenant's product id and sell their stock.
  */
 async function assertProductsInOrg(
   organizationId: string,
@@ -315,6 +508,27 @@ async function assertProductsInOrg(
     where: { id: { in: ids }, organizationId },
   })
   if (count !== ids.length) throw new Error('Unknown product in this offer')
+}
+
+/** The same check for every variant named by a pin, a shortlist or a rule. */
+async function assertVariantsInOrg(organizationId: string, ids: string[]) {
+  if (ids.length === 0) return
+  const count = await prisma.productVariant.count({
+    where: { id: { in: ids }, product: { organizationId } },
+  })
+  if (count !== ids.length)
+    throw new Error('Unknown product option in this offer')
+}
+
+function collectVariantIds(input: OfferInput): string[] {
+  const ids = new Set<string>()
+  for (const item of input.items) {
+    if (item.variantId) ids.add(item.variantId)
+    for (const id of item.variantIds ?? []) ids.add(id)
+  }
+  for (const rule of input.variantRules ?? []) ids.add(rule.variantId)
+  if (input.giftVariantId) ids.add(input.giftVariantId)
+  return [...ids]
 }
 
 function scalarFields(input: OfferInput) {
@@ -331,6 +545,11 @@ function scalarFields(input: OfferInput) {
     maxQuantity: Math.max(0, Math.round(input.maxQuantity)),
     isDefault: input.isDefault,
     isActive: input.isActive,
+    tierMode: input.tierMode,
+    startsAt: input.startsAt ?? null,
+    endsAt: input.endsAt ?? null,
+    giftVariantId: input.giftVariantId ?? null,
+    giftQuantity: Math.max(1, Math.round(input.giftQuantity ?? 1)),
   }
 }
 
@@ -338,22 +557,68 @@ function toItemCreate(item: OfferItemInput, position: number) {
   return {
     productId: item.productId,
     variantId: item.variantId,
+    // A pin and a shortlist say the same thing when the shortlist is the pin,
+    // so the shortlist is dropped rather than stored twice and left to drift.
+    variantIds: item.variantId ? [] : [...new Set(item.variantIds ?? [])],
     quantity: Math.max(1, Math.round(item.quantity)),
     position,
   }
 }
 
 /** Deduplicated by quantity and sorted, since the ladder is keyed on it. */
-function normalizeTierInput(tiers: { quantity: number; priceCents: number }[]) {
-  const byQuantity = new Map<number, number>()
+function normalizeTierInput(
+  tiers: {
+    quantity: number
+    reward: OfferTierReward
+    priceCents: number
+    discountBps: number
+  }[]
+) {
+  const byQuantity = new Map<
+    number,
+    { reward: OfferTierReward; priceCents: number; discountBps: number }
+  >()
+
   for (const tier of tiers) {
     const quantity = Math.round(tier.quantity)
     if (quantity < 1) continue
-    byQuantity.set(quantity, Math.max(0, Math.round(tier.priceCents)))
+    byQuantity.set(quantity, {
+      reward: tier.reward,
+      priceCents: Math.max(0, Math.round(tier.priceCents)),
+      discountBps: Math.max(0, Math.round(tier.discountBps)),
+    })
   }
+
   return [...byQuantity.entries()]
     .sort((a, b) => a[0] - b[0])
-    .map(([quantity, priceCents]) => ({ quantity, priceCents }))
+    .map(([quantity, rung]) => ({ quantity, ...rung }))
+}
+
+/**
+ * Per-size rules, with the ones that say nothing dropped.
+ *
+ * A row that neither excludes a size nor overrides its price is a leftover from
+ * a merchant toggling a checkbox twice, and storing it would put a rule on a
+ * variant that behaves exactly as if there were none.
+ */
+function normalizeRuleInput(rules: OfferVariantRuleInput[] | undefined) {
+  const byVariant = new Map<string, OfferVariantRuleInput>()
+
+  for (const rule of rules ?? []) {
+    if (!rule.variantId) continue
+    if (!rule.excluded && !rule.pricingMode) continue
+    byVariant.set(rule.variantId, rule)
+  }
+
+  return [...byVariant.values()].map((rule) => ({
+    variantId: rule.variantId,
+    excluded: rule.excluded,
+    // An excluded size is not sold at all, so a price on it would be a rule
+    // nothing can ever read.
+    pricingMode: rule.excluded ? null : rule.pricingMode,
+    priceCents: Math.max(0, Math.round(rule.priceCents)),
+    discountBps: Math.max(0, Math.round(rule.discountBps)),
+  }))
 }
 
 // ── Delivery and promotions ─────────────────────────────────────────────────
@@ -456,6 +721,4 @@ export async function savePageCheckout(
       data: discountRules.map((rule) => ({ ...rule, checkoutId: checkout.id })),
     }),
   ])
-
-  await refreshPublishedSnapshot(organizationId, storeId, pageId)
 }

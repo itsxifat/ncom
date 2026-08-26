@@ -7,6 +7,7 @@ import {
 } from './inventoryService'
 import { emitOrderWebhook } from './orderService'
 import { loadTaxRates, parseAddress } from './pricingService'
+import { quoteOrderEdit, type OrderEditQuoteLine } from './orderEditPricing'
 import { applyBps, clampNonNegative, taxFromInclusive } from '@/lib/money'
 import type { TaxLine } from '@/lib/pricing'
 import type { Prisma } from '@/generated/prisma/client'
@@ -54,6 +55,16 @@ export interface OrderEditLine {
   /** Set for a line being added. Ignored when `orderLineId` is present. */
   variantId?: string | null
   quantity: number
+  /**
+   * Given away rather than sold.
+   *
+   * "Put a pair of socks in for the trouble" is the most common thing a
+   * merchant says on a complaint call, and before this it could only be done by
+   * adding the socks and then typing a discount that happened to equal their
+   * price — which reads, on the order and in the margin report, as if the socks
+   * were sold at a loss.
+   */
+  isGift?: boolean
 }
 
 export interface OrderEditInput {
@@ -66,6 +77,18 @@ export interface OrderEditInput {
   lines: OrderEditLine[]
   /** Delivery charge in minor units. Omitted leaves it as it was. */
   shippingCents?: number
+  /** Waive delivery outright. Distinct from a zero charge in the timeline. */
+  waiveShipping?: boolean
+  /**
+   * The code to judge against the edited basket.
+   *
+   * `undefined` re-judges whatever the order already carries; a string tries
+   * that code instead; `null` takes the code off.
+   */
+  discountCode?: string | null
+  /** Money off by hand, over and above every rule. */
+  manualDiscountCents?: number
+  manualDiscountReason?: string
   /** Why, for the timeline. */
   reason?: string
 }
@@ -187,11 +210,17 @@ export async function editOrder(
   const updates: {
     line: (typeof order.lines)[number]
     quantity: number
+    isGift: boolean
   }[] = []
-  const additions: { variantId: string; quantity: number }[] = []
+  const additions: {
+    variantId: string
+    quantity: number
+    isGift: boolean
+  }[] = []
 
   for (const requested of input.lines) {
     const quantity = Math.trunc(requested.quantity)
+    const isGift = requested.isGift ?? false
 
     if (requested.orderLineId) {
       const line = existingById.get(requested.orderLineId)
@@ -215,14 +244,25 @@ export async function editOrder(
         )
       }
 
+      // A line that has been partly returned or refunded describes money that
+      // has already moved against a price. Turning it into a gift now would
+      // make a refund of ৳500 point at a line worth nothing.
+      if (isGift !== line.isGift && settled > 0) {
+        throw new Error(
+          `"${line.title}" cannot become a gift — some of it has already been returned or refunded`
+        )
+      }
+
       keptIds.add(line.id)
-      if (quantity !== line.quantity) updates.push({ line, quantity })
+      if (quantity !== line.quantity || isGift !== line.isGift) {
+        updates.push({ line, quantity, isGift })
+      }
       continue
     }
 
     if (!requested.variantId) continue
     if (quantity < 1) continue
-    additions.push({ variantId: requested.variantId, quantity })
+    additions.push({ variantId: requested.variantId, quantity, isGift })
   }
 
   const removals = order.lines.filter((line) => !keptIds.has(line.id))
@@ -233,12 +273,6 @@ export async function editOrder(
       throw new Error(
         `"${line.title}" cannot be removed — ${settled} have already been returned or refunded`
       )
-    }
-  }
-
-  if (updates.length === 0 && additions.length === 0 && removals.length === 0) {
-    if (input.shippingCents === undefined) {
-      return { orderId, changed: false as const }
     }
   }
 
@@ -282,6 +316,71 @@ export async function editOrder(
       )
     : []
 
+  // ── Re-quote the whole basket before touching anything ─────────────────
+  //
+  // Quoted from the *intended* lines rather than from the rows after the
+  // writes, so the offer, the code and the delivery charge are all settled
+  // before a single unit of stock moves. An edit that turns out to be
+  // unpriceable therefore fails having changed nothing.
+
+  const updateByLineId = new Map(
+    updates.map((update) => [update.line.id, update])
+  )
+
+  const quoteLines: OrderEditQuoteLine[] = [
+    ...order.lines
+      .filter((line) => keptIds.has(line.id))
+      .map((line) => {
+        const update = updateByLineId.get(line.id)
+        return {
+          key: line.id,
+          productId: line.productId,
+          variantId: line.variantId,
+          quantity: update?.quantity ?? line.quantity,
+          unitPriceCents: line.unitPriceCents,
+          isGift: update?.isGift ?? line.isGift,
+        }
+      }),
+    ...additions.map((addition, index) => {
+      const variant = variantById.get(addition.variantId)!
+      return {
+        key: additionKey(index),
+        productId: variant.product.id,
+        variantId: variant.id,
+        quantity: addition.quantity,
+        unitPriceCents: variant.priceCents,
+        isGift: addition.isGift,
+      }
+    }),
+  ]
+
+  if (quoteLines.length === 0) {
+    throw new Error('An order needs at least one item. Cancel it instead.')
+  }
+
+  const shippingWaived = input.waiveShipping ?? order.shippingWaived
+  const quote = await quoteOrderEdit({
+    organizationId,
+    storeId: order.storeId,
+    pageId: order.pageId,
+    offerKey: order.offerKey,
+    lines: quoteLines,
+    discountCode: input.discountCode,
+    previousCouponCode: order.discountCode,
+    // What the code alone was worth, for the "campaign has been deleted"
+    // fallback. Recorded on the order for exactly this: `discountTotalCents`
+    // also contains the bundle saving, the gift and anything granted by hand,
+    // and carrying that forward as "the code" would multiply the discount every
+    // time someone edited the order.
+    previousCouponCents: order.couponDiscountCents,
+    manualDiscountCents: input.manualDiscountCents ?? order.manualDiscountCents,
+    shippingCents:
+      input.shippingCents === undefined
+        ? order.shippingTotalCents
+        : Math.trunc(input.shippingCents),
+    shippingWaived,
+  })
+
   const summary: string[] = []
 
   const updated = await prisma.$transaction(async (tx) => {
@@ -302,11 +401,11 @@ export async function editOrder(
       await tx.orderLine.delete({ where: { id: line.id } })
     }
 
-    // ── Quantity changes ────────────────────────────────────────────────
-    for (const { line, quantity } of updates) {
+    // ── Quantity and gift changes ───────────────────────────────────────
+    for (const { line, quantity, isGift } of updates) {
       const delta = quantity - line.quantity
 
-      if (line.variantId) {
+      if (line.variantId && delta !== 0) {
         if (delta > 0) {
           const variant = await tx.productVariant.findUnique({
             where: { id: line.variantId },
@@ -342,42 +441,63 @@ export async function editOrder(
         }
       }
 
-      // The line's discount was agreed per unit, so it scales with the
-      // quantity. Holding it flat would hand a bigger order the same money off
-      // and turn a 10%-off line into 3%-off without anyone deciding to.
-      const perUnitDiscount =
-        line.quantity > 0
-          ? Math.round(line.totalDiscountCents / line.quantity)
-          : 0
-      const discountCents = perUnitDiscount * quantity
-      const gross = line.unitPriceCents * quantity
-      const taxableBase = clampNonNegative(gross - discountCents)
-      const previousBase = clampNonNegative(
-        line.unitPriceCents * line.quantity - line.totalDiscountCents
-      )
-      const { taxLines, taxCents } = retaxLine(
-        line.taxLines,
-        taxableBase,
-        pricesIncludeTax,
-        { taxCents: line.taxTotalCents, base: previousBase }
-      )
-
-      await tx.orderLine.update({
-        where: { id: line.id },
-        data: {
-          quantity,
-          totalDiscountCents: discountCents,
-          taxTotalCents: taxCents,
-          taxLines: taxLines as unknown as Prisma.InputJsonValue,
-          totalCents: pricesIncludeTax ? taxableBase : taxableBase + taxCents,
+      await writeLineMoney(tx, {
+        id: line.id,
+        quantity,
+        unitPriceCents: line.unitPriceCents,
+        discountCents: quote.lineDiscounts[line.id] ?? 0,
+        storedTaxLines: line.taxLines,
+        previous: {
+          taxCents: line.taxTotalCents,
+          base: clampNonNegative(
+            line.unitPriceCents * line.quantity - line.totalDiscountCents
+          ),
         },
+        isGift,
+        pricesIncludeTax,
       })
 
-      summary.push(`${line.title} ${line.quantity} → ${quantity}`)
+      if (quantity !== line.quantity) {
+        summary.push(`${line.title} ${line.quantity} → ${quantity}`)
+      }
+      if (isGift !== line.isGift) {
+        summary.push(
+          isGift
+            ? `${line.title} is now a gift`
+            : `${line.title} is no longer a gift`
+        )
+      }
+    }
+
+    // Kept lines nobody touched still need their share of a discount that has
+    // just been recomputed — a code that stopped qualifying takes money off a
+    // line whose quantity never moved.
+    for (const line of order.lines) {
+      if (!keptIds.has(line.id)) continue
+      if (updateByLineId.has(line.id)) continue
+
+      const discountCents = quote.lineDiscounts[line.id] ?? 0
+      if (discountCents === line.totalDiscountCents) continue
+
+      await writeLineMoney(tx, {
+        id: line.id,
+        quantity: line.quantity,
+        unitPriceCents: line.unitPriceCents,
+        discountCents,
+        storedTaxLines: line.taxLines,
+        previous: {
+          taxCents: line.taxTotalCents,
+          base: clampNonNegative(
+            line.unitPriceCents * line.quantity - line.totalDiscountCents
+          ),
+        },
+        isGift: line.isGift,
+        pricesIncludeTax,
+      })
     }
 
     // ── Additions ───────────────────────────────────────────────────────
-    for (const addition of additions) {
+    for (const [index, addition] of additions.entries()) {
       const variant = variantById.get(addition.variantId)!
 
       const result = await commitInventoryForOrder(tx, orderId, [
@@ -395,6 +515,9 @@ export async function editOrder(
       }
 
       const gross = variant.priceCents * addition.quantity
+      const discountCents = quote.lineDiscounts[additionKey(index)] ?? 0
+      const taxableBase = clampNonNegative(gross - discountCents)
+
       const applicableRates = variant.isTaxable
         ? taxRates.filter(
             (rate) => rate.taxCode === null || rate.taxCode === variant.taxCode
@@ -405,8 +528,8 @@ export async function editOrder(
         title: rate.name,
         rateBps: rate.rateBps,
         amountCents: pricesIncludeTax
-          ? taxFromInclusive(gross, rate.rateBps)
-          : applyBps(gross, rate.rateBps),
+          ? taxFromInclusive(taxableBase, rate.rateBps)
+          : applyBps(taxableBase, rate.rateBps),
       }))
       const taxCents = taxLines.reduce((sum, tax) => sum + tax.amountCents, 0)
 
@@ -424,82 +547,54 @@ export async function editOrder(
           vendor: variant.product.vendor,
           quantity: addition.quantity,
           unitPriceCents: variant.priceCents,
-          totalDiscountCents: 0,
+          totalDiscountCents: discountCents,
           taxTotalCents: taxCents,
           taxLines: taxLines as unknown as Prisma.InputJsonValue,
-          totalCents: pricesIncludeTax ? gross : gross + taxCents,
+          totalCents: pricesIncludeTax ? taxableBase : taxableBase + taxCents,
           requiresShipping: variant.requiresShipping,
           weightGrams: variant.weightGrams,
+          isGift: addition.isGift,
         },
       })
 
+      const name = `${variant.product.title}${
+        variant.title && variant.title !== 'Default Title'
+          ? ` (${variant.title})`
+          : ''
+      }`
       summary.push(
-        `added ${addition.quantity} × ${variant.product.title}${
-          variant.title && variant.title !== 'Default Title'
-            ? ` (${variant.title})`
-            : ''
-        }`
+        addition.isGift
+          ? `added ${addition.quantity} × ${name} as a gift`
+          : `added ${addition.quantity} × ${name}`
       )
     }
 
-    // ── Recompute the order's money from the lines that now exist ───────
-    const lines = await tx.orderLine.findMany({
-      where: { orderId },
-      select: {
-        quantity: true,
-        unitPriceCents: true,
-        totalDiscountCents: true,
-        taxTotalCents: true,
-      },
-    })
+    // ── The order's money, from the quote taken above ───────────────────
 
-    const subtotalCents = lines.reduce(
-      (sum, line) => sum + line.unitPriceCents * line.quantity,
-      0
-    )
-    const lineDiscountCents = lines.reduce(
-      (sum, line) => sum + line.totalDiscountCents,
-      0
-    )
-    const taxTotalCents = lines.reduce(
-      (sum, line) => sum + line.taxTotalCents,
-      0
-    )
+    const taxTotalCents = (
+      await tx.orderLine.findMany({
+        where: { orderId },
+        select: { taxTotalCents: true },
+      })
+    ).reduce((sum, line) => sum + line.taxTotalCents, 0)
 
-    const shippingTotalCents =
-      input.shippingCents === undefined
-        ? order.shippingTotalCents
-        : clampNonNegative(Math.trunc(input.shippingCents))
+    const totalCents = clampNonNegative(quote.totalCents + taxTotalCents)
 
-    if (
-      input.shippingCents !== undefined &&
-      shippingTotalCents !== order.shippingTotalCents
-    ) {
+    if (quote.shippingTotalCents !== order.shippingTotalCents) {
       summary.push(
-        `delivery ${order.shippingTotalCents} → ${shippingTotalCents}`
+        shippingWaived && quote.shippingTotalCents === 0
+          ? 'delivery waived'
+          : `delivery ${order.shippingTotalCents} → ${quote.shippingTotalCents}`
       )
     }
-
-    // Order-level discounts (a code applied at checkout) are not re-evaluated:
-    // whether a code still qualifies depends on rules that may have changed or
-    // been deleted since, and silently withdrawing a customer's discount on a
-    // phone call is worse than carrying it. It is only clamped so it can never
-    // exceed the goods it is discounting.
-    //
-    // The line-level portion is summed fresh above because it already scaled
-    // with the quantities.
-    const orderLevelDiscount = clampNonNegative(
-      order.discountTotalCents -
-        order.lines.reduce((sum, line) => sum + line.totalDiscountCents, 0)
-    )
-    const discountTotalCents = Math.min(
-      subtotalCents,
-      lineDiscountCents + orderLevelDiscount
-    )
-
-    const totalCents = clampNonNegative(
-      subtotalCents - discountTotalCents + shippingTotalCents + taxTotalCents
-    )
+    if (quote.offerNote) summary.push(quote.offerNote)
+    if (quote.couponNote) summary.push(quote.couponNote)
+    if (quote.manualDiscountCents !== order.manualDiscountCents) {
+      summary.push(
+        `extra discount ${order.manualDiscountCents} → ${quote.manualDiscountCents}` +
+          (input.manualDiscountReason ? ` (${input.manualDiscountReason})` : '')
+      )
+    }
 
     // Payment status follows the new total. An order that was PAID and has just
     // grown is no longer paid, and one that shrank below what was collected is
@@ -514,22 +609,35 @@ export async function editOrder(
     const saved = await tx.order.update({
       where: { id: orderId },
       data: {
-        subtotalCents,
-        discountTotalCents,
-        shippingTotalCents,
+        subtotalCents: quote.subtotalCents,
+        discountTotalCents: quote.discountTotalCents,
+        shippingTotalCents: quote.shippingTotalCents,
+        shippingWaived,
         taxTotalCents,
         totalCents,
         financialStatus,
+        discountCode: quote.couponCode,
+        couponDiscountCents: quote.couponDiscountCents,
+        manualDiscountCents: quote.manualDiscountCents,
+        manualDiscountReason:
+          input.manualDiscountReason?.trim() ||
+          (quote.manualDiscountCents > 0 ? order.manualDiscountReason : null),
       },
     })
+
+    // A save that moved no line can still move money — a code that expired
+    // between the order and the call, an offer the merchant has since retired.
+    // Saying "totals recalculated" is more use to whoever reads this later than
+    // an empty list of changes.
+    const what = summary.length > 0 ? summary.join(', ') : 'totals recalculated'
 
     await tx.orderEvent.create({
       data: {
         orderId,
         type: 'order_edited',
         message: input.reason
-          ? `Order edited — ${summary.join(', ')} (${input.reason})`
-          : `Order edited — ${summary.join(', ')}`,
+          ? `Order edited — ${what} (${input.reason})`
+          : `Order edited — ${what}`,
         actorUserId: session.user.id,
       },
     })
@@ -539,7 +647,153 @@ export async function editOrder(
 
   await emitOrderWebhook(organizationId, orderId, 'ORDER_UPDATED')
 
-  return { orderId, changed: true as const, order: updated }
+  return { orderId, changed: true as const, order: updated, quote }
+}
+
+/**
+ * What this edit would cost, without doing it.
+ *
+ * The editor calls this as the merchant changes quantities, so "so what's my
+ * total now" is answerable while the customer is still on the phone rather than
+ * after a save they cannot undo. It runs the identical quote the save runs —
+ * the point of the shared module — so the number on screen is the number that
+ * lands.
+ *
+ * Read-only and cheap to be wrong about: it validates ownership and nothing
+ * else, because a preview that refuses to price an impossible basket tells the
+ * merchant nothing about which part of it is impossible.
+ */
+export async function previewOrderEdit(
+  organizationId: string,
+  orderId: string,
+  input: OrderEditInput
+) {
+  await requireHumanOrgAccess(organizationId, 'VIEWER')
+
+  const order = await prisma.order.findFirst({
+    where: { id: orderId, organizationId },
+    include: { lines: { orderBy: { id: 'asc' } } },
+  })
+  if (!order) throw new Error('Order not found')
+
+  const existingById = new Map(order.lines.map((line) => [line.id, line]))
+
+  const requestedVariantIds = input.lines
+    .filter((line) => !line.orderLineId && line.variantId)
+    .map((line) => line.variantId!)
+
+  const variants = requestedVariantIds.length
+    ? await prisma.productVariant.findMany({
+        where: {
+          id: { in: requestedVariantIds },
+          product: { organizationId },
+        },
+        select: { id: true, priceCents: true, productId: true },
+      })
+    : []
+  const variantById = new Map(variants.map((variant) => [variant.id, variant]))
+
+  const lines: OrderEditQuoteLine[] = []
+  for (const [index, requested] of input.lines.entries()) {
+    const quantity = Math.trunc(requested.quantity)
+    if (quantity < 1) continue
+
+    if (requested.orderLineId) {
+      const line = existingById.get(requested.orderLineId)
+      if (!line) continue
+      lines.push({
+        key: line.id,
+        productId: line.productId,
+        variantId: line.variantId,
+        quantity,
+        unitPriceCents: line.unitPriceCents,
+        isGift: requested.isGift ?? line.isGift,
+      })
+      continue
+    }
+
+    const variant = requested.variantId
+      ? variantById.get(requested.variantId)
+      : undefined
+    if (!variant) continue
+
+    lines.push({
+      key: additionKey(index),
+      productId: variant.productId,
+      variantId: variant.id,
+      quantity,
+      unitPriceCents: variant.priceCents,
+      isGift: requested.isGift ?? false,
+    })
+  }
+
+  return quoteOrderEdit({
+    organizationId,
+    storeId: order.storeId,
+    pageId: order.pageId,
+    offerKey: order.offerKey,
+    lines,
+    discountCode: input.discountCode,
+    previousCouponCode: order.discountCode,
+    previousCouponCents: order.couponDiscountCents,
+    manualDiscountCents: input.manualDiscountCents ?? order.manualDiscountCents,
+    shippingCents:
+      input.shippingCents === undefined
+        ? order.shippingTotalCents
+        : Math.trunc(input.shippingCents),
+    shippingWaived: input.waiveShipping ?? order.shippingWaived,
+  })
+}
+
+/** Stable key for a line that does not exist yet, shared with the quote. */
+function additionKey(index: number): string {
+  return `new:${index}`
+}
+
+/**
+ * Writes one existing line's money, retaxed on its new base.
+ *
+ * A gift keeps its real unit price and carries an equal discount, so the
+ * subtotal still says what the goods were worth and the discount total says
+ * what was given away — see the note on OrderLine.isGift in schema.prisma.
+ */
+async function writeLineMoney(
+  tx: Prisma.TransactionClient,
+  line: {
+    id: string
+    quantity: number
+    unitPriceCents: number
+    discountCents: number
+    storedTaxLines: unknown
+    previous: { taxCents: number; base: number }
+    isGift: boolean
+    pricesIncludeTax: boolean
+  }
+) {
+  const gross = line.unitPriceCents * line.quantity
+  const discountCents = line.isGift
+    ? gross
+    : Math.min(clampNonNegative(line.discountCents), gross)
+  const taxableBase = clampNonNegative(gross - discountCents)
+
+  const { taxLines, taxCents } = retaxLine(
+    line.storedTaxLines,
+    taxableBase,
+    line.pricesIncludeTax,
+    line.previous
+  )
+
+  await tx.orderLine.update({
+    where: { id: line.id },
+    data: {
+      quantity: line.quantity,
+      isGift: line.isGift,
+      totalDiscountCents: discountCents,
+      taxTotalCents: taxCents,
+      taxLines: taxLines as unknown as Prisma.InputJsonValue,
+      totalCents: line.pricesIncludeTax ? taxableBase : taxableBase + taxCents,
+    },
+  })
 }
 
 /**

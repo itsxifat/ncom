@@ -1,13 +1,12 @@
 import { notFound } from 'next/navigation'
 import { getActiveOrganization } from '@/server/services/organizationService'
 import { getDiscount } from '@/server/services/discountService'
-import { listProducts } from '@/server/services/productService'
 import { listCollections } from '@/server/services/collectionService'
 import { getOrganizationSettings } from '@/server/services/organizationSettingsService'
 import { centsToMajorString, bpsToPercent } from '@/lib/money'
 import { PageHeader } from '@/components/app/page-header'
-import { PageShell } from '@/components/app/page-shell'
 import { DiscountForm } from '@/components/store/discount-form'
+import { loadDiscountTargets } from '../discount-data'
 
 function toLocalInput(date: Date | null): string {
   if (!date) return ''
@@ -28,8 +27,8 @@ export default async function EditDiscountPage({
     notFound()
   }
 
-  const [{ items }, collections, settings] = await Promise.all([
-    listProducts(organization.id, { take: 200 }),
+  const [targets, collections, settings] = await Promise.all([
+    loadDiscountTargets(organization.id),
     listCollections(organization.id),
     getOrganizationSettings(organization.id),
   ])
@@ -37,7 +36,7 @@ export default async function EditDiscountPage({
   const currency = settings?.currencyCode ?? 'USD'
 
   return (
-    <PageShell>
+    <>
       <PageHeader
         backHref={`/discounts`}
         backLabel="Discounts"
@@ -46,8 +45,10 @@ export default async function EditDiscountPage({
       />
       <DiscountForm
         currencyCode={currency}
-        products={items.map((p) => ({ id: p.id, title: p.title }))}
+        products={targets.products}
         collections={collections.map((c) => ({ id: c.id, title: c.title }))}
+        stores={targets.stores}
+        variants={targets.variants}
         initial={{
           id: discount.id,
           title: discount.title,
@@ -58,9 +59,14 @@ export default async function EditDiscountPage({
               ? String(bpsToPercent(discount.valueBps))
               : '',
           amount: centsToMajorString(discount.valueCents, currency),
+          maxDiscount: centsToMajorString(discount.maxDiscountCents, currency),
+          storeIds: discount.storeIds,
           appliesTo: discount.appliesTo,
           targetProductIds: discount.targetProductIds,
           targetCollectionIds: discount.targetCollectionIds,
+          targetVariantIds: discount.targetVariantIds,
+          excludedProductIds: discount.excludedProductIds,
+          excludedVariantIds: discount.excludedVariantIds,
           minimumSubtotal: centsToMajorString(
             discount.minimumSubtotalCents,
             currency
@@ -83,6 +89,6 @@ export default async function EditDiscountPage({
           codes: discount.codes.map((code) => code.code),
         }}
       />
-    </PageShell>
+    </>
   )
 }
