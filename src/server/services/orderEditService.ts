@@ -9,8 +9,10 @@ import { emitOrderWebhook } from './orderService'
 import { loadTaxRates, parseAddress } from './pricingService'
 import { quoteOrderEdit, type OrderEditQuoteLine } from './orderEditPricing'
 import { applyBps, clampNonNegative, taxFromInclusive } from '@/lib/money'
+import { isOrderCancelled } from '@/lib/order-status'
 import type { TaxLine } from '@/lib/pricing'
 import type { Prisma } from '@/generated/prisma/client'
+import type { OrderWorkflowState } from '@/generated/prisma/enums'
 
 /**
  * Editing a placed order.
@@ -100,11 +102,15 @@ export interface OrderEditInput {
  * it, rather than offering a button that fails on submit.
  */
 export function orderEditability(order: {
+  workflowState: OrderWorkflowState
   cancelledAt: Date | null
+  workflowUpdatedAt?: Date | null
   stockConsumedAt: Date | null
   closedAt: Date | null
 }): { editable: boolean; reason: string | null } {
-  if (order.cancelledAt) {
+  // Asked of the merged status, so an order the courier cancelled is as
+  // uneditable as one the merchant cancelled — they are the same thing.
+  if (isOrderCancelled(order)) {
     return { editable: false, reason: 'This order has been cancelled.' }
   }
   if (order.closedAt) {

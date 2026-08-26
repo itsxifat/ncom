@@ -509,3 +509,112 @@ test('analytics is locked on the free plan and shows an upgrade screen, not a 40
     await expect(page.getByRole('button', { name: 'Table' })).toBeVisible()
   })
 })
+
+/**
+ * One status, on both screens.
+ *
+ * An order carries two cancellation signals — `cancelledAt` and the pipeline
+ * state — and cancelling used to write only the first. The detail page read
+ * both and said "Cancelled"; the order list read the pipeline alone and went on
+ * saying "Processing", so the same order answered the same question two ways
+ * depending on which screen asked. Both halves are checked here: the drifted
+ * rows that bug left behind must read as cancelled, and a cancellation made
+ * today must leave nothing to resolve.
+ */
+test('a cancelled order reads as cancelled in the list, not only on its own page', async ({
+  page,
+}) => {
+  const stamp = Date.now()
+  const item = await seedProduct(
+    organizationId,
+    `Boxed set ${stamp}`,
+    25_000,
+    6
+  )
+
+  const line = (orderId: string) =>
+    db.query(
+      `INSERT INTO "OrderLine"
+         (id, "orderId", "productId", "variantId", title, quantity, "unitPriceCents", "totalCents")
+       VALUES ($1, $2, $3, $4, $5, 1, 25000, 25000)`,
+      [id('ln'), orderId, item.product.id, item.variant.id, item.product.title]
+    )
+
+  // The shape the old cancel path left behind: stopped an hour after the
+  // pipeline last moved, with the pipeline none the wiser.
+  const strandedId = id('ord')
+  await db.query(
+    `INSERT INTO "Order"
+       (id, "organizationId", "orderNumber", phone, "currencyCode",
+        "subtotalCents", "totalCents", "workflowState", "workflowUpdatedAt",
+        "cancelledAt", "cancelReason", "updatedAt")
+     VALUES ($1, $2, $3, '01800000002', 'BDT', 25000, 25000, 'PROCESSING',
+             now() - interval '2 hours', now() - interval '1 hour', 'CUSTOMER', now())`,
+    [strandedId, organizationId, `#OLD${stamp}`]
+  )
+  await line(strandedId)
+
+  const liveId = id('ord')
+  await db.query(
+    `INSERT INTO "Order"
+       (id, "organizationId", "orderNumber", phone, "currencyCode",
+        "subtotalCents", "totalCents", "workflowState", "updatedAt")
+     VALUES ($1, $2, $3, '01800000003', 'BDT', 25000, 25000, 'PROCESSING', now())`,
+    [liveId, organizationId, `#NEW${stamp}`]
+  )
+  await line(liveId)
+
+  const rowFor = (orderNumber: string) =>
+    page.locator('[data-slot="list-row"]').filter({ hasText: orderNumber })
+
+  await test.step('a row whose columns drifted apart still reads cancelled', async () => {
+    await page.goto('/orders')
+
+    const row = rowFor(`#OLD${stamp}`)
+    await expect(row.getByText('Cancelled')).toBeVisible()
+    // And not under the status the pipeline was left on.
+    await expect(row.getByText('Processing')).toHaveCount(0)
+    // Cancelled orders are not moved along by hand, so the row offers no menu.
+    await expect(
+      row.getByRole('button', { name: /Delivery status/ })
+    ).toHaveCount(0)
+  })
+
+  await test.step('cancelling from the order page moves the pipeline too', async () => {
+    await page.goto(`/orders/${liveId}`)
+    await page.getByRole('button', { name: 'Cancel order' }).click()
+    await page
+      .getByRole('button', { name: 'Cancel order' })
+      .click({ timeout: 20_000 })
+
+    // The panel is gone once the order is stopped, and the header says so —
+    // there is no success banner to wait on, the page itself is the receipt.
+    await expect(
+      page.getByRole('button', { name: 'Cancel order' })
+    ).toHaveCount(0, { timeout: 20_000 })
+    await expect(
+      page.getByText('Cancelled', { exact: true }).first()
+    ).toBeVisible()
+
+    const saved = await one<{
+      workflowState: string
+      cancelledAt: Date | null
+    }>(`SELECT "workflowState", "cancelledAt" FROM "Order" WHERE id = $1`, [
+      liveId,
+    ])
+    // The point of the merge: one write, both columns.
+    expect(saved.workflowState).toBe('CANCELLED')
+    expect(saved.cancelledAt).not.toBeNull()
+  })
+
+  await test.step('and the order book says so without a reload trick', async () => {
+    await page.goto('/orders')
+    await expect(rowFor(`#NEW${stamp}`).getByText('Cancelled')).toBeVisible()
+  })
+
+  await test.step('neither one is offered for a printed label', async () => {
+    await page.goto('/labels?view=all')
+    await expect(page.getByText(`#OLD${stamp}`)).toHaveCount(0)
+    await expect(page.getByText(`#NEW${stamp}`)).toHaveCount(0)
+  })
+})

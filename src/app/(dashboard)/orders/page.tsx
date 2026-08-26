@@ -7,6 +7,7 @@ import { listStores } from '@/server/services/storeService'
 import { EmptyState } from '@/components/app/empty-state'
 import { OrderList } from '@/components/store/order-list'
 import { OrderFilters } from '@/components/store/order-filters'
+import { orderStatus } from '@/lib/order-status'
 import { Button } from '@/components/ui/button'
 import type {
   FinancialStatus,
@@ -162,13 +163,15 @@ export default async function OrdersPage({
             ),
             placedOn: order.createdAt.toLocaleDateString(),
             financialStatus: order.financialStatus,
-            workflowState: order.workflowState,
+            // The merged status — see lib/order-status.ts. Read straight off
+            // `workflowState`, a cancelled order used to sit in this list under
+            // whatever the pipeline last said, usually "Pending".
+            workflowState: orderStatus(order),
             storeName: order.store?.name ?? null,
             pageTitle: order.page?.title ?? null,
             offerLabel: order.offerLabel,
             totalCents: order.totalCents,
             currencyCode: order.currencyCode,
-            cancelled: Boolean(order.cancelledAt),
           }))}
         />
       )}

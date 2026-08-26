@@ -324,6 +324,8 @@ export async function getCustomerForMerchant(
           currencyCode: true,
           financialStatus: true,
           workflowState: true,
+          workflowUpdatedAt: true,
+          cancelledAt: true,
           createdAt: true,
         },
         orderBy: { createdAt: 'desc' },

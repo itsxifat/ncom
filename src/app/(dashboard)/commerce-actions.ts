@@ -884,6 +884,12 @@ export async function cancelOrderAction(
   }
 
   revalidatePath(`/orders/${orderId}`)
+  // The order book shows the cancellation now that there is one status rather
+  // than two, so it has to be rebuilt as well — leaving it stale is how a
+  // merchant cancels an order, goes back, and reads "Pending" again. The label
+  // queue drops the order for the same reason.
+  revalidatePath('/orders')
+  revalidatePath('/labels')
   return { success: 'Order cancelled.' }
 }
 

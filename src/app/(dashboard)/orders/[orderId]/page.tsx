@@ -12,6 +12,7 @@ import { listCourierConfigs } from '@/server/services/courierConfigService'
 import { CourierPanel } from '@/components/store/courier-panel'
 import { WorkflowStateBadge } from '@/components/store/fraud-badges'
 import { formatMoney } from '@/lib/money'
+import { orderStatus } from '@/lib/order-status'
 import { PageHeader } from '@/components/app/page-header'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -103,6 +104,13 @@ export default async function OrderDetailPage({
   const refundableCents = order.paidTotalCents - order.refundedTotalCents
   const outstandingCents = order.totalCents - order.paidTotalCents
 
+  // The order's one status, and the single question every action below asks of
+  // it. The page used to read the two columns separately — a workflow badge
+  // beside a "Cancelled" badge, and every guard keyed on `cancelledAt` alone —
+  // which is what let this page and the order list disagree.
+  const status = orderStatus(order)
+  const cancelled = status === 'CANCELLED'
+
   // Whether the goods can still be changed — decided by the same function the
   // service enforces with, so the button and the save agree.
   const { editable, reason: notEditableReason } = orderEditability(order)
@@ -132,11 +140,10 @@ export default async function OrderDetailPage({
           <span className="flex flex-wrap items-center gap-2">
             <FinancialStatusBadge status={order.financialStatus} />
             {/* Where the parcel is, which is a different question from
-                whether the order is paid. */}
-            <WorkflowStateBadge state={order.workflowState} />
-            {order.cancelledAt && (
-              <Badge variant="destructive">Cancelled</Badge>
-            )}
+                whether the order is paid. A cancelled order reads "Cancelled"
+                here rather than carrying a second badge that contradicts the
+                first. */}
+            <WorkflowStateBadge state={status} />
             {/* Which storefront this order came through. Nullable because the
                 catalogue outlives any one site: a deleted landing page must not
                 take its orders with it. */}
@@ -155,7 +162,7 @@ export default async function OrderDetailPage({
           </span>
         }
         actions={
-          !order.cancelledAt && outstandingCents > 0 ? (
+          !cancelled && outstandingCents > 0 ? (
             <MarkPaidButton orderId={order.id} />
           ) : undefined
         }
@@ -169,8 +176,8 @@ export default async function OrderDetailPage({
               a day. */}
           <CourierPanel
             orderId={order.id}
-            workflowState={order.workflowState}
-            cancelled={Boolean(order.cancelledAt)}
+            workflowState={status}
+            cancelled={cancelled}
             fraud={{
               verdict: order.fraudVerdict,
               reason: order.fraudReason,
@@ -399,7 +406,7 @@ export default async function OrderDetailPage({
               notEditableReason={notEditableReason}
             />
 
-            {!order.cancelledAt && (
+            {!cancelled && (
               <RefundPanel
                 orderId={order.id}
                 lines={lineSummaries}
@@ -407,14 +414,14 @@ export default async function OrderDetailPage({
                 refundableCents={refundableCents}
               />
             )}
-            {!order.cancelledAt && (
+            {!cancelled && (
               <ReturnPanel
                 orderId={order.id}
                 lines={lineSummaries}
                 currencyCode={currency}
               />
             )}
-            {!order.cancelledAt && <CancelOrderPanel orderId={order.id} />}
+            {!cancelled && <CancelOrderPanel orderId={order.id} />}
           </div>
 
           <Card>

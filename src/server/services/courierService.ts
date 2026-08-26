@@ -30,6 +30,7 @@ import {
   WORKFLOW_STATE_LABEL,
 } from '@/server/courier/statusMap'
 import { normalizeBdPhone } from '@/server/courier/phone'
+import { isOrderCancelled, orderStatus } from '@/lib/order-status'
 import { requireCourierInvoice } from '@/server/courier/invoice'
 import {
   CourierApiError,
@@ -118,7 +119,8 @@ export async function evaluateOrderForCourier(
     // Only a fresh order is screened. Anything already moved on — approved,
     // dispatched, cancelled — must not be dragged back through the gate by a
     // retried call.
-    if (!order || order.workflowState !== 'PENDING' || order.cancelledAt) return
+    if (!order || order.workflowState !== 'PENDING' || isOrderCancelled(order))
+      return
 
     // Nothing configured, nothing to do. This whole pipeline is opt-in, and a
     // workspace that has never opened courier settings must see no change at
@@ -345,7 +347,7 @@ export async function approveOrderForDispatch(
     select: { id: true, workflowState: true, cancelledAt: true },
   })
   if (!order) throw new Error('Order not found')
-  if (order.cancelledAt) throw new Error('This order has been cancelled')
+  if (isOrderCancelled(order)) throw new Error('This order has been cancelled')
   if (
     order.workflowState !== 'FRAUD_REVIEW' &&
     order.workflowState !== 'PENDING'
@@ -398,13 +400,17 @@ export async function rejectHeldOrder(
     select: { id: true, workflowState: true, cancelledAt: true },
   })
   if (!order) throw new Error('Order not found')
-  if (order.cancelledAt) throw new Error('This order is already cancelled')
+  if (isOrderCancelled(order))
+    throw new Error('This order is already cancelled')
 
+  // Only who decided, and when. The status itself is `cancelOrder`'s to write
+  // below — asserting CANCELLED here as well would make this function the
+  // second writer of the same fact, and now that a cancelled order is
+  // recognised by its state, it would walk into that call's own
+  // already-cancelled guard.
   await prisma.order.update({
     where: { id: orderId },
     data: {
-      workflowState: 'CANCELLED',
-      workflowUpdatedAt: new Date(),
       reviewedByUserId: session.user.id,
       reviewedAt: new Date(),
     },
@@ -497,7 +503,7 @@ async function dispatchOrderInternal(
   })
 
   if (!order) return { ok: false, shipmentId: null, error: 'Order not found' }
-  if (order.cancelledAt) {
+  if (isOrderCancelled(order)) {
     return { ok: false, shipmentId: null, error: 'This order is cancelled' }
   }
 
@@ -822,7 +828,7 @@ export async function setOrderWorkflowState(
     },
   })
   if (!order) throw new Error('Order not found')
-  if (order.cancelledAt) throw new Error('This order has been cancelled')
+  if (isOrderCancelled(order)) throw new Error('This order has been cancelled')
 
   const state = input.state
   const note = input.note?.trim()
@@ -1251,13 +1257,41 @@ async function syncOrderFromShipments(
 
   const order = await prisma.order.findUnique({
     where: { id: orderId },
-    select: { workflowState: true },
+    select: {
+      workflowState: true,
+      workflowUpdatedAt: true,
+      cancelledAt: true,
+    },
   })
-  if (!order || order.workflowState === next) return
+  if (!order) return
+
+  // A cancelled order is finished, and its parcels draining through the
+  // courier's pipeline afterwards do not restart it. Without this, cancelling
+  // an order that was already on a van put it back to "In transit" on the next
+  // webhook — the merchant cancels it, walks away, and finds it moving again.
+  // The parcel's own status keeps updating and is still shown on the delivery
+  // panel; it is the *order* that stays cancelled.
+  if (isOrderCancelled(order)) return
+
+  if (order.workflowState === next) return
+
+  const now = new Date()
 
   await prisma.order.update({
     where: { id: orderId },
-    data: { workflowState: next, workflowUpdatedAt: new Date() },
+    data: {
+      workflowState: next,
+      workflowUpdatedAt: now,
+      // The courier refused or cancelled the consignment, so the order is
+      // cancelled — and says when. Stamped only if nothing else has: this is
+      // the courier's word, not a second cancellation, and it must not
+      // overwrite the timestamp and reason a merchant's own cancel recorded.
+      // Deliberately no restock: nobody has said the goods are back on a
+      // shelf, and inventing that is worse than leaving it to the return flow.
+      ...(next === 'CANCELLED'
+        ? { cancelledAt: now, cancelReason: 'OTHER' as const }
+        : {}),
+    },
   })
 
   await emitOrderWebhook(organizationId, orderId, 'ORDER_UPDATED')
@@ -1697,6 +1731,8 @@ export async function trackParcelPublicly(
       orderNumber: true,
       phone: true,
       workflowState: true,
+      workflowUpdatedAt: true,
+      cancelledAt: true,
       createdAt: true,
       totalCents: true,
       currencyCode: true,
@@ -1737,7 +1773,9 @@ export async function trackParcelPublicly(
   return {
     orderNumber: order.orderNumber,
     placedAt: order.createdAt,
-    workflowState: order.workflowState,
+    // The merged status, so a buyer whose order was cancelled is not told it
+    // is still pending on the one page they were given to check.
+    workflowState: orderStatus(order),
     totalCents: order.totalCents,
     currencyCode: order.currencyCode,
     // Deliberately no address, no email, no line items: the customer knows what
@@ -1973,6 +2011,8 @@ export async function trackParcelByToken(token: string) {
     select: {
       orderNumber: true,
       workflowState: true,
+      workflowUpdatedAt: true,
+      cancelledAt: true,
       createdAt: true,
       totalCents: true,
       currencyCode: true,
@@ -2019,7 +2059,7 @@ export async function trackParcelByToken(token: string) {
 
   return {
     orderNumber: order.orderNumber,
-    workflowState: order.workflowState,
+    workflowState: orderStatus(order),
     placedAt: order.createdAt,
     storeName: order.store?.name ?? order.organization.name,
     totalCents: order.totalCents,

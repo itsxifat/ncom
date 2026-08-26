@@ -2,6 +2,7 @@ import 'server-only'
 import { prisma } from '@/server/db/client'
 import { requireOrgAccess } from '@/server/auth/rbac'
 import { orderLineImageUrl, ORDER_LINE_IMAGE_SELECT } from './orderService'
+import { orderStatus } from '@/lib/order-status'
 import type { OrderWorkflowState } from '@/generated/prisma/enums'
 
 /**
@@ -243,11 +244,18 @@ export async function listLabelQueue(
   const where = {
     organizationId,
     // A cancelled order is not going in a box. It stays reachable from the
-    // order book, but offering it for printing is offering a mistake.
+    // order book, but offering it for printing is offering a mistake. Both
+    // columns are checked because a courier can cancel a consignment as well
+    // as a merchant cancelling an order — see lib/order-status.ts.
     cancelledAt: null,
-    ...(options.workflowStateIn?.length
-      ? { workflowState: { in: options.workflowStateIn } }
-      : {}),
+    // One key rather than a `not` that a later spread would silently replace.
+    // A caller asking for CANCELLED gets nothing here for the same reason: the
+    // queue is a printer, not the order book.
+    workflowState: options.workflowStateIn?.length
+      ? {
+          in: options.workflowStateIn.filter((state) => state !== 'CANCELLED'),
+        }
+      : { not: 'CANCELLED' as const },
     ...(options.storeId ? { storeId: options.storeId } : {}),
     ...(options.search
       ? {
@@ -283,6 +291,8 @@ export async function listLabelQueue(
         totalCents: true,
         paidTotalCents: true,
         workflowState: true,
+        workflowUpdatedAt: true,
+        cancelledAt: true,
         store: { select: { name: true } },
         lines: { select: { quantity: true } },
         shipments: {
@@ -328,7 +338,7 @@ export async function listLabelQueue(
             .trim() || null,
         codCents: Math.max(0, order.totalCents - order.paidTotalCents),
         units: order.lines.reduce((sum, line) => sum + line.quantity, 0),
-        workflowState: order.workflowState,
+        workflowState: orderStatus(order),
         courier: shipment
           ? shipment.provider === 'STEADFAST'
             ? 'Steadfast'

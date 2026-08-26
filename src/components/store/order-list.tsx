@@ -52,14 +52,18 @@ export interface OrderListRow {
   itemCount: number
   placedOn: string
   financialStatus: FinancialStatus
+  /**
+   * The one status this order has — `orderStatus()` of its pipeline state and
+   * its cancellation, resolved on the server. Not the raw `workflowState`
+   * column: that is half the answer, and rendering it is how this list came to
+   * show "Pending" for orders the detail page called cancelled.
+   */
   workflowState: OrderWorkflowState
   storeName: string | null
   pageTitle: string | null
   offerLabel: string | null
   totalCents: number
   currencyCode: string
-  /** Cancelled orders cannot be moved along the pipeline by hand. */
-  cancelled: boolean
 }
 
 /**
@@ -198,7 +202,6 @@ export function OrderList({
               <StatusControl
                 orderId={order.id}
                 state={order.workflowState}
-                cancelled={order.cancelled}
                 canEdit={canEditStatus}
               />
               <Money>{formatMoney(order.totalCents, order.currencyCode)}</Money>
@@ -225,18 +228,19 @@ export function OrderList({
 function StatusControl({
   orderId,
   state,
-  cancelled,
   canEdit,
 }: {
   orderId: string
   state: OrderWorkflowState
-  cancelled: boolean
   canEdit: boolean
 }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
 
-  if (!canEdit || cancelled) {
+  // A cancelled order is read-only here, and now that there is one status
+  // rather than two it is the status itself that says so — no second
+  // `cancelled` flag travelling alongside it to disagree with.
+  if (!canEdit || state === 'CANCELLED') {
     return <WorkflowStateBadge state={state} />
   }
 

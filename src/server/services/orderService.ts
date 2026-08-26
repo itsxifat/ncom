@@ -5,6 +5,7 @@ import { releaseInventoryForOrder, restockInventory } from './inventoryService'
 import { legacyFulfillmentStatus } from '@/server/courier/statusMap'
 import { emitWebhook } from './webhookService'
 import { clampNonNegative } from '@/lib/money'
+import { isOrderCancelled, orderStatus } from '@/lib/order-status'
 import type { WebhookTopic } from '@/generated/prisma/client'
 import type { OrderWorkflowState } from '@/generated/prisma/enums'
 
@@ -197,6 +198,7 @@ export async function emitOrderWebhook(
       phone: true,
       financialStatus: true,
       workflowState: true,
+      workflowUpdatedAt: true,
       stockConsumedAt: true,
       currencyCode: true,
       subtotalCents: true,
@@ -229,8 +231,10 @@ export async function emitOrderWebhook(
     email: order.email,
     phone: order.phone,
     financialStatus: order.financialStatus.toLowerCase(),
-    // Derived for compatibility only — see legacyFulfillmentStatus.
-    fulfillmentStatus: legacyFulfillmentStatus(order.workflowState),
+    // Derived for compatibility only — see legacyFulfillmentStatus. Read from
+    // the merged status so a cancelled order is reported as restocked to a
+    // subscriber even if the two columns were written apart.
+    fulfillmentStatus: legacyFulfillmentStatus(orderStatus(order)),
     currencyCode: order.currencyCode,
     subtotalCents: order.subtotalCents,
     discountTotalCents: order.discountTotalCents,
@@ -289,7 +293,10 @@ export async function cancelOrder(
     include: { lines: true },
   })
   if (!order) throw new Error('Order not found')
-  if (order.cancelledAt) throw new Error('This order is already cancelled')
+  if (isOrderCancelled(order))
+    throw new Error('This order is already cancelled')
+
+  const now = new Date()
 
   const cancelled = await prisma.$transaction(async (tx) => {
     if (input.restock !== false) {
@@ -321,10 +328,16 @@ export async function cancelOrder(
     return tx.order.update({
       where: { id: orderId },
       data: {
-        cancelledAt: new Date(),
+        cancelledAt: now,
         cancelReason: input.reason,
+        // The pipeline moves with the cancellation. It used to be left where
+        // it was, so the order book went on showing "Pending" beside an order
+        // the detail page called cancelled — one order, two answers. There is
+        // one status now; `cancelledAt` says when and why it got there.
+        workflowState: 'CANCELLED',
+        workflowUpdatedAt: now,
         ...(input.restock !== false && !order.stockConsumedAt
-          ? { stockRestoredAt: new Date() }
+          ? { stockRestoredAt: now }
           : {}),
       },
     })

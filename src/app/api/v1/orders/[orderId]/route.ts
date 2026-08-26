@@ -1,6 +1,7 @@
 import { apiOk, withApiKey } from '@/server/api/context'
 import { getOrder } from '@/server/services/orderService'
 import { legacyFulfillmentStatus } from '@/server/courier/statusMap'
+import { orderStatus } from '@/lib/order-status'
 
 export async function GET(
   _request: Request,
@@ -19,7 +20,7 @@ export async function GET(
         financialStatus: order.financialStatus.toLowerCase(),
         // Derived, not stored — kept so integrations built against v1 keep
         // working now that fulfilment is not a concept in the platform.
-        fulfillmentStatus: legacyFulfillmentStatus(order.workflowState),
+        fulfillmentStatus: legacyFulfillmentStatus(orderStatus(order)),
         currencyCode: order.currencyCode,
         subtotalCents: order.subtotalCents,
         discountTotalCents: order.discountTotalCents,

@@ -4,6 +4,7 @@ import { getActiveOrganization } from '@/server/services/organizationService'
 import { getCustomerForMerchant } from '@/server/services/customerService'
 import { getOrganizationSettings } from '@/server/services/organizationSettingsService'
 import { formatMoney } from '@/lib/money'
+import { orderStatus } from '@/lib/order-status'
 import { PageHeader } from '@/components/app/page-header'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -88,7 +89,7 @@ export default async function CustomerDetailPage({
                       </p>
                       <div className="mt-1 flex flex-wrap gap-1.5">
                         <FinancialStatusBadge status={order.financialStatus} />
-                        <WorkflowStateBadge state={order.workflowState} />
+                        <WorkflowStateBadge state={orderStatus(order)} />
                       </div>
                     </div>
                     <Money>

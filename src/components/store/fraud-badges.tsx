@@ -53,7 +53,10 @@ const WORKFLOW_VARIANT: Record<
   DELIVERED: 'lime',
   PARTIALLY_DELIVERED: 'secondary',
   RETURNED: 'destructive',
-  CANCELLED: 'outline',
+  // Not `outline`. That is what PENDING wears, and a cancelled order that looks
+  // exactly like a fresh one is how a cancellation goes unread on a list —
+  // which is the whole reason the cancelled state is shown here at all now.
+  CANCELLED: 'destructive',
   FAILED: 'destructive',
 }
 
