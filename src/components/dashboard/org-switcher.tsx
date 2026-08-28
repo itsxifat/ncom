@@ -23,10 +23,17 @@ type OrgOption = {
 export function OrgSwitcher({
   activeOrgId,
   organizations,
+  compact = false,
   className,
 }: {
   activeOrgId: string
   organizations: OrgOption[]
+  /**
+   * Drops the "Workspace" label and the chevron, for the mobile top bar where
+   * the control has a third of the width and the surrounding chrome already
+   * says what it is.
+   */
+  compact?: boolean
   className?: string
 }) {
   const [isPending, startTransition] = useTransition()
@@ -47,12 +54,16 @@ export function OrgSwitcher({
           {(active?.name ?? '?').slice(0, 1).toUpperCase()}
         </span>
         <span className="flex min-w-0 flex-col items-start gap-1">
-          <span className="eyebrow text-ink-muted">Workspace</span>
+          {!compact && (
+            <span className="eyebrow text-ink-muted">Workspace</span>
+          )}
           <span className="max-w-full truncate text-sm font-medium">
             {active?.name ?? 'Select workspace'}
           </span>
         </span>
-        <ChevronsUpDown className="ml-auto size-4 shrink-0 opacity-40" />
+        {!compact && (
+          <ChevronsUpDown className="ml-auto size-4 shrink-0 opacity-40" />
+        )}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-60">
         <DropdownMenuGroup>

@@ -817,17 +817,31 @@ function FixedLine({
   // Options at different prices need the price on the chip, or the buyer picks
   // Large and the total moves for no visible reason.
   const varies = new Set(line.variants.map((v) => v.priceCents)).size > 1
+  // Nothing left in any size. The line stays on the card — the offer is still
+  // what the ad promised — but it says so plainly rather than leaving a row of
+  // dead chips the buyer keeps tapping.
+  const soldOut = !line.variants.some((variant) => variant.available)
 
   return (
     <div className="flex items-center gap-3">
       <ProductThumb url={line.imageUrl} />
       <div className="min-w-0 flex-1">
-        <p className="line-clamp-2 text-[13.5px] leading-snug font-medium text-[color:var(--lp-text)]">
+        <p
+          className={cn(
+            'line-clamp-2 text-[13.5px] leading-snug font-medium text-[color:var(--lp-text)]',
+            soldOut && 'opacity-55'
+          )}
+        >
           {line.title}
           {line.quantity > 1 && (
             <span className="text-[color:var(--lp-text)]/45">
               {' '}
               × {line.quantity}
+            </span>
+          )}
+          {soldOut && (
+            <span className="ml-1.5 align-middle text-[11px] font-semibold tracking-wide text-amber-700 uppercase">
+              Out of stock
             </span>
           )}
         </p>
@@ -840,7 +854,7 @@ function FixedLine({
             {/* Nothing is pre-selected, so the line has to ask. The summary's
                 error says an option is missing; only the row knows which
                 item is missing it. */}
-            {!chosen && (
+            {!chosen && !soldOut && (
               <p
                 className="mt-0.5 text-[11.5px] font-medium"
                 style={{ color: 'var(--lp-accent)' }}
@@ -857,8 +871,18 @@ function FixedLine({
                     key={variant.id}
                     disabled={!variant.available}
                     aria-pressed={active}
+                    // Says which size is gone, for a screen reader and for
+                    // anyone who reads a faded chip as "not selected yet".
+                    aria-label={
+                      variant.available
+                        ? undefined
+                        : `${variant.title} — out of stock`
+                    }
                     onClick={() => onChoose(variant.id)}
-                    className="min-w-[42px] rounded-lg border px-3 py-1.5 text-[12.5px] font-medium transition-colors disabled:opacity-35"
+                    className={cn(
+                      'min-w-[42px] rounded-lg border px-3 py-1.5 text-[12.5px] font-medium transition-colors disabled:opacity-35',
+                      !variant.available && 'line-through'
+                    )}
                     style={{
                       borderColor: active
                         ? 'var(--lp-accent)'
@@ -873,6 +897,16 @@ function FixedLine({
                 )
               })}
             </div>
+            {/* One gone size among several is legible from the chips alone;
+                naming them only repeats the row. This is for the case where
+                the buyer has options but the specific one they came for is
+                not among them. */}
+            {!soldOut &&
+              line.variants.some((variant) => !variant.available) && (
+                <p className="mt-1 text-[11px] text-[color:var(--lp-text)]/45">
+                  Crossed-out options are out of stock.
+                </p>
+              )}
           </>
         ) : null}
       </div>
@@ -1033,7 +1067,31 @@ function PoolRow({
   /** Set when the buyer tries to add the row before naming an option. */
   const [needsChoice, setNeedsChoice] = useState(false)
 
-  if (sellable.length === 0) return null
+  // Nothing left in this product. It stays in the pool, greyed and inert,
+  // rather than disappearing: a mix-and-match row that silently vanishes reads
+  // as a broken page to the merchant who put it there and as a shorter offer
+  // than advertised to the buyer who came for it.
+  if (sellable.length === 0) {
+    return (
+      <div
+        aria-disabled
+        className="flex gap-3 rounded-xl border-2 p-3 select-none"
+        style={{ borderColor: 'rgba(0,0,0,0.08)', background: 'white' }}
+      >
+        <div className="opacity-45">
+          <ProductThumb url={line.imageUrl} />
+        </div>
+        <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
+          <p className="line-clamp-2 text-[13.5px] leading-snug font-medium text-[color:var(--lp-text)] opacity-55">
+            {line.title}
+          </p>
+          <span className="flex-shrink-0 text-[11px] font-semibold tracking-wide text-amber-700 uppercase">
+            Out of stock
+          </span>
+        </div>
+      </div>
+    )
+  }
 
   const variant =
     sellable.find((candidate) => candidate.id === variantId) ?? null

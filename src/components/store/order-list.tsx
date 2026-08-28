@@ -177,18 +177,29 @@ export function OrderList({
                 badges={
                   <>
                     <FinancialStatusBadge status={order.financialStatus} />
-                    {/* Which storefront sold it. One catalogue can be sold from
-                        several landing pages, so this is how a merchant tells
-                        which page is actually working. */}
-                    {order.storeName && (
-                      <Badge variant="outline">{order.storeName}</Badge>
-                    )}
-                    {order.pageTitle && (
-                      <Badge variant="outline">{order.pageTitle}</Badge>
-                    )}
-                    {order.offerLabel && (
-                      <Badge variant="secondary">{order.offerLabel}</Badge>
-                    )}
+                    {/* Provenance — which storefront and which landing page sold
+                        it, and under what offer. One catalogue can be sold from
+                        several pages, so this is how a merchant tells which page
+                        is actually working.
+
+                        It is desktop-only. Four badges beside an order number is
+                        two wrapped lines on a 390px screen, and it pushes the
+                        amount — the thing being scanned for — off the fold. On a
+                        phone the row answers which order, who, how much and what
+                        state; provenance is a question you ask on the order
+                        itself. `sm:contents` puts the badges back in the parent's
+                        flex flow rather than nesting them in a box of their own. */}
+                    <span className="hidden sm:contents">
+                      {order.storeName && (
+                        <Badge variant="outline">{order.storeName}</Badge>
+                      )}
+                      {order.pageTitle && (
+                        <Badge variant="outline">{order.pageTitle}</Badge>
+                      )}
+                      {order.offerLabel && (
+                        <Badge variant="secondary">{order.offerLabel}</Badge>
+                      )}
+                    </span>
                   </>
                 }
               />

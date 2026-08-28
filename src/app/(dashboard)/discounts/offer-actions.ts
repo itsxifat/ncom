@@ -15,6 +15,7 @@
  */
 
 import { revalidatePath } from 'next/cache'
+import { redirect } from 'next/navigation'
 import { z } from 'zod'
 import { getActiveOrganization } from '@/server/services/organizationService'
 import { getOrganizationSettings } from '@/server/services/organizationSettingsService'
@@ -259,6 +260,10 @@ export async function saveOfferAction(
     }
   }
 
+  // Set only when this save *created* something, so the redirect below can tell
+  // a create from an edit.
+  let newId: string | null = null
+
   try {
     const organizationId = await org()
     const settings = await getOrganizationSettings(organizationId)
@@ -267,14 +272,27 @@ export async function saveOfferAction(
     const problem = validate(input)
     if (problem) return { error: problem }
 
-    if (offerId) await updateOffer(organizationId, offerId, input)
-    else await createOffer(organizationId, input)
+    if (offerId) {
+      await updateOffer(organizationId, offerId, input)
+    } else {
+      const created = await createOffer(organizationId, input)
+      newId = created.id
+    }
   } catch (cause) {
     return fail(cause)
   }
 
   revalidatePath('/discounts/offers')
   if (offerId) revalidatePath(`/discounts/offers/${offerId}`)
+
+  // Leave the New screen the moment it has created something. The offer id is
+  // bound into this action when the form renders, so a form that stays on /new
+  // after a successful save is still bound to `null` and every later save
+  // creates *another* offer — the merchant edits one bundle, saves twice, and
+  // ends up with "family-pack" and "family-pack-2" selling side by side.
+  // Outside the try because redirect() signals by throwing, and fail() would
+  // otherwise report the redirect as a failed save.
+  if (newId) redirect(`/discounts/offers/${newId}`)
   return { success: 'Offer saved.' }
 }
 

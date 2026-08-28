@@ -262,7 +262,7 @@ export function OrderFilters({
       </div>
 
       {/* ── Saved views ─────────────────────────────────────────────── */}
-      <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
+      <div className="-mx-4 flex scrollbar-none gap-1.5 overflow-x-auto px-4 pb-1 sm:-mx-1 sm:px-1">
         {QUICK_VIEWS.map((view) => {
           const isActive = activeView === view.key
           return (

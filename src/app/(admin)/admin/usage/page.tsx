@@ -41,7 +41,7 @@ export default async function AdminUsagePage() {
         description={`What every workspace is consuming. Traffic and visitors cover ${period} and reset next month; pages, storage and domains are counted live.`}
       />
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <StatCard label="Stored media" value={formatBytes(totals.storage)} />
         <StatCard
           label={`Traffic (${period})`}

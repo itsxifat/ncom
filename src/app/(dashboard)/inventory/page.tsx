@@ -67,7 +67,7 @@ export default async function InventoryPage({
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard label="Tracked variants" value={summary.tracked} />
         <StatCard
           label={`Low stock (≤ ${DEFAULT_LOW_STOCK_THRESHOLD})`}

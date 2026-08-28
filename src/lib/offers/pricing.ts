@@ -238,6 +238,28 @@ export function quoteOffer(
   }
 
   if (selections.length === 0) {
+    // A sold-out line is not a choice the buyer failed to make. Offers stay on
+    // the page when their goods run out, so without this the form asks someone
+    // to pick an option it has already crossed out — which reads as a broken
+    // page rather than as an empty shelf.
+    const soldOut = (offer.kind === 'FIXED' ? offer.items : offer.pool).filter(
+      (line) => !line.variants.some((variant) => variant.available)
+    )
+    const allSoldOut =
+      offer.kind === 'FIXED'
+        ? soldOut.length > 0
+        : soldOut.length > 0 && soldOut.length === offer.pool.length
+
+    if (allSoldOut) {
+      return {
+        ...empty,
+        error:
+          soldOut.length === 1
+            ? `${soldOut[0]!.title} is out of stock.`
+            : 'Everything in this offer is out of stock right now.',
+      }
+    }
+
     return {
       ...empty,
       error:

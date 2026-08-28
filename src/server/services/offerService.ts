@@ -146,24 +146,49 @@ function toVariantChoice(
 }
 
 /**
- * One offer line as the page should see it, or null when it cannot be sold.
+ * One offer line as the page should see it, or why it cannot be shown at all.
  *
- * A draft product must never appear on a live page, and a line whose only
- * remaining sizes are sold out or excluded has nothing to offer — returning
- * null lets the caller decide whether that kills the whole offer (FIXED: yes,
- * the set is incomplete) or just shrinks the pool (COLLECTION/ALACARTE: no).
+ * Being out of stock is *not* a reason to refuse. A sold-out product stays on
+ * the card with its options marked, because a bundle that vanishes the moment
+ * one size runs out takes the whole campaign down with it — the merchant's ad
+ * still points at the page, and the buyer arrives to find nothing for sale and
+ * no explanation. `soldOut` says the line has nothing sellable left so callers
+ * can label it; every option carries its own `available` flag either way, the
+ * order form disables them, and `priceOfferSubmission` still refuses to sell
+ * one. Showing an empty shelf is a merchandising decision; selling from it is
+ * not, and that boundary has not moved.
+ *
+ * A draft product is still refused: publication status is the merchant saying
+ * this is not ready to be seen, which is a different statement from "we ran
+ * out". So is a line whose every size the merchant excluded by hand.
+ *
+ * The reason travels with the refusal rather than being re-derived by whoever
+ * wants to explain it. A merchant whose bundle never appears on their page is
+ * owed a sentence saying which product is at fault, and a second implementation
+ * of these rules written to produce that sentence would drift from this one —
+ * at which point the admin confidently explains something the storefront is not
+ * actually doing.
  *
  * `status` is the only publication gate. There is deliberately no check on
  * `publishedAt` here: nothing in the product editor ever sets that column, so
  * requiring it hid every offer on the platform behind a field no merchant
  * could fill in.
  */
+type LineResult =
+  | { ok: true; line: OfferLine; soldOut: boolean }
+  | { ok: false; reason: string }
+
 function toOfferLine(
   item: OfferRow['items'][number],
   rules: VariantRules
-): OfferLine | null {
+): LineResult {
   const product = item.product
-  if (product.status !== 'ACTIVE') return null
+  if (product.status !== 'ACTIVE') {
+    return {
+      ok: false,
+      reason: `"${product.title}" is not an active product`,
+    }
+  }
 
   const pinned = item.variantId
     ? product.variants.find((variant) => variant.id === item.variantId)
@@ -189,35 +214,78 @@ function toOfferLine(
   candidates = candidates.filter((variant) => !rules.get(variant.id)?.excluded)
 
   const choices = candidates.map((variant) => toVariantChoice(variant, rules))
-  if (choices.length === 0) return null
-  if (!choices.some((choice) => choice.available)) return null
-
+  if (choices.length === 0) {
+    return {
+      ok: false,
+      reason: `every option of "${product.title}" is excluded from this offer`,
+    }
+  }
   return {
-    productId: product.id,
-    title: product.title,
-    imageUrl: product.images[0]?.media.url ?? null,
-    quantity: Math.max(1, item.quantity),
-    pinnedVariantId: pinned?.id ?? null,
-    variants: choices,
+    ok: true,
+    soldOut: !choices.some((choice) => choice.available),
+    line: {
+      productId: product.id,
+      title: product.title,
+      imageUrl: product.images[0]?.media.url ?? null,
+      quantity: Math.max(1, item.quantity),
+      pinnedVariantId: pinned?.id ?? null,
+      variants: choices,
+    },
   }
 }
 
-function toPublicOffer(row: OfferRow): PublicOffer | null {
+/**
+ * One offer as a page should see it, or why the page will not show it.
+ *
+ * The `ok: false` branch is what the Offers screen reads to warn a merchant
+ * that a bundle they can see in their own admin is invisible to buyers. That
+ * situation is not an error anywhere — the row saved, it is switched on, its
+ * dates are fine — so nothing else in the system has any reason to mention it.
+ *
+ * `soldOut` names the products in a shown offer that have nothing left, which
+ * is the merchant's cue to restock rather than to go looking for a bug.
+ */
+type OfferResult =
+  | { ok: true; offer: PublicOffer; soldOut: string[] }
+  | { ok: false; reason: string }
+
+function resolveOffer(row: OfferRow): OfferResult {
   const rules: VariantRules = new Map(
     row.variantRules.map((rule) => [rule.variantId, rule])
   )
 
-  const lines = row.items
-    .map((item) => toOfferLine(item, rules))
-    .filter((line): line is OfferLine => line !== null)
+  const results = row.items.map((item) => toOfferLine(item, rules))
+  const kept = results.filter(
+    (result): result is { ok: true; line: OfferLine; soldOut: boolean } =>
+      result.ok
+  )
+  const lines = kept.map((result) => result.line)
+  const soldOut = kept
+    .filter((result) => result.soldOut)
+    .map((result) => result.line.title)
 
   const isPool = row.kind === 'COLLECTION' || row.kind === 'ALACARTE'
 
-  // A FIXED offer is an exact set: if any part of it cannot be sold, the offer
-  // as advertised does not exist and showing it would take an order we cannot
-  // fill. A pool offer simply loses that product.
-  if (!isPool && lines.length !== row.items.length) return null
-  if (lines.length === 0) return null
+  // A FIXED offer is an exact set: if a part of it may not be *shown* — a draft
+  // product, a line the merchant excluded entirely — the offer as advertised
+  // does not exist. Running out of stock is not that; a sold-out line stays,
+  // marked, and the card goes up with it.
+  if (!isPool && lines.length !== row.items.length) {
+    const blocked = results.find((result) => !result.ok)
+    return {
+      ok: false,
+      reason:
+        blocked?.ok === false ? blocked.reason : 'a product cannot be sold',
+    }
+  }
+  if (lines.length === 0) {
+    const blocked = results.find((result) => !result.ok)
+    return {
+      ok: false,
+      reason:
+        blocked?.ok === false ? blocked.reason : 'it has no products in it',
+    }
+  }
 
   const tiers = row.tiers.map((tier) => ({
     quantity: tier.quantity,
@@ -225,7 +293,9 @@ function toPublicOffer(row: OfferRow): PublicOffer | null {
     priceCents: tier.priceCents,
     discountBps: tier.discountBps,
   }))
-  if (row.kind === 'COLLECTION' && tiers.length === 0) return null
+  if (row.kind === 'COLLECTION' && tiers.length === 0) {
+    return { ok: false, reason: 'its price ladder has no quantities on it' }
+  }
 
   const offer: PublicOffer = {
     key: row.key,
@@ -268,7 +338,7 @@ function toPublicOffer(row: OfferRow): PublicOffer | null {
     offer.compareAtCents = regularTotalOf(offer)
   }
 
-  return offer
+  return { ok: true, offer, soldOut }
 }
 
 /** What an offer's goods list for at their own prices, before any discount. */
@@ -328,8 +398,12 @@ export async function getPublicOffers(pageId: string): Promise<PublicOffer[]> {
   })
 
   const offers = rows
-    .map(toPublicOffer)
-    .filter((offer): offer is PublicOffer => offer !== null)
+    .map(resolveOffer)
+    .filter(
+      (result): result is { ok: true; offer: PublicOffer; soldOut: string[] } =>
+        result.ok
+    )
+    .map((result) => result.offer)
 
   // Exactly one default, so the form always has something selected and the
   // buyer never has to make a choice before they can start typing.
@@ -338,6 +412,52 @@ export async function getPublicOffers(pageId: string): Promise<PublicOffer[]> {
     ...offer,
     isDefault: offer === firstDefault,
   }))
+}
+
+/**
+ * What a page would actually do with each of these offers.
+ *
+ * For the Offers screen, and answered by the storefront's own resolver so the
+ * list cannot claim an offer is fine while pages quietly drop it.
+ *
+ * Two different things, which the admin must not conflate. `hidden` means the
+ * page renders nothing at all — the worst state this model has, because the row
+ * saved, it reads as Live, and the merchant's only clue is a page that looks
+ * empty. `soldOut` means the offer *is* on the page with some of its goods
+ * marked unavailable, which needs restocking rather than debugging.
+ *
+ * Deliberately says nothing about `isActive` or the schedule — the list already
+ * badges those, and repeating them here would put two authorities on screen for
+ * the same fact.
+ */
+export interface OfferHealth {
+  /** Why the page shows nothing, or null when it shows the offer. */
+  hidden: string | null
+  /** Products on a shown offer whose every option is out of stock. */
+  soldOut: string[]
+}
+
+export async function checkOfferHealth(
+  offerIds: string[]
+): Promise<Map<string, OfferHealth>> {
+  const health = new Map<string, OfferHealth>()
+  if (offerIds.length === 0) return health
+
+  const rows = await prisma.offer.findMany({
+    where: { id: { in: offerIds } },
+    include: offerInclude,
+  })
+
+  for (const row of rows) {
+    const result = resolveOffer(row)
+    if (!result.ok) {
+      health.set(row.id, { hidden: result.reason, soldOut: [] })
+    } else if (result.soldOut.length > 0) {
+      health.set(row.id, { hidden: null, soldOut: result.soldOut })
+    }
+  }
+
+  return health
 }
 
 const DEFAULT_SHIPPING: PublicShipping = { askZone: false, rates: [] }

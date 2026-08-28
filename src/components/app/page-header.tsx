@@ -42,7 +42,10 @@ export function PageHeader({
         {eyebrow && (
           <p className="eyebrow text-muted-foreground mb-3">{eyebrow}</p>
         )}
-        <h1 className="font-display text-3xl leading-[1.08] font-semibold tracking-tight text-balance sm:text-4xl 2xl:text-[2.75rem]">
+        {/* Starts a step smaller than it used to. `text-3xl` on a 390px
+            screen spends three lines on a title like "Discounts & offers",
+            which is a third of the fold gone before any content. */}
+        <h1 className="font-display text-2xl leading-[1.12] font-semibold tracking-tight text-balance sm:text-3xl sm:leading-[1.08] lg:text-4xl 2xl:text-[2.75rem]">
           {title}
         </h1>
         {description && (
@@ -52,7 +55,11 @@ export function PageHeader({
         )}
       </div>
       {actions && (
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
+        // Below `sm` each action grows to share the row, so a header with
+        // one button gets a full-width one — the shape a primary action
+        // should have on a phone — and a header with two gets an even
+        // pair, rather than two small pills stranded on the left.
+        <div className="flex w-full shrink-0 flex-wrap items-center gap-2 lg:w-auto max-sm:[&>*]:min-w-0 max-sm:[&>*]:flex-1">
           {actions}
         </div>
       )}

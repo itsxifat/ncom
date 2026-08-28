@@ -29,7 +29,12 @@ export async function checkRateLimit(
     }
     return { allowed: true }
   } catch (error) {
-    console.error('Rate limit check failed, allowing request:', error)
+    // The Redis client already reports why it is unreachable; a stack per
+    // request on top of that is noise, so keep this to one line.
+    const reason = error instanceof Error ? error.message : String(error)
+    console.warn(
+      `Rate limit check failed for ${key}, allowing request: ${reason}`
+    )
     return { allowed: true }
   }
 }

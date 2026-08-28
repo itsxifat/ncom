@@ -53,7 +53,23 @@ function DialogContent({
       <DialogPrimitive.Popup
         data-slot="dialog-content"
         className={cn(
-          'bg-popover text-popover-foreground ring-foreground/10 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl p-4 text-sm ring-1 duration-100 outline-none sm:max-w-sm',
+          // A dialog is a sheet on a phone and a centred panel from `sm` up.
+          //
+          // Centring is wrong on a phone for two reasons: the software
+          // keyboard takes the bottom half of the screen and shoves a
+          // vertically-centred panel up under the status bar, and the
+          // buttons of a centred panel land in the middle of the screen,
+          // which is the one place a thumb cannot comfortably reach.
+          // Anchored to the bottom edge, the panel grows upward, the
+          // keyboard sits directly beneath the field it is editing, and
+          // the actions stay in the thumb arc.
+          //
+          // `max-h`/`overflow-y-auto` because a form that is merely tall on
+          // a desktop is taller than the whole viewport on a phone; without
+          // them its submit button is simply off-screen with no way to
+          // scroll to it.
+          'bg-popover text-popover-foreground ring-foreground/10 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 pb-safe-2 fixed inset-x-0 bottom-0 z-50 grid max-h-[85svh] w-full gap-4 overflow-y-auto rounded-t-3xl p-4 text-sm ring-1 duration-100 outline-none',
+          'sm:inset-x-auto sm:top-1/2 sm:bottom-auto sm:left-1/2 sm:max-w-sm sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-xl sm:pb-4',
           className
         )}
         {...props}

@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { Package, Plus } from 'lucide-react'
 import { getActiveOrganization } from '@/server/services/organizationService'
 import { listOffers } from '@/server/services/offerAdminService'
+import { checkOfferHealth } from '@/server/services/offerService'
 import { getOrganizationSettings } from '@/server/services/organizationSettingsService'
 import { prisma } from '@/server/db/client'
 import { formatMoney } from '@/lib/money'
@@ -39,6 +40,10 @@ export default async function OffersPage() {
       },
     }),
   ])
+
+  // Asked of the storefront's own resolver, so this list cannot claim an offer
+  // is fine while pages quietly drop it.
+  const health = await checkOfferHealth(offers.map((offer) => offer.id))
 
   const currency = settings?.currencyCode ?? 'USD'
   const now = new Date()
@@ -117,6 +122,15 @@ export default async function OffersPage() {
           const finished = offer.endsAt !== null && offer.endsAt <= now
           const live = offer.isActive && !scheduled && !finished
 
+          // The same trap one step further in: an offer can pass every date and
+          // flag check and still be dropped by the page. Only worth saying
+          // while it is otherwise live — nobody needs to be told a paused offer
+          // is not showing. `soldOut` is the softer case: the offer is up, but
+          // some of it cannot be bought, which is a restocking job.
+          const state = live ? health.get(offer.id) : undefined
+          const blocked = state?.hidden ?? undefined
+          const soldOut = state?.soldOut ?? []
+
           const rules = offer.variantRules.length
           const narrowed = offer.items.filter(
             (item) => item.variantIds.length > 0
@@ -145,23 +159,47 @@ export default async function OffersPage() {
                     )}
                     {narrowed > 0 && <> · {narrowed} narrowed to sizes</>}
                     {offer.giftVariantId && <> · free gift</>}
+                    {blocked && (
+                      <span className="text-destructive block">
+                        Buyers cannot see this offer because {blocked}.
+                      </span>
+                    )}
+                    {soldOut.length > 0 && (
+                      <span className="block text-amber-600 dark:text-amber-500">
+                        On the page, but out of stock:{' '}
+                        {soldOut.map((title) => `"${title}"`).join(', ')}.
+                        Buyers can see {soldOut.length === 1 ? 'it' : 'them'}{' '}
+                        but cannot order {soldOut.length === 1 ? 'it' : 'them'}.
+                      </span>
+                    )}
                   </>
                 }
                 badges={
                   <>
                     <Badge
                       variant={
-                        live ? 'lime' : finished ? 'outline' : 'secondary'
+                        blocked
+                          ? 'destructive'
+                          : live
+                            ? 'lime'
+                            : finished
+                              ? 'outline'
+                              : 'secondary'
                       }
                     >
                       {finished
                         ? 'Finished'
                         : scheduled
                           ? 'Scheduled'
-                          : offer.isActive
-                            ? 'Live'
-                            : 'Paused'}
+                          : blocked
+                            ? 'Not showing'
+                            : offer.isActive
+                              ? 'Live'
+                              : 'Paused'}
                     </Badge>
+                    {soldOut.length > 0 && !blocked && (
+                      <Badge variant="outline">Out of stock</Badge>
+                    )}
                     {offer.isDefault && (
                       <Badge variant="outline">Preselected</Badge>
                     )}

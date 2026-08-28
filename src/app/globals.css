@@ -140,37 +140,70 @@
   --sidebar-ring: #d8f84e;
 }
 
+/*
+ * Dark mode.
+ *
+ * The rail is *not* part of what this inverts. In light mode the black rail is
+ * the darkest thing on screen, and that is the whole spatial idea: the rail is
+ * the floor, the canvas sits on it, cards sit on the canvas. Inverting the page
+ * must not collapse that stack, so dark mode lifts the canvas to a charcoal and
+ * leaves `--sidebar` at the same true black it has in light mode. The rail is
+ * then still the darkest surface, still reads as the same object, and the one
+ * element people navigate by never changes colour when they flip the switch.
+ *
+ * That is why the canvas here is #131316 rather than the #0b0b0c you would
+ * expect from the brand's true black: a true-black canvas behind a true-black
+ * rail is one undifferentiated sheet, with the rail invisible inside it.
+ */
 .dark {
   color-scheme: dark;
-  --canvas: #0b0b0c;
-  --background: #0b0b0c;
+  --canvas: #131316;
+  --background: #131316;
   --foreground: #f7f7f8;
-  --card: #141416;
+  --card: #1c1c20;
   --card-foreground: #f7f7f8;
-  --popover: #141416;
+  --popover: #1c1c20;
   --popover-foreground: #f7f7f8;
   --primary: #d8f84e;
   --primary-foreground: #0b0b0c;
-  --secondary: #1d1d20;
+  --secondary: #26262c;
   --secondary-foreground: #f7f7f8;
-  --muted: #18181b;
+  --muted: #212126;
   --muted-foreground: #9a9ba3;
-  --accent: #1d1d20;
+  --accent: #26262c;
   --accent-foreground: #f7f7f8;
   --destructive: #f04438;
   --border: color-mix(in oklab, white 12%, transparent);
   --input: color-mix(in oklab, white 16%, transparent);
   --ring: #d8f84e;
-  --ink: #141416;
+  /*
+   * `--ink` is the *statement* surface — the spotlight tile, the active pill,
+   * a stat card that wants to be looked at first. In light mode it makes that
+   * statement by being the darkest thing on a pale page. Inverting the page
+   * inverts the mechanism too: on a dark canvas the tile has to be *lighter*
+   * than the card it sits beside, or the emphasis simply disappears and the
+   * tile reads as one more panel. So these lift above `--card` rather than
+   * tracking it, and `--ink-raised` stays a step above `--ink`, keeping the
+   * name honest in both themes.
+   */
+  --ink: #2b2b33;
   --ink-foreground: #f7f7f8;
   --ink-muted: #8b8c93;
-  --ink-raised: #1d1d20;
-  --sidebar: #141416;
+  --ink-raised: #363640;
+  /* Chart 2 is the brand's black, which is the *contrast* colour against a
+     white card. On a dark card it disappears, so it flips to the near-white
+     that plays the same role here. */
+  --chart-2: #f7f7f8;
+  --chart-3: #9a9ba3;
+  /* True black, exactly as in light mode - see the note above. */
+  --sidebar: #0b0b0c;
   --sidebar-foreground: #f7f7f8;
   --sidebar-primary: #d8f84e;
   --sidebar-primary-foreground: #0b0b0c;
-  --sidebar-accent: #24242a;
+  --sidebar-accent: #1c1c20;
   --sidebar-accent-foreground: #f7f7f8;
+  --sidebar-border: color-mix(in oklab, white 10%, transparent);
+  --sidebar-ring: #d8f84e;
 }
 
 /*
@@ -213,4 +246,72 @@
   line-height: 1;
   letter-spacing: 0.14em;
   text-transform: uppercase;
+}
+
+/*
+ * Paper is always light.
+ *
+ * Shipping labels and packing slips are printed from this app, and a merchant
+ * who happens to have dark mode on should not get a sheet of black toner — or,
+ * worse, a label whose barcode prints white-on-black and will not scan. The
+ * print stylesheet therefore forces the light surfaces back regardless of the
+ * theme class on <html>. Only the surface tokens are reset; hues (lime,
+ * destructive) already read correctly on white.
+ */
+@media print {
+  .dark {
+    color-scheme: light;
+    --canvas: #ffffff;
+    --background: #ffffff;
+    --foreground: #0b0b0c;
+    --card: #ffffff;
+    --card-foreground: #0b0b0c;
+    --popover: #ffffff;
+    --popover-foreground: #0b0b0c;
+    --primary: #0b0b0c;
+    --primary-foreground: #ffffff;
+    --secondary: #ffffff;
+    --secondary-foreground: #0b0b0c;
+    --muted: #f3f4f6;
+    --muted-foreground: #55565c;
+    --accent: #f1f2f5;
+    --accent-foreground: #0b0b0c;
+    --border: #d8d9de;
+    --input: #d8d9de;
+    --ink: #0b0b0c;
+    --ink-foreground: #ffffff;
+    --ink-raised: #17171a;
+    --chart-2: #0b0b0c;
+  }
+}
+
+/*
+ * The bottom of a phone is not where the screen ends.
+ *
+ * On a device with a home indicator, `100svh` includes the strip the system
+ * draws over, so anything pinned to the bottom edge sits underneath it. These
+ * add the inset the browser reports on top of the padding the element wants,
+ * and fall back to plain padding on every device that reports nothing.
+ */
+@utility pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+@utility pb-safe-2 {
+  padding-bottom: calc(--spacing(2) + env(safe-area-inset-bottom, 0px));
+}
+
+/* Reserves room for the mobile tab bar so the last row of a list is not
+   permanently hidden behind it. Paired with `lg:pb-0` wherever it is used,
+   because the bar itself is mobile-only. */
+@utility pb-tabbar {
+  padding-bottom: calc(--spacing(24) + env(safe-area-inset-bottom, 0px));
+}
+
+/*
+ * Momentum scrolling inside a pane should not drag the page behind it — the
+ * "rubber-banding whole page" effect that makes a web app feel unlike an app.
+ */
+@utility overscroll-none-y {
+  overscroll-behavior-y: contain;
 }

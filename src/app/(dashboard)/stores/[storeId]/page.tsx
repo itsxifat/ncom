@@ -74,7 +74,7 @@ export default async function StoreOverviewPage({
 
   return (
     <div className="flex flex-col gap-8">
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
         <StatCard
           tone={isLive ? 'lime' : 'ink'}
           label="Storefront"
@@ -204,7 +204,7 @@ export default async function StoreOverviewPage({
           href={`${base}/theme`}
           className="bg-card ring-foreground/6 shadow-puck hover:ring-foreground/12 flex items-center gap-3 rounded-xl px-5 py-4 ring-1 transition"
         >
-          <span className="flex size-9 items-center justify-center rounded-full bg-black/6">
+          <span className="flex size-9 items-center justify-center rounded-full bg-black/6 dark:bg-white/10">
             <Palette className="size-4" />
           </span>
           <div>
@@ -218,7 +218,7 @@ export default async function StoreOverviewPage({
           href={`${base}/settings`}
           className="bg-card ring-foreground/6 shadow-puck hover:ring-foreground/12 flex items-center gap-3 rounded-xl px-5 py-4 ring-1 transition"
         >
-          <span className="flex size-9 items-center justify-center rounded-full bg-black/6">
+          <span className="flex size-9 items-center justify-center rounded-full bg-black/6 dark:bg-white/10">
             <BarChart3 className="size-4" />
           </span>
           <div>

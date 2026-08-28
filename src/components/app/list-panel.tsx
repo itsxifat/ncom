@@ -103,7 +103,14 @@ export function ListRowActions({
   return (
     <div
       data-slot="list-row-actions"
-      className={cn('flex shrink-0 flex-wrap items-center gap-2', className)}
+      // On a phone the row has stacked, so this is a band of its own under
+      // the title. Spreading it puts the status control at the left margin
+      // and the amount hard right, which is the alignment that lets a
+      // column of rows be read as a column of figures.
+      className={cn(
+        'flex shrink-0 flex-wrap items-center gap-2 max-sm:w-full max-sm:justify-between',
+        className
+      )}
       {...props}
     />
   )

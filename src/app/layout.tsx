@@ -1,8 +1,9 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import { Manrope, Space_Grotesk, Geist_Mono } from 'next/font/google'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toaster } from '@/components/ui/sonner'
 import { SessionProvider } from '@/components/session-provider'
+import { ThemeProvider } from '@/components/theme-provider'
 import { BRAND_NAME, BRAND_SQUARE } from '@/lib/brand'
 import { env } from '@/lib/env'
 import './globals.css'
@@ -52,28 +53,59 @@ export const metadata: Metadata = {
   twitter: { card: 'summary', title: BRAND_NAME },
 }
 
+/*
+ * `viewportFit: 'cover'` is what lets the page paint into the rounded corners
+ * and the home-indicator strip on a phone, and it is also what makes the
+ * `env(safe-area-inset-*)` values in globals.css report anything other than
+ * zero. The mobile tab bar depends on both.
+ *
+ * `themeColor` is the browser's own chrome — the status bar on Android, the
+ * surrounding UI in an installed PWA. It follows the OS preference rather than
+ * the in-app choice, because it is emitted as static markup and cannot know
+ * what the user picked; the two colours are the two canvases, so a system-dark
+ * phone gets a charcoal bar and a system-light one gets the cool grey.
+ */
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#eceef1' },
+    { media: '(prefers-color-scheme: dark)', color: '#131316' },
+  ],
+}
+
 export default function RootLayout({ children }: LayoutProps<'/'>) {
   return (
-    // `dark` is set here rather than by a theme provider because NCOM is a
-    // black-surfaced product, not a product with a dark mode: the lime brand mark
-    // is built for an ink ground and every surface is designed around that. A
-    // class on the server-rendered <html> also means no hydration flash and no
-    // client JavaScript deciding what colour the page is.
+    // The theme class is written onto this element by next-themes' inline
+    // script before first paint, which is why `suppressHydrationWarning` is
+    // required here: the server cannot know the visitor's stored preference, so
+    // the markup it emits and the DOM React hydrates against legitimately
+    // disagree on this one attribute. The warning is suppressed on <html>
+    // alone, so a real mismatch anywhere inside the tree still reports.
     //
-    // Tenant storefronts are unaffected. They render through `PageThemeProvider`,
-    // which namespaces its variables under `--page-*` and sets its own
-    // background, so a merchant's own theme still wins on their own domain.
+    // The workspace rail opts out of all of this and stays black in both
+    // themes; see the note on `.dark` in globals.css.
+    //
+    // Tenant storefronts are unaffected either way. They render through
+    // `PageThemeProvider`, which namespaces its variables under `--page-*` and
+    // sets its own background, so a merchant's own theme still wins on their
+    // own domain — and a merchant who prefers dark mode in the workspace does
+    // not thereby darken the storefront their customers see.
     <html
       lang="en"
-      className={`dark ${manrope.variable} ${spaceGrotesk.variable} ${geistMono.variable} h-full antialiased`}
+      suppressHydrationWarning
+      className={`${manrope.variable} ${spaceGrotesk.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="flex min-h-full flex-col">
-        <SessionProvider>
-          <TooltipProvider>
-            {children}
-            <Toaster />
-          </TooltipProvider>
-        </SessionProvider>
+        <ThemeProvider>
+          <SessionProvider>
+            <TooltipProvider>
+              {children}
+              <Toaster />
+            </TooltipProvider>
+          </SessionProvider>
+        </ThemeProvider>
       </body>
     </html>
   )

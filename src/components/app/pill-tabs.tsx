@@ -20,7 +20,7 @@ export function PillTabs({
   return (
     <nav
       className={cn(
-        'bg-card ring-foreground/6 shadow-puck inline-flex w-fit max-w-full items-center gap-1 overflow-x-auto rounded-full p-1 ring-1',
+        'bg-card ring-foreground/6 shadow-puck inline-flex w-fit max-w-full scrollbar-none items-center gap-1 overflow-x-auto rounded-full p-1 ring-1',
         className
       )}
     >

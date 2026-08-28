@@ -8,10 +8,10 @@ export default function DashboardLoading() {
         <Skeleton className="h-10 w-72" />
         <Skeleton className="h-4 w-96 max-w-full" />
       </div>
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Skeleton className="h-32 rounded-xl 2xl:h-36" />
-        <Skeleton className="h-32 rounded-xl 2xl:h-36" />
-        <Skeleton className="h-32 rounded-xl xl:col-span-2 2xl:h-36" />
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
+        <Skeleton className="h-24 rounded-xl sm:h-32 2xl:h-36" />
+        <Skeleton className="h-24 rounded-xl sm:h-32 2xl:h-36" />
+        <Skeleton className="col-span-2 h-32 rounded-xl 2xl:h-36" />
       </div>
       <div className="3xl:grid-cols-5 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
         {Array.from({ length: 6 }).map((_, index) => (
