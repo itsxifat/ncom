@@ -59,7 +59,20 @@ export function countCustomDomains(organizationId: string): Promise<number> {
  * memberships lets a 1-seat organisation send five invitations and end up with
  * five members, since each acceptance individually looked like it fit.
  */
-export async function countTeamSeats(organizationId: string): Promise<number> {
+export async function countTeamSeats(
+  organizationId: string,
+  /**
+   * One invitation to leave out of the count.
+   *
+   * Passed when checking whether that invitation can be accepted. A pending
+   * invitation is already holding a seat, and accepting it converts that seat
+   * into a membership rather than claiming a second one — so counting it and
+   * *then* asking for one more charges the same person twice. That made the
+   * last seat of every plan unusable: the invitation sent fine, and the
+   * recipient could never accept it.
+   */
+  excludeInvitationId?: string
+): Promise<number> {
   const [members, pendingInvites] = await Promise.all([
     prisma.membership.count({ where: { organizationId } }),
     prisma.orgInvitation.count({
@@ -67,6 +80,7 @@ export async function countTeamSeats(organizationId: string): Promise<number> {
         organizationId,
         acceptedAt: null,
         expiresAt: { gt: new Date() },
+        ...(excludeInvitationId ? { id: { not: excludeInvitationId } } : {}),
       },
     }),
   ])

@@ -6,7 +6,10 @@ import {
   requireOrgAccess,
   requireHumanOrgAccess,
 } from '@/server/auth/rbac'
-import { requireQuota } from '@/server/services/entitlementService'
+import {
+  requireQuota,
+  requireSeatForInvitation,
+} from '@/server/services/entitlementService'
 import type { OrgRole } from '@/generated/prisma/enums'
 
 /**
@@ -172,7 +175,23 @@ export async function acceptInvitation(token: string) {
   // was free can be clicked a week later, after the seat was filled. The invitee
   // sees the refusal, which is unhelpful for them but correct — the alternative
   // is a workspace silently over its plan.
-  await requireQuota(invitation.organizationId, 'TEAM_MEMBERS')
+  //
+  // Someone who is somehow already a member takes no new seat, so the check is
+  // skipped rather than failed — refusing them would be refusing entry to a
+  // workspace they are already in.
+  const existingMembership = await prisma.membership.findUnique({
+    where: {
+      userId_organizationId: {
+        userId: session.user.id,
+        organizationId: invitation.organizationId,
+      },
+    },
+    select: { id: true },
+  })
+
+  if (!existingMembership) {
+    await requireSeatForInvitation(invitation.organizationId, invitation.id)
+  }
 
   return prisma.$transaction(async (tx) => {
     const membership = await tx.membership.upsert({

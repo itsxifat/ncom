@@ -31,6 +31,19 @@ export interface SectionRendererProps<T> {
    * there.
    */
   commerce?: StorefrontCommerce
+  /**
+   * True only inside the builder canvas.
+   *
+   * A block that renders nothing when it is not configured yet is invisible on
+   * the canvas, which reads as a broken block rather than an unfinished one —
+   * the merchant drops it on the page, sees nothing appear, and has no target
+   * to click to open the inspector. Blocks with that property use this to draw
+   * a placeholder while editing and stay honest on the published page.
+   *
+   * It is not set for the preview routes: a preview is meant to answer "what
+   * will a customer see", so it must show exactly what the live page shows.
+   */
+  editing?: boolean
 }
 
 /**

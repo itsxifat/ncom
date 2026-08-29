@@ -4,13 +4,19 @@ import { useEffect } from 'react'
 import {
   useForm,
   useFieldArray,
+  useWatch,
   Controller,
   type Control,
   type UseFormRegister,
 } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Plus, Trash2, GripVertical } from 'lucide-react'
-import type { FieldConfig } from '../sections/editorFields'
+import { Plus, RotateCcw, Trash2, GripVertical } from 'lucide-react'
+import {
+  fieldIsVisible,
+  optionLabel,
+  optionValue,
+  type FieldConfig,
+} from '../sections/editorFields'
 import type { SectionDefinition } from '../sections/registry'
 import { ImagePicker } from './ImagePicker'
 import { useProductCatalog } from './ProductCatalogContext'
@@ -18,9 +24,10 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import { Button } from '@/components/ui/button'
-import { Field, FieldLabel } from '@/components/ui/field'
+import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { FormSelect } from '@/components/ui/form-select'
 import { FontPicker } from '@/components/ui/font-picker'
+import { DateTimeField } from './DateTimeField'
 import { ProductPickerDialog } from '@/components/store/product-picker'
 import { formatMoneyAmount } from '@/lib/money'
 
@@ -41,7 +48,7 @@ function emptyValueForField(field: FieldConfig): unknown {
     case 'number':
       return field.min ?? 0
     case 'select':
-      return field.options[0] ?? ''
+      return field.options[0] ? optionValue(field.options[0]) : ''
     default:
       return ''
   }
@@ -147,6 +154,43 @@ function ProductField({
   )
 }
 
+/**
+ * One field, hidden when its `showWhen` condition does not hold.
+ *
+ * Watches only the sibling the condition names, so a block with a dozen
+ * conditional fields does not re-render the whole inspector on every keystroke
+ * somewhere else in the form.
+ */
+function ConditionalField({
+  field,
+  namePrefix,
+  control,
+  register,
+}: {
+  field: FieldConfig
+  namePrefix: string
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  control: Control<any>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  register: UseFormRegister<any>
+}) {
+  const dependency = field.showWhen!.field
+  const watched = useWatch({
+    control,
+    name: namePrefix ? `${namePrefix}.${dependency}` : dependency,
+  })
+
+  if (!fieldIsVisible(field, { [dependency]: watched })) return null
+  return (
+    <FieldRenderer
+      field={field}
+      namePrefix={namePrefix}
+      control={control}
+      register={register}
+    />
+  )
+}
+
 function FieldRenderer({
   field,
   namePrefix,
@@ -161,13 +205,47 @@ function FieldRenderer({
   register: UseFormRegister<any>
 }) {
   const name = namePrefix ? `${namePrefix}.${field.name}` : field.name
+  const hint = field.description ? (
+    <FieldDescription>{field.description}</FieldDescription>
+  ) : null
+
+  if (field.type === 'heading') {
+    return (
+      <div className="border-border/70 mt-1 flex flex-col gap-0.5 border-t pt-4 first:mt-0 first:border-t-0 first:pt-0">
+        <p className="text-muted-foreground text-[11px] font-semibold tracking-[0.08em] uppercase">
+          {field.label}
+        </p>
+        {hint}
+      </div>
+    )
+  }
 
   if (field.type === 'text') {
     return (
       <Field>
         <FieldLabel>{field.label}</FieldLabel>
-        <Input {...register(name)} />
+        <Input {...register(name)} placeholder={field.placeholder} />
+        {hint}
       </Field>
+    )
+  }
+
+  if (field.type === 'datetime') {
+    return (
+      <Controller
+        name={name}
+        control={control}
+        render={({ field: controllerField }) => (
+          <Field>
+            <FieldLabel>{field.label}</FieldLabel>
+            <DateTimeField
+              value={(controllerField.value as string) ?? ''}
+              onChange={controllerField.onChange}
+            />
+            {hint}
+          </Field>
+        )}
+      />
     )
   }
 
@@ -184,6 +262,7 @@ function FieldRenderer({
               onChange={controllerField.onChange}
               aspect={field.aspect}
             />
+            {hint}
           </Field>
         )}
       />
@@ -194,22 +273,66 @@ function FieldRenderer({
     return (
       <Field>
         <FieldLabel>{field.label}</FieldLabel>
-        <Textarea {...register(name)} rows={3} />
+        <Textarea
+          {...register(name)}
+          rows={3}
+          placeholder={field.placeholder}
+        />
+        {hint}
       </Field>
     )
   }
 
   if (field.type === 'color') {
     return (
-      <Field>
-        <FieldLabel>{field.label}</FieldLabel>
-        <div className="flex items-center gap-2">
-          <Input type="color" {...register(name)} className="h-9 w-14 p-1" />
-          {/* The text input is the accessible path to the value: a bare
-              <input type="color"> can't be typed into or pasted a hex code. */}
-          <Input {...register(name)} placeholder="#000000" />
-        </div>
-      </Field>
+      <Controller
+        name={name}
+        control={control}
+        render={({ field: controllerField }) => {
+          const value = (controllerField.value as string) ?? ''
+          return (
+            <Field>
+              <FieldLabel>{field.label}</FieldLabel>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="color"
+                  // A native colour input has no empty state, so an unset
+                  // "inherit from the theme" field has to show *something*.
+                  // Black would read as a deliberate choice; the theme accent
+                  // is what the block actually paints with when unset.
+                  value={value || '#111111'}
+                  onChange={(event) =>
+                    controllerField.onChange(event.target.value)
+                  }
+                  className="h-9 w-14 shrink-0 p-1"
+                />
+                {/* The text input is the accessible path to the value: a bare
+                    <input type="color"> can't be typed into or pasted a hex
+                    code — and it is the only way to clear one. */}
+                <Input
+                  value={value}
+                  onChange={(event) =>
+                    controllerField.onChange(event.target.value)
+                  }
+                  placeholder={field.allowEmpty ? 'Theme colour' : '#000000'}
+                />
+                {field.allowEmpty && value && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={`Reset ${field.label.toLowerCase()}`}
+                    onClick={() => controllerField.onChange('')}
+                  >
+                    <RotateCcw className="size-3.5" />
+                  </Button>
+                )}
+              </div>
+              {hint}
+            </Field>
+          )
+        }}
+      />
     )
   }
 
@@ -225,6 +348,7 @@ function FieldRenderer({
               value={(controllerField.value as string) ?? ''}
               onValueChange={controllerField.onChange}
             />
+            {hint}
           </Field>
         )}
       />
@@ -235,16 +359,24 @@ function FieldRenderer({
     return (
       <Field>
         <FieldLabel>{field.label}</FieldLabel>
-        <Input
-          type="number"
-          min={field.min}
-          max={field.max}
-          step={field.step}
-          // valueAsNumber keeps the stored content numeric; without it a
-          // number input round-trips as a string and breaks the block's
-          // arithmetic filters on the value.
-          {...register(name, { valueAsNumber: true })}
-        />
+        <div className="flex items-center gap-2">
+          <Input
+            type="number"
+            min={field.min}
+            max={field.max}
+            step={field.step}
+            // valueAsNumber keeps the stored content numeric; without it a
+            // number input round-trips as a string and breaks the block's
+            // arithmetic filters on the value.
+            {...register(name, { valueAsNumber: true })}
+          />
+          {field.suffix && (
+            <span className="text-muted-foreground shrink-0 text-xs">
+              {field.suffix}
+            </span>
+          )}
+        </div>
+        {hint}
       </Field>
     )
   }
@@ -255,16 +387,31 @@ function FieldRenderer({
 
   if (field.type === 'select') {
     return (
-      <Field>
-        <FieldLabel>{field.label}</FieldLabel>
-        <FormSelect {...register(name)}>
-          {field.options.map((option) => (
-            <option key={option} value={option}>
-              {option}
-            </option>
-          ))}
-        </FormSelect>
-      </Field>
+      <Controller
+        name={name}
+        control={control}
+        render={({ field: controllerField }) => (
+          <Field>
+            <FieldLabel>{field.label}</FieldLabel>
+            {/* Controlled, not `register`d. FormSelect is not a native
+                <select>: it takes no ref, so react-hook-form had no way to
+                write the stored value into it and every dropdown in the
+                inspector opened showing its first option regardless of what
+                the section actually held. */}
+            <FormSelect
+              value={(controllerField.value as string) ?? ''}
+              onChange={(event) => controllerField.onChange(event.target.value)}
+            >
+              {field.options.map((option) => (
+                <option key={optionValue(option)} value={optionValue(option)}>
+                  {optionLabel(option)}
+                </option>
+              ))}
+            </FormSelect>
+            {hint}
+          </Field>
+        )}
+      />
     )
   }
 
@@ -279,7 +426,10 @@ function FieldRenderer({
               checked={!!controllerField.value}
               onCheckedChange={controllerField.onChange}
             />
-            <FieldLabel>{field.label}</FieldLabel>
+            <div className="flex flex-col gap-0.5">
+              <FieldLabel>{field.label}</FieldLabel>
+              {hint}
+            </div>
           </Field>
         )}
       />
@@ -350,15 +500,25 @@ function ArrayField({
               </Button>
             </div>
             <div className="flex flex-col gap-2">
-              {itemFields.map((itemField) => (
-                <FieldRenderer
-                  key={itemField.name}
-                  field={itemField}
-                  namePrefix={`${name}.${index}`}
-                  control={control}
-                  register={register}
-                />
-              ))}
+              {itemFields.map((itemField) =>
+                itemField.showWhen ? (
+                  <ConditionalField
+                    key={itemField.name}
+                    field={itemField}
+                    namePrefix={`${name}.${index}`}
+                    control={control}
+                    register={register}
+                  />
+                ) : (
+                  <FieldRenderer
+                    key={itemField.name}
+                    field={itemField}
+                    namePrefix={`${name}.${index}`}
+                    control={control}
+                    register={register}
+                  />
+                )
+              )}
             </div>
           </div>
         ))}
@@ -486,15 +646,25 @@ export function FieldsRenderer({
 }) {
   return (
     <>
-      {fields.map((field) => (
-        <FieldRenderer
-          key={field.name}
-          field={field}
-          namePrefix=""
-          control={control}
-          register={register}
-        />
-      ))}
+      {fields.map((field) =>
+        field.showWhen ? (
+          <ConditionalField
+            key={field.name}
+            field={field}
+            namePrefix=""
+            control={control}
+            register={register}
+          />
+        ) : (
+          <FieldRenderer
+            key={field.name}
+            field={field}
+            namePrefix=""
+            control={control}
+            register={register}
+          />
+        )
+      )}
     </>
   )
 }

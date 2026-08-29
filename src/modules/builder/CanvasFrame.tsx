@@ -68,5 +68,12 @@ export function CanvasClient({
     return () => window.removeEventListener('message', handleMessage)
   }, [])
 
-  return <PageRenderer theme={theme} sections={sections} commerce={commerce} />
+  return (
+    <PageRenderer
+      theme={theme}
+      sections={sections}
+      commerce={commerce}
+      editing
+    />
+  )
 }

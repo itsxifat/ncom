@@ -43,6 +43,7 @@ export function PageRenderer({
   sections,
   storeId,
   commerce,
+  editing,
 }: {
   theme: PageTheme
   sections: RenderablePageSection[]
@@ -50,6 +51,12 @@ export function PageRenderer({
   storeId?: string
   /** What this page sells. Absent where there is no real page behind it. */
   commerce?: StorefrontCommerce
+  /**
+   * True only for the builder canvas, so a block that has nothing to show yet
+   * can draw a placeholder there instead of disappearing. Left off everywhere
+   * a real visitor is being served, including the preview routes.
+   */
+  editing?: boolean
 }) {
   return (
     // `scroll-smooth` is what makes every CTA on the page glide to the order
@@ -80,6 +87,7 @@ export function PageRenderer({
                 sectionId={section.id}
                 storeId={storeId}
                 commerce={commerce}
+                editing={editing}
               />
             </div>
           )

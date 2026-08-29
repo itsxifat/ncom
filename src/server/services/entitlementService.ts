@@ -449,6 +449,39 @@ export async function requireQuota(
 }
 
 /**
+ * Checks a workspace has room for the person accepting an invitation.
+ *
+ * Not `requireQuota(org, 'TEAM_MEMBERS')`: that counts every pending
+ * invitation as an occupied seat, including the one being accepted right now,
+ * and then asks for one seat on top. On a two-seat plan a workspace with one
+ * member reads as "2 of 2 used" the moment a single invitation is outstanding,
+ * so the invite sends and the recipient is refused forever.
+ *
+ * The seat this invitation reserved is the seat the new membership takes, so it
+ * is excluded from the count and charged once.
+ */
+export async function requireSeatForInvitation(
+  organizationId: string,
+  invitationId: string
+): Promise<void> {
+  const entitlements = await getEntitlements(organizationId)
+  if (entitlements.quotaEnforcementDisabled) return
+
+  const limit = entitlements.quotas.TEAM_MEMBERS
+  if (limit === null) return
+
+  const used = await countTeamSeats(organizationId, invitationId)
+  if (!isWithinQuota(limit, used, 1)) {
+    throw new QuotaExceededError(
+      'TEAM_MEMBERS',
+      limit,
+      used,
+      entitlements.planName
+    )
+  }
+}
+
+/**
  * Reads just the one figure a quota check needs.
  *
  * A full `getUsageSnapshot` runs nine queries; creating a page only needs to

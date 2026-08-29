@@ -3,6 +3,7 @@ import nodemailer from 'nodemailer'
 import { prisma } from '@/server/db/client'
 import type { EmailPurpose, EmailStatus } from '@/generated/prisma/enums'
 import { decryptSecret, encryptSecret } from '@/lib/crypto'
+import { smtpTestEmail } from '@/server/email/templates'
 
 /**
  * Outbound email.
@@ -334,12 +335,20 @@ export async function sendTestEmail(
   purpose: EmailPurpose,
   recipient: string
 ): Promise<SendResult> {
+  // Rendered through the same shell as every real message, so the test also
+  // proves the branding survives this route — images resolving, markup intact —
+  // not merely that the connection opened.
+  const rendered = smtpTestEmail({
+    purpose,
+    host: (await resolveConfig(purpose))?.host ?? 'unknown host',
+  })
+
   const result = await sendEmail({
     purpose,
     to: recipient,
-    subject: `NCOM SMTP test (${purpose})`,
-    text: `This is a test message from NCOM for the ${purpose} mail server. If you received it, the configuration works.`,
-    html: `<p>This is a test message from NCOM for the <strong>${purpose}</strong> mail server.</p><p>If you received it, the configuration works.</p>`,
+    subject: rendered.subject,
+    text: rendered.text,
+    html: rendered.html,
   })
 
   await prisma.emailSmtpConfig

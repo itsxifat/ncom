@@ -7,9 +7,10 @@
  * layout shift, and reading them from the file at render time is not possible for
  * something in `public/`.
  *
- * Both marks are the lime wordmark on transparency, and lime is the brand — so
- * the mark ships in that colour on every surface, light or dark, and is never
- * recoloured to suit a background. `BrandMark` renders it as supplied.
+ * The wordmark ships as flat lime on transparency. In the app `BrandMark`
+ * darkens it to ink on light surfaces with a CSS filter, so there is one file
+ * to replace rather than two to keep in sync — see that component for why.
+ * Email cannot filter and cannot resize sensibly, so it gets its own copy.
  */
 
 export const BRAND_NAME = 'NCOM'
@@ -36,6 +37,21 @@ export const BRAND_SQUARE = {
   height: 2000,
 } as const
 
-/** Sampled from the wordmark itself, matching `--lime` in globals.css. */
+/**
+ * The wordmark at email size.
+ *
+ * 360px wide — roughly 3x the ~112px a message actually displays it at, which
+ * stays crisp on a retina phone without posting the 1180px original into every
+ * email. It stays lime because the email masthead is ink; see
+ * `server/email/layout.ts` for why mail does not follow the app's ink-on-light
+ * rule. Regenerate from `Ncom-1-Logo.png` if the logo changes.
+ */
+export const BRAND_WORDMARK_EMAIL = {
+  src: '/ncom-wordmark-lime.png',
+  width: 360,
+  height: 80,
+} as const
+
+/** Sampled from the wordmark itself. */
 export const BRAND_LIME = '#dff83f'
 export const BRAND_INK = '#0b0b0c'

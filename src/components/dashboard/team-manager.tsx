@@ -186,7 +186,7 @@ export function TeamManager({
       {canManage && (
         <SettingsSection
           title="Invite someone"
-          description="They will need to sign in with this exact email address to accept."
+          description="We email them a link. They will need to sign in with this exact email address to accept."
         >
           <form action={inviteAction}>
             <FieldGroup>
@@ -219,12 +219,29 @@ export function TeamManager({
                 <FieldError>{inviteState.error}</FieldError>
               )}
 
+              {inviteState?.success && !inviteState.warning && (
+                <p className="text-muted-foreground text-sm">
+                  {inviteState.success}
+                </p>
+              )}
+
+              {/* A send failure is not an error — the invitation exists and the
+                  link below works. But it must not be reported as a clean
+                  "sent" either, or the admin waits for an email that is never
+                  arriving. */}
+              {inviteState?.warning && (
+                <p className="text-sm font-medium text-amber-700 dark:text-amber-500">
+                  {inviteState.warning}
+                </p>
+              )}
+
               {inviteState?.inviteUrl && (
                 <Field>
                   <FieldLabel>Invitation link</FieldLabel>
-                  {/* Shown because there is no transactional email yet —
-                          without this the invite would be created and then be
-                          unreachable. */}
+                  {/* Kept alongside the email rather than replaced by it: mail
+                      gets filtered, bounces silently, or has no server
+                      configured at all, and a link the admin can hand over
+                      directly is what keeps the invite usable when it does. */}
                   <div className="flex gap-2">
                     <Input
                       readOnly
@@ -247,8 +264,8 @@ export function TeamManager({
                     </Button>
                   </div>
                   <FieldDescription>
-                    Send this to them yourself — automatic invitation emails are
-                    not set up yet. The link expires in 14 days.
+                    A backup for the emailed invitation — share it directly if
+                    the email does not arrive. The link expires in 14 days.
                   </FieldDescription>
                 </Field>
               )}
@@ -256,7 +273,7 @@ export function TeamManager({
               <Field>
                 <Button type="submit" disabled={inviting}>
                   <Mail />
-                  {inviting ? 'Creating…' : 'Create invitation'}
+                  {inviting ? 'Sending…' : 'Send invitation'}
                 </Button>
               </Field>
             </FieldGroup>
