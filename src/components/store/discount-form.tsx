@@ -208,6 +208,15 @@ export function DiscountForm({
           <div className="grid gap-4 sm:grid-cols-2">
             <Field>
               <FieldLabel htmlFor="method">How it applies</FieldLabel>
+              {/* Automatic discounts are not resolved by anything yet. Every
+                  path that prices a basket — the cart, the landing-page order
+                  route and the order editor — reaches a discount through
+                  `loadDiscount`, which looks a row up *by its typed code*, so a
+                  discount with no code is never found and takes nothing off any
+                  order. Offering the choice made that a silent failure: the
+                  campaign saved, listed as Active with its value, and did
+                  nothing. It stays visible and disabled rather than removed,
+                  because a merchant who already picked it is owed the reason. */}
               <FormSelect
                 id="method"
                 value={form.method}
@@ -216,8 +225,17 @@ export function DiscountForm({
                 }
               >
                 <option value="CODE">Customer enters a code</option>
-                <option value="AUTOMATIC">Applied automatically</option>
+                <option value="AUTOMATIC" disabled>
+                  Applied automatically — not available yet
+                </option>
               </FormSelect>
+              {form.method === 'AUTOMATIC' && (
+                <FieldDescription>
+                  This discount is not applied to any order. Give it a code, or
+                  use a page promotion under Delivery for a rule that fires on
+                  its own.
+                </FieldDescription>
+              )}
             </Field>
 
             <Field>

@@ -164,6 +164,13 @@ export function pricedQuantities(offer: PublicOffer): number[] {
     .map((tier) => tier.quantity)
 }
 
+/** "2, 3 or 6" — a ladder's rungs, as a buyer would read them out. */
+function listQuantities(quantities: number[]): string {
+  if (quantities.length <= 1) return String(quantities[0] ?? '')
+  const last = quantities[quantities.length - 1]
+  return `${quantities.slice(0, -1).join(', ')} or ${last}`
+}
+
 /**
  * The piece-count bounds a buyer must stay inside.
  *
@@ -323,10 +330,19 @@ export function quoteOffer(
       unitPrices,
     })
     if (tierPrice === null) {
+      // An exact ladder prices a set of quantities, not a range, so a buyer can
+      // sit well inside `quantityBounds` and still be standing somewhere nobody
+      // priced. Naming the rungs turns a dead end into a choice — the form has
+      // just let them build a basket it refuses, and "no price is set" does not
+      // tell them what would work. `pricedQuantities` exists for exactly this.
+      const rungs = pricedQuantities(offer)
       return {
         ...empty,
         quantity,
-        error: 'No price is set for that many items.',
+        error:
+          rungs.length > 0
+            ? `This offer is sold in sets of ${listQuantities(rungs)} — you have ${quantity}.`
+            : 'No price is set for that many items.',
       }
     }
     return {

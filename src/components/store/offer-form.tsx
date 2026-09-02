@@ -255,6 +255,12 @@ export function OfferForm({
 
           {isPool && (
             <div className="grid gap-4 sm:grid-cols-2">
+              {/* A ladder's bounds come from the ladder, and saying so is the
+                  whole job of these two fields on a mix-and-match offer. The
+                  lowest rung is the minimum in both modes — `quantityBounds`
+                  never reads `minQuantity` for a COLLECTION — and an exact
+                  ladder's top rung is its maximum, so a number typed in either
+                  box used to be accepted, saved and then silently ignored. */}
               <Field>
                 <FieldLabel htmlFor="offer-min">Minimum items</FieldLabel>
                 <Input
@@ -263,8 +269,13 @@ export function OfferForm({
                   value={form.minQuantity}
                   onChange={(event) => set('minQuantity', event.target.value)}
                   placeholder={isLadder ? 'From the ladder' : '1'}
-                  disabled={isLadder && form.tierMode === 'EXACT'}
+                  disabled={isLadder}
                 />
+                {isLadder && (
+                  <FieldDescription>
+                    The lowest rung below sets this.
+                  </FieldDescription>
+                )}
               </Field>
               <Field>
                 <FieldLabel htmlFor="offer-max">Maximum items</FieldLabel>
@@ -273,9 +284,19 @@ export function OfferForm({
                   inputMode="numeric"
                   value={form.maxQuantity}
                   onChange={(event) => set('maxQuantity', event.target.value)}
-                  placeholder="No limit"
+                  placeholder={
+                    isLadder && form.tierMode === 'EXACT'
+                      ? 'From the ladder'
+                      : 'No limit'
+                  }
                   disabled={isLadder && form.tierMode === 'EXACT'}
                 />
+                {isLadder && form.tierMode === 'EXACT' && (
+                  <FieldDescription>
+                    The highest rung below sets this — an exact ladder sells
+                    nothing it has not priced.
+                  </FieldDescription>
+                )}
               </Field>
             </div>
           )}
@@ -871,7 +892,13 @@ function TierEditor({
 
       <div className="flex flex-col gap-2">
         {tiers.map((tier, index) => (
-          <div key={index} className="flex items-center gap-2">
+          // Wraps rather than squeezing. Five controls in one non-wrapping row
+          // left only the fixed-width rung type at its size on a phone: the
+          // quantity box shrank to about 30px — 2px of typing area once its own
+          // padding is taken — and the price box to less than its currency
+          // prefix. A merchant on a 360px screen could not enter the item count
+          // of a rung at all, which is the whole point of the control.
+          <div key={index} className="flex flex-wrap items-center gap-2">
             <Input
               inputMode="numeric"
               aria-label="Quantity"
@@ -880,7 +907,7 @@ function TierEditor({
                 update(index, { quantity: event.target.value })
               }
               placeholder="3"
-              className="w-20 text-center"
+              className="w-20 shrink-0 text-center"
             />
             <span className="text-muted-foreground shrink-0 text-sm">
               items
@@ -900,27 +927,31 @@ function TierEditor({
               <option value="PERCENT">get % off</option>
             </FormSelect>
 
-            {tier.reward === 'PRICE' ? (
-              <MoneyInput
-                aria-label="Price"
-                currencyCode={currencyCode}
-                value={tier.price}
-                onChange={(event) =>
-                  update(index, { price: event.target.value })
-                }
-                placeholder="1000"
-              />
-            ) : (
-              <Input
-                inputMode="decimal"
-                aria-label="Percentage off"
-                value={tier.discountPercent}
-                onChange={(event) =>
-                  update(index, { discountPercent: event.target.value })
-                }
-                placeholder="15"
-              />
-            )}
+            {/* Wide enough to be worth wrapping onto its own line, so what the
+                rung costs is never narrower than the currency sitting in it. */}
+            <div className="min-w-40 flex-1">
+              {tier.reward === 'PRICE' ? (
+                <MoneyInput
+                  aria-label="Price"
+                  currencyCode={currencyCode}
+                  value={tier.price}
+                  onChange={(event) =>
+                    update(index, { price: event.target.value })
+                  }
+                  placeholder="1000"
+                />
+              ) : (
+                <Input
+                  inputMode="decimal"
+                  aria-label="Percentage off"
+                  value={tier.discountPercent}
+                  onChange={(event) =>
+                    update(index, { discountPercent: event.target.value })
+                  }
+                  placeholder="15"
+                />
+              )}
+            </div>
 
             <Button
               type="button"
@@ -930,7 +961,7 @@ function TierEditor({
               onClick={() =>
                 onTiers(tiers.filter((_, position) => position !== index))
               }
-              className="text-muted-foreground hover:text-destructive"
+              className="text-muted-foreground hover:text-destructive shrink-0"
             >
               <Trash2 />
             </Button>
