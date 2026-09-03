@@ -260,6 +260,25 @@ function toProductInput(
   }
 }
 
+/**
+ * The currency an order's money is typed in.
+ *
+ * Falls back to the workspace's for an order that cannot be read — the caller
+ * that follows will refuse it anyway, and guessing a currency is better than
+ * failing to parse the form before the ownership check runs.
+ */
+async function orderCurrency(
+  organizationId: string,
+  orderId: string
+): Promise<string> {
+  const { prisma } = await import('@/server/db/client')
+  const order = await prisma.order.findFirst({
+    where: { id: orderId, organizationId },
+    select: { currencyCode: true },
+  })
+  return order?.currencyCode ?? (await organizationCurrency(organizationId))
+}
+
 async function organizationCurrency(organizationId: string): Promise<string> {
   const { getOrganizationSettings } =
     await import('@/server/services/organizationSettingsService')
@@ -735,6 +754,14 @@ const orderEditSchema = z.object({
         variantId: z.string().max(40).nullish(),
         quantity: z.number().int().min(0).max(10_000),
         isGift: z.boolean().default(false),
+        /**
+         * What one of these costs on this order, in major units, as typed.
+         *
+         * A string rather than a number for the same reason `shipping` and
+         * `extraDiscount` are: it is what the merchant typed, and the currency's
+         * exponent is applied once, server-side, where the currency is known.
+         */
+        unitPrice: z.string().max(30).nullish(),
       })
     )
     .min(1),
@@ -749,19 +776,64 @@ const orderEditSchema = z.object({
 
 async function toOrderEditInput(
   organizationId: string,
+  orderId: string,
   raw: unknown
 ): Promise<{ ok: true; input: OrderEditInput } | { ok: false; error: string }> {
   const parsed = orderEditSchema.safeParse(raw)
   if (!parsed.success) return { ok: false, error: firstIssue(parsed.error) }
 
-  const currency = await organizationCurrency(organizationId)
+  // The order's own currency, not the workspace's. The editor renders and
+  // seeds every money field from `order.currencyCode`, and the two can differ
+  // — a workspace that has since changed currency, or an order taken in
+  // another. Parsing "1000" under a two-decimal currency that was typed under
+  // a zero-decimal one is a hundredfold error, on every row at once.
+  const currency = await orderCurrency(organizationId, orderId)
   const shipping = parsed.data.shipping?.trim()
   const extra = parsed.data.extraDiscount?.trim()
+
+  const lines: OrderEditLine[] = []
+  for (const line of parsed.data.lines) {
+    const typed = line.unitPrice?.trim()
+    let unitPriceCents: number | undefined
+    if (typed) {
+      // Validated before parsing, not after. `parseMoneyInput` strips every
+      // character that is not a digit, a dot or a minus, so "abc" reduces to
+      // the empty string and comes back as 0 — a typo would have made the line
+      // free, and the editor beside it would still be showing the old price.
+      // Grouping separators are dropped first so "1,200" is a price and not a
+      // rejection.
+      const cleaned = typed.replace(/[\s,]/g, '')
+      const numeric = Number(cleaned)
+
+      if (cleaned === '' || !Number.isFinite(numeric)) {
+        return { ok: false, error: `"${typed}" is not a price` }
+      }
+      if (numeric < 0) {
+        return { ok: false, error: 'A price cannot be negative' }
+      }
+
+      unitPriceCents = parseMoneyInput(cleaned, currency)
+
+      // Fits the Int the column is. A fat-fingered extra zero should be a
+      // refusal a merchant can read, not a write that fails deep in Postgres.
+      if (unitPriceCents > 2_000_000_000) {
+        return { ok: false, error: `${typed} is too large to be a price` }
+      }
+    }
+
+    lines.push({
+      orderLineId: line.orderLineId,
+      variantId: line.variantId,
+      quantity: line.quantity,
+      isGift: line.isGift,
+      unitPriceCents,
+    })
+  }
 
   return {
     ok: true,
     input: {
-      lines: parsed.data.lines as OrderEditLine[],
+      lines,
       shippingCents: shipping ? parseMoneyInput(shipping, currency) : undefined,
       waiveShipping: parsed.data.waiveShipping,
       // A blank string is the merchant clearing the field, which is a removal;
@@ -792,7 +864,7 @@ export async function editOrderAction(
 
   try {
     const organizationId = await org()
-    const parsed = await toOrderEditInput(organizationId, raw)
+    const parsed = await toOrderEditInput(organizationId, orderId, raw)
     if (!parsed.ok) return { error: parsed.error }
 
     await editOrder(organizationId, orderId, parsed.input)
@@ -822,7 +894,7 @@ export async function previewOrderEditAction(
 > {
   try {
     const organizationId = await org()
-    const parsed = await toOrderEditInput(organizationId, raw)
+    const parsed = await toOrderEditInput(organizationId, orderId, raw)
     if (!parsed.ok) return { ok: false, error: parsed.error }
 
     return {

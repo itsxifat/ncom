@@ -618,3 +618,121 @@ test('a cancelled order reads as cancelled in the list, not only on its own page
     await expect(page.getByText(`#NEW${stamp}`)).toHaveCount(0)
   })
 })
+
+/**
+ * A price agreed on the phone.
+ *
+ * The merchant's other half of "make it three" is "I'll do it for four-fifty",
+ * and until the editor could take a price the only way to record it was an
+ * order-level discount that happened to equal the difference — which lands on
+ * the customer's invoice as a discount they never asked for and leaves the
+ * margin report unable to tell a negotiated price from a promotion.
+ *
+ * The guarantee that matters, and the reason this reads the catalogue back: the
+ * price is the *order's*. A workspace that discovers its whole price list moved
+ * because someone haggled over one order has lost more than the order.
+ */
+test('a line can be repriced for one order without touching the catalogue', async ({
+  page,
+}) => {
+  const stamp = Date.now()
+
+  const mug = await seedProduct(organizationId, `Mug ${stamp}`, 50_000, 10)
+
+  const orderId = id('ord')
+  await db.query(
+    `INSERT INTO "Order"
+       (id, "organizationId", "orderNumber", email, phone, "currencyCode",
+        "subtotalCents", "shippingTotalCents", "totalCents",
+        "financialStatus", "workflowState", "updatedAt")
+     VALUES ($1, $2, $3, 'buyer@example.com', '01700000001', 'BDT',
+             100000, 6000, 106000, 'PENDING', 'PENDING', now())`,
+    [orderId, organizationId, `#PRICE${stamp}`]
+  )
+  await db.query(
+    `INSERT INTO "OrderLine"
+       (id, "orderId", "productId", "variantId", title, "variantTitle", sku,
+        quantity, "unitPriceCents", "totalCents")
+     VALUES ($1, $2, $3, $4, $5, 'Default Title', $6, 2, 50000, 100000)`,
+    [
+      id('ln'),
+      orderId,
+      mug.product.id,
+      mug.variant.id,
+      mug.product.title,
+      mug.variant.sku,
+    ]
+  )
+  await db.query(
+    `UPDATE "InventoryLevel"
+        SET available = available - 2, committed = committed + 2
+      WHERE "variantId" = $1`,
+    [mug.variant.id]
+  )
+
+  await test.step('type a new price on the line', async () => {
+    await page.goto(`/orders/${orderId}`)
+    await page.getByRole('button', { name: 'Edit order' }).click()
+
+    const price = page.getByRole('textbox', {
+      name: `Price of ${mug.product.title}, per item`,
+    })
+    await expect(price).toHaveValue('500.00')
+    await price.fill('450.00')
+
+    // The row's own total follows immediately — the merchant is reading this
+    // back to someone before the server has answered.
+    await expect(page.getByText('900.00').first()).toBeVisible()
+  })
+
+  await test.step('save', async () => {
+    await page.getByRole('button', { name: 'Save changes' }).click()
+    await expect(
+      page.getByRole('heading', { name: `Edit #PRICE${stamp}` })
+    ).toBeHidden({ timeout: 20_000 })
+  })
+
+  await test.step('the order is repriced and the catalogue is not', async () => {
+    const line = await one<{ unitPriceCents: number; totalCents: number }>(
+      `SELECT "unitPriceCents", "totalCents" FROM "OrderLine" WHERE "orderId" = $1`,
+      [orderId]
+    )
+    expect(num(line.unitPriceCents)).toBe(45_000)
+    expect(num(line.totalCents)).toBe(90_000)
+
+    const saved = await one<{ subtotalCents: number; totalCents: number }>(
+      `SELECT "subtotalCents", "totalCents" FROM "Order" WHERE id = $1`,
+      [orderId]
+    )
+    // 2 × 450, plus the 60 delivery the order already carried.
+    expect(num(saved.subtotalCents)).toBe(90_000)
+    expect(num(saved.totalCents)).toBe(96_000)
+
+    // The whole point: the product still lists at 500 for the next customer.
+    const variant = await one<{ priceCents: number }>(
+      `SELECT "priceCents" FROM "ProductVariant" WHERE id = $1`,
+      [mug.variant.id]
+    )
+    expect(num(variant.priceCents)).toBe(50_000)
+
+    // Repricing moves no stock — the customer is buying the same two mugs.
+    expect(await availableFor(mug.variant.id)).toEqual({
+      available: 8,
+      committed: 2,
+    })
+
+    // And the history says what happened, in money rather than in paisa.
+    const edited = await one<{ message: string }>(
+      `SELECT message FROM "OrderEvent"
+        WHERE "orderId" = $1 AND type = 'order_edited'
+        ORDER BY "createdAt" DESC LIMIT 1`,
+      [orderId]
+    )
+    // Whitespace-normalised: Intl separates a currency code from its amount
+    // with U+00A0, and an assertion typed with an ordinary space fails against
+    // a string that is entirely correct.
+    expect(edited.message.replace(/\s/g, ' ')).toContain(
+      'BDT 500.00 → BDT 450.00 each'
+    )
+  })
+})

@@ -8,7 +8,12 @@ import {
 import { emitOrderWebhook } from './orderService'
 import { loadTaxRates, parseAddress } from './pricingService'
 import { quoteOrderEdit, type OrderEditQuoteLine } from './orderEditPricing'
-import { applyBps, clampNonNegative, taxFromInclusive } from '@/lib/money'
+import {
+  applyBps,
+  clampNonNegative,
+  formatMoney,
+  taxFromInclusive,
+} from '@/lib/money'
 import { isOrderCancelled } from '@/lib/order-status'
 import type { TaxLine } from '@/lib/pricing'
 import type { Prisma } from '@/generated/prisma/client'
@@ -40,6 +45,14 @@ import type { OrderWorkflowState } from '@/generated/prisma/enums'
  * line keeps the unit price it was sold at even if the product has since gone
  * up: the customer agreed a price, and quietly repricing their order on a phone
  * call is how a merchant loses them.
+ *
+ * The merchant may still set a price by hand, per line, for this order alone —
+ * "I'll do it for eight hundred" is the other half of the same phone call, and
+ * before this it could only be done by typing an order-level discount that
+ * happened to equal the difference, which reads on the invoice as a discount
+ * the customer never asked for. A hand-set price never touches the catalogue,
+ * and it is refused on a line that has already been refunded or returned,
+ * because those rows point at money that moved against the old price.
  */
 
 /** Why an order cannot be edited, in the merchant's language. */
@@ -67,6 +80,15 @@ export interface OrderEditLine {
    * were sold at a loss.
    */
   isGift?: boolean
+  /**
+   * What one of these costs on this order, in minor units.
+   *
+   * Omitted keeps the price the line already carries — an added line falls back
+   * to the catalogue. This is the negotiated price and nothing else: it is
+   * written to the OrderLine and never back to the product, so the next
+   * customer is quoted the catalogue as usual.
+   */
+  unitPriceCents?: number | null
 }
 
 export interface OrderEditInput {
@@ -217,16 +239,20 @@ export async function editOrder(
     line: (typeof order.lines)[number]
     quantity: number
     isGift: boolean
+    unitPriceCents: number
   }[] = []
   const additions: {
     variantId: string
     quantity: number
     isGift: boolean
+    /** Null falls back to the catalogue price. */
+    unitPriceCents: number | null
   }[] = []
 
   for (const requested of input.lines) {
     const quantity = Math.trunc(requested.quantity)
     const isGift = requested.isGift ?? false
+    const requestedPrice = requestedUnitPrice(requested.unitPriceCents)
 
     if (requested.orderLineId) {
       const line = existingById.get(requested.orderLineId)
@@ -259,16 +285,37 @@ export async function editOrder(
         )
       }
 
+      const unitPriceCents = requestedPrice ?? line.unitPriceCents
+
+      // The same reasoning as the gift guard above, for the same rows. A
+      // RefundLine's amount was frozen from this line's price, and a return's
+      // arithmetic re-derives from it; moving the price under them leaves both
+      // describing money at a price the order no longer claims.
+      if (unitPriceCents !== line.unitPriceCents && settled > 0) {
+        throw new Error(
+          `"${line.title}" cannot be repriced — ${settled} have already been returned or refunded`
+        )
+      }
+
       keptIds.add(line.id)
-      if (quantity !== line.quantity || isGift !== line.isGift) {
-        updates.push({ line, quantity, isGift })
+      if (
+        quantity !== line.quantity ||
+        isGift !== line.isGift ||
+        unitPriceCents !== line.unitPriceCents
+      ) {
+        updates.push({ line, quantity, isGift, unitPriceCents })
       }
       continue
     }
 
     if (!requested.variantId) continue
     if (quantity < 1) continue
-    additions.push({ variantId: requested.variantId, quantity, isGift })
+    additions.push({
+      variantId: requested.variantId,
+      quantity,
+      isGift,
+      unitPriceCents: requestedPrice,
+    })
   }
 
   const removals = order.lines.filter((line) => !keptIds.has(line.id))
@@ -343,7 +390,7 @@ export async function editOrder(
           productId: line.productId,
           variantId: line.variantId,
           quantity: update?.quantity ?? line.quantity,
-          unitPriceCents: line.unitPriceCents,
+          unitPriceCents: update?.unitPriceCents ?? line.unitPriceCents,
           isGift: update?.isGift ?? line.isGift,
         }
       }),
@@ -354,7 +401,7 @@ export async function editOrder(
         productId: variant.product.id,
         variantId: variant.id,
         quantity: addition.quantity,
-        unitPriceCents: variant.priceCents,
+        unitPriceCents: addition.unitPriceCents ?? variant.priceCents,
         isGift: addition.isGift,
       }
     }),
@@ -387,6 +434,13 @@ export async function editOrder(
     shippingWaived,
   })
 
+  // Money in the timeline is formatted in the order's own currency. A summary
+  // that interpolated the raw minor units read "delivery 6000 → 8000" on an
+  // order whose every other screen says ৳60.00 — a hundredfold error to anyone
+  // scanning the history, and the numbers in a timeline are exactly what gets
+  // read back to a customer who is disputing a charge.
+  const money = (cents: number) => formatMoney(cents, order.currencyCode)
+
   const summary: string[] = []
 
   const updated = await prisma.$transaction(async (tx) => {
@@ -408,7 +462,7 @@ export async function editOrder(
     }
 
     // ── Quantity and gift changes ───────────────────────────────────────
-    for (const { line, quantity, isGift } of updates) {
+    for (const { line, quantity, isGift, unitPriceCents } of updates) {
       const delta = quantity - line.quantity
 
       if (line.variantId && delta !== 0) {
@@ -450,9 +504,13 @@ export async function editOrder(
       await writeLineMoney(tx, {
         id: line.id,
         quantity,
-        unitPriceCents: line.unitPriceCents,
+        unitPriceCents,
         discountCents: quote.lineDiscounts[line.id] ?? 0,
         storedTaxLines: line.taxLines,
+        // Deliberately the *old* price and quantity: this is the base the
+        // stored tax was actually levied on, and it is what the fallback in
+        // retaxLine scales from. Recomputing it from the new price would
+        // rescale the tax twice on any order with no rate breakdown.
         previous: {
           taxCents: line.taxTotalCents,
           base: clampNonNegative(
@@ -465,6 +523,13 @@ export async function editOrder(
 
       if (quantity !== line.quantity) {
         summary.push(`${line.title} ${line.quantity} → ${quantity}`)
+      }
+      if (unitPriceCents !== line.unitPriceCents) {
+        summary.push(
+          `${line.title} ${money(line.unitPriceCents)} → ${money(
+            unitPriceCents
+          )} each`
+        )
       }
       if (isGift !== line.isGift) {
         summary.push(
@@ -520,7 +585,12 @@ export async function editOrder(
         )
       }
 
-      const gross = variant.priceCents * addition.quantity
+      // Read once. `gross` and the stored `unitPriceCents` used to be two
+      // separate reads of the catalogue price; with a price that can be set by
+      // hand, missing either taxes the line at one price and bills it at
+      // another.
+      const unitPriceCents = addition.unitPriceCents ?? variant.priceCents
+      const gross = unitPriceCents * addition.quantity
       const discountCents = quote.lineDiscounts[additionKey(index)] ?? 0
       const taxableBase = clampNonNegative(gross - discountCents)
 
@@ -552,7 +622,7 @@ export async function editOrder(
           sku: variant.sku,
           vendor: variant.product.vendor,
           quantity: addition.quantity,
-          unitPriceCents: variant.priceCents,
+          unitPriceCents,
           totalDiscountCents: discountCents,
           taxTotalCents: taxCents,
           taxLines: taxLines as unknown as Prisma.InputJsonValue,
@@ -568,10 +638,16 @@ export async function editOrder(
           ? ` (${variant.title})`
           : ''
       }`
+      // The price is named only when it is not the catalogue's. On the ordinary
+      // add it is noise; on a negotiated one it is the whole point of the line.
+      const at =
+        unitPriceCents === variant.priceCents
+          ? ''
+          : ` at ${money(unitPriceCents)} each`
       summary.push(
         addition.isGift
           ? `added ${addition.quantity} × ${name} as a gift`
-          : `added ${addition.quantity} × ${name}`
+          : `added ${addition.quantity} × ${name}${at}`
       )
     }
 
@@ -584,20 +660,52 @@ export async function editOrder(
       })
     ).reduce((sum, line) => sum + line.taxTotalCents, 0)
 
-    const totalCents = clampNonNegative(quote.totalCents + taxTotalCents)
+    // Tax is added on top only when prices exclude it. With tax-inclusive
+    // pricing the line prices are already gross, so the quote's subtotal
+    // carries the tax and adding it again charges it twice — the same rule
+    // priceCart applies at checkout, which is where the two have to agree.
+    const totalCents = clampNonNegative(
+      quote.totalCents + (pricesIncludeTax ? 0 : taxTotalCents)
+    )
 
     if (quote.shippingTotalCents !== order.shippingTotalCents) {
       summary.push(
         shippingWaived && quote.shippingTotalCents === 0
           ? 'delivery waived'
-          : `delivery ${order.shippingTotalCents} → ${quote.shippingTotalCents}`
+          : `delivery ${money(order.shippingTotalCents)} → ${money(
+              quote.shippingTotalCents
+            )}`
       )
     }
     if (quote.offerNote) summary.push(quote.offerNote)
     if (quote.couponNote) summary.push(quote.couponNote)
+
+    // What the code did, in figures. The timeline used to say nothing at all
+    // about a code unless something went wrong with it: applying one, taking
+    // one off, and a code whose worth moved because the basket moved all
+    // landed as a silent change to the total. "Why is this order ৳500 cheaper
+    // than the one I quoted" is asked of this list.
+    if (quote.couponCode !== order.discountCode) {
+      summary.push(
+        quote.couponCode
+          ? order.discountCode
+            ? `code ${order.discountCode} → ${quote.couponCode}`
+            : `code ${quote.couponCode} applied`
+          : `code ${order.discountCode} removed`
+      )
+    }
+    if (quote.couponDiscountCents !== order.couponDiscountCents) {
+      summary.push(
+        `code discount ${money(order.couponDiscountCents)} → ${money(
+          quote.couponDiscountCents
+        )}`
+      )
+    }
     if (quote.manualDiscountCents !== order.manualDiscountCents) {
       summary.push(
-        `extra discount ${order.manualDiscountCents} → ${quote.manualDiscountCents}` +
+        `extra discount ${money(order.manualDiscountCents)} → ${money(
+          quote.manualDiscountCents
+        )}` +
           (input.manualDiscountReason ? ` (${input.manualDiscountReason})` : '')
       )
     }
@@ -712,7 +820,11 @@ export async function previewOrderEdit(
         productId: line.productId,
         variantId: line.variantId,
         quantity,
-        unitPriceCents: line.unitPriceCents,
+        // Resolved exactly as the save resolves it, or the price on screen
+        // stops being the price that lands — which is the whole point of
+        // sharing one quote between preview and save.
+        unitPriceCents:
+          requestedUnitPrice(requested.unitPriceCents) ?? line.unitPriceCents,
         isGift: requested.isGift ?? line.isGift,
       })
       continue
@@ -728,7 +840,8 @@ export async function previewOrderEdit(
       productId: variant.productId,
       variantId: variant.id,
       quantity,
-      unitPriceCents: variant.priceCents,
+      unitPriceCents:
+        requestedUnitPrice(requested.unitPriceCents) ?? variant.priceCents,
       isGift: requested.isGift ?? false,
     })
   }
@@ -754,6 +867,24 @@ export async function previewOrderEdit(
 /** Stable key for a line that does not exist yet, shared with the quote. */
 function additionKey(index: number): string {
   return `new:${index}`
+}
+
+/**
+ * A hand-set unit price, or null for "leave it alone".
+ *
+ * Negative is refused here rather than clamped. A minus sign survives
+ * `parseMoneyInput`, and a negative line does not merely price itself wrongly —
+ * it drags the subtotal below the sum of the other lines, and every discount
+ * that is capped against the subtotal then caps against a number that is not
+ * the basket. Refusing is also the honest answer to what was almost certainly
+ * a typo.
+ */
+function requestedUnitPrice(value: number | null | undefined): number | null {
+  if (value === undefined || value === null) return null
+  if (!Number.isFinite(value)) throw new Error('That is not a price')
+  const cents = Math.trunc(value)
+  if (cents < 0) throw new Error('A price cannot be negative')
+  return cents
 }
 
 /**
@@ -793,6 +924,9 @@ async function writeLineMoney(
     where: { id: line.id },
     data: {
       quantity: line.quantity,
+      // The negotiated price lands here, and only here — the catalogue is
+      // untouched, so the next customer is still quoted the list price.
+      unitPriceCents: line.unitPriceCents,
       isGift: line.isGift,
       totalDiscountCents: discountCents,
       taxTotalCents: taxCents,

@@ -61,9 +61,16 @@ import { cn } from '@/lib/utils'
  * basket to search, and close the search to check the basket, cannot answer
  * "so what's my total now" without hanging up.
  *
- * Nothing commits until Save. Every quantity change, removal and addition is
- * local state, and a removed line can be put back — because the person making
- * these edits is repeating numbers back to someone and will get one wrong.
+ * Nothing commits until Save. Every quantity change, price, removal and
+ * addition is local state, and a removed line can be put back — because the
+ * person making these edits is repeating numbers back to someone and will get
+ * one wrong.
+ *
+ * A price typed on a row is that row's price on this order and nowhere else.
+ * "I'll do it for eight hundred" is the other half of the call that changes a
+ * quantity, and the alternative — an order-level discount that happens to equal
+ * the difference — puts a discount on the customer's invoice that they never
+ * asked for and that the margin report then has to guess at.
  *
  * The totals are quoted by the server rather than added up here, and that is
  * the important part. Whether the bundle still prices this basket, and whether
@@ -98,7 +105,10 @@ interface DraftLine {
   variantTitle: string | null
   sku: string | null
   imageUrl: string | null
+  /** The catalogue price, kept so "was …" can say what it started at. */
   unitPriceCents: number
+  /** What the merchant has typed, in major units. Empty means the catalogue. */
+  unitPrice: string
   quantity: number
   isGift: boolean
   /** Null when the variant does not track stock. */
@@ -145,6 +155,14 @@ export function OrderEditor({
   notEditableReason: string | null
 }) {
   const [open, setOpen] = useState(false)
+  // Where the dialog puts focus when it opens.
+  //
+  // Base UI's default is the first tabbable element, which is now the first
+  // row's price field — so opening the editor and starting to type would
+  // overwrite a price the merchant had not even looked at yet. Focus goes to
+  // the panel instead: the dialog is still announced and Tab still walks it,
+  // and nothing is armed to be overwritten by the first keystroke.
+  const panelRef = useRef<HTMLFormElement>(null)
 
   if (!editable) {
     return (
@@ -166,13 +184,17 @@ export function OrderEditor({
         <Pencil />
         Edit order
       </DialogTrigger>
-      <DialogContent className="max-h-[92vh] w-full max-w-[calc(100%-1rem)] gap-0 overflow-hidden p-0 sm:max-w-5xl">
+      <DialogContent
+        initialFocus={panelRef}
+        className="max-h-[92vh] w-full max-w-[calc(100%-1rem)] gap-0 overflow-hidden p-0 sm:max-w-5xl"
+      >
         {/* Remounted per open so an abandoned edit does not come back next
             time — the merchant reopening this expects the order as it is, not
             the half-finished basket they walked away from. */}
         {open && (
           <EditorBody
             key={String(open)}
+            panelRef={panelRef}
             orderId={orderId}
             orderNumber={orderNumber}
             currencyCode={currencyCode}
@@ -192,6 +214,7 @@ export function OrderEditor({
 }
 
 function EditorBody({
+  panelRef,
   orderId,
   orderNumber,
   currencyCode,
@@ -204,6 +227,8 @@ function EditorBody({
   totalCents,
   onDone,
 }: {
+  /** Where the dialog puts focus on open — see OrderEditor. */
+  panelRef: React.RefObject<HTMLFormElement | null>
   orderId: string
   orderNumber: string
   currencyCode: string
@@ -223,6 +248,17 @@ function EditorBody({
   )
   const [gifts, setGifts] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(lines.map((line) => [line.id, line.isGift]))
+  )
+  // What each line costs on this order, as typed. Seeded from what the line
+  // already carries so the field reads as the current price rather than as an
+  // empty box the merchant has to fill in to change one number.
+  const [prices, setPrices] = useState<Record<string, string>>(() =>
+    Object.fromEntries(
+      lines.map((line) => [
+        line.id,
+        centsToMajorString(line.unitPriceCents, currencyCode),
+      ])
+    )
   )
   const [drafts, setDrafts] = useState<DraftLine[]>([])
   // Through the currency's real exponent, not a hardcoded 100 — a yen delivery
@@ -256,6 +292,30 @@ function EditorBody({
 
   const setGift = (id: string, next: boolean) =>
     setGifts((current) => ({ ...current, [id]: next }))
+
+  const setPrice = (id: string, next: string) =>
+    setPrices((current) => ({ ...current, [id]: next }))
+
+  /**
+   * A typed price in minor units, or the price it started at.
+   *
+   * A half-typed or cleared field falls back rather than reading as zero: the
+   * merchant deleting "500" to type "450" passes through an empty box, and a
+   * running total that dives to the delivery charge and back on every edit is
+   * unreadable while someone is talking.
+   */
+  const priceOf = (typed: string | undefined, fallbackCents: number) => {
+    if (typed === undefined || typed.trim() === '') return fallbackCents
+    // Cleaned the same way the server cleans it, so "1,200" reads as twelve
+    // hundred on both sides and the running total cannot disagree with what
+    // the save is about to do.
+    const cleaned = typed.replace(/[\s,]/g, '')
+    const parsed = Number(cleaned)
+    if (cleaned === '' || !Number.isFinite(parsed) || parsed < 0) {
+      return fallbackCents
+    }
+    return Math.round(parsed * minorUnitsPerMajor(currencyCode))
+  }
 
   const addVariant = (
     product: PickerProduct,
@@ -308,6 +368,7 @@ function EditorBody({
           sku: variant.sku,
           imageUrl: product.imageUrl,
           unitPriceCents: variant.priceCents,
+          unitPrice: centsToMajorString(variant.priceCents, currencyCode),
           quantity: 1,
           isGift: asGift,
           available: variant.tracksInventory ? variant.available : null,
@@ -343,11 +404,13 @@ function EditorBody({
             orderLineId: line.id,
             quantity: quantities[line.id] ?? line.quantity,
             isGift: gifts[line.id] ?? line.isGift,
+            unitPrice: prices[line.id] ?? '',
           })),
         ...drafts.map((draft) => ({
           variantId: draft.variantId,
           quantity: draft.quantity,
           isGift: draft.isGift,
+          unitPrice: draft.unitPrice,
         })),
       ],
       shipping,
@@ -361,6 +424,7 @@ function EditorBody({
       lines,
       quantities,
       gifts,
+      prices,
       drafts,
       shipping,
       waived,
@@ -380,31 +444,51 @@ function EditorBody({
   const subtotalCents =
     quote?.subtotalCents ??
     lines.reduce(
-      (sum, line) => sum + line.unitPriceCents * (quantities[line.id] ?? 0),
+      (sum, line) =>
+        sum +
+        priceOf(prices[line.id], line.unitPriceCents) *
+          (quantities[line.id] ?? 0),
       0
     ) +
       drafts.reduce(
-        (sum, draft) => sum + draft.unitPriceCents * draft.quantity,
+        (sum, draft) =>
+          sum + priceOf(draft.unitPrice, draft.unitPriceCents) * draft.quantity,
         0
       )
 
   const newTotal = quote ? quote.totalCents + taxTotalCents : totalCents
   const delta = newTotal - totalCents
 
+  const extraParsed = Math.max(
+    0,
+    Math.round(
+      (Number.parseFloat(extra) || 0) * minorUnitsPerMajor(currencyCode)
+    )
+  )
+
   const dirty =
     lines.some(
       (line) =>
         (quantities[line.id] ?? 0) !== line.quantity ||
-        (gifts[line.id] ?? line.isGift) !== line.isGift
+        (gifts[line.id] ?? line.isGift) !== line.isGift ||
+        priceOf(prices[line.id], line.unitPriceCents) !== line.unitPriceCents
     ) ||
     drafts.length > 0 ||
     shippingParsed !== shippingCents ||
     waived !== shippingWaived ||
     (code.trim() || null) !== discountCode ||
-    (quote?.manualDiscountCents ?? manualDiscountCents) !== manualDiscountCents
+    // Read from the field, not from the quote. Taking it from the quote meant
+    // typing an extra discount left Save disabled until a preview happened to
+    // land — and disabled again the moment one failed.
+    extraParsed !== manualDiscountCents
 
   return (
-    <form action={action} className="flex max-h-[92vh] min-h-0 flex-col">
+    <form
+      ref={panelRef}
+      tabIndex={-1}
+      action={action}
+      className="flex max-h-[92vh] min-h-0 flex-col outline-none"
+    >
       <input type="hidden" name="edit" value={JSON.stringify(payload)} />
 
       <DialogHeader className="border-b px-5 py-4">
@@ -412,8 +496,9 @@ function EditorBody({
           Edit {orderNumber}
         </DialogTitle>
         <p className="text-muted-foreground text-sm">
-          Change quantities, remove items or add products. Stock moves when you
-          save.
+          Change quantities and prices, remove items or add products. A price
+          typed here applies to this order only — the catalogue is untouched.
+          Stock moves when you save.
         </p>
       </DialogHeader>
 
@@ -473,15 +558,38 @@ function EditorBody({
                         </Badge>
                       )}
                     </div>
-                    <p className="text-muted-foreground truncate text-xs">
+                    <div className="text-muted-foreground flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs">
                       {line.variantTitle &&
                         line.variantTitle !== 'Default Title' && (
-                          <>{line.variantTitle} · </>
+                          <span className="truncate">
+                            {line.variantTitle} ·
+                          </span>
                         )}
-                      {formatMoneyAmount(line.unitPriceCents, currencyCode)}{' '}
-                      each
-                      {floor > 0 && <> · {floor} settled</>}
-                    </p>
+                      {removed ? (
+                        <span>
+                          {formatMoneyAmount(line.unitPriceCents, currencyCode)}{' '}
+                          each
+                        </span>
+                      ) : (
+                        <PriceField
+                          value={prices[line.id] ?? ''}
+                          originalCents={line.unitPriceCents}
+                          typedCents={priceOf(
+                            prices[line.id],
+                            line.unitPriceCents
+                          )}
+                          currencyCode={currencyCode}
+                          // Money has already moved against this line's price,
+                          // so the server refuses to change it — see the gift
+                          // toggle beside it, which is refused for the same
+                          // reason.
+                          disabled={floor > 0}
+                          label={line.title}
+                          onChange={(next) => setPrice(line.id, next)}
+                        />
+                      )}
+                      {floor > 0 && <span>· {floor} settled</span>}
+                    </div>
                   </div>
 
                   {removed ? (
@@ -504,7 +612,10 @@ function EditorBody({
                       />
                       <LinePrice
                         gift={gift}
-                        amountCents={line.unitPriceCents * quantity}
+                        amountCents={
+                          priceOf(prices[line.id], line.unitPriceCents) *
+                          quantity
+                        }
                         currencyCode={currencyCode}
                       />
                       <GiftToggle
@@ -565,13 +676,34 @@ function EditorBody({
                       )}
                     </Badge>
                   </div>
-                  <p className="text-muted-foreground truncate text-xs">
-                    {draft.variantTitle && <>{draft.variantTitle} · </>}
-                    {formatMoneyAmount(draft.unitPriceCents, currencyCode)} each
-                    {draft.available !== null && (
-                      <> · {draft.available} in stock</>
+                  <div className="text-muted-foreground flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs">
+                    {draft.variantTitle && (
+                      <span className="truncate">{draft.variantTitle} ·</span>
                     )}
-                  </p>
+                    <PriceField
+                      value={draft.unitPrice}
+                      originalCents={draft.unitPriceCents}
+                      typedCents={priceOf(
+                        draft.unitPrice,
+                        draft.unitPriceCents
+                      )}
+                      currencyCode={currencyCode}
+                      disabled={false}
+                      label={draft.productTitle}
+                      onChange={(next) =>
+                        setDrafts((current) =>
+                          current.map((entry) =>
+                            entry.key === draft.key
+                              ? { ...entry, unitPrice: next }
+                              : entry
+                          )
+                        )
+                      }
+                    />
+                    {draft.available !== null && (
+                      <span>· {draft.available} in stock</span>
+                    )}
+                  </div>
                 </div>
 
                 <Stepper
@@ -590,7 +722,10 @@ function EditorBody({
                 />
                 <LinePrice
                   gift={draft.isGift}
-                  amountCents={draft.unitPriceCents * draft.quantity}
+                  amountCents={
+                    priceOf(draft.unitPrice, draft.unitPriceCents) *
+                    draft.quantity
+                  }
                   currencyCode={currencyCode}
                 />
                 <GiftToggle
@@ -855,6 +990,67 @@ function LinePrice({
     <p className="w-20 shrink-0 text-right text-sm font-medium tabular-nums">
       {formatMoneyAmount(amountCents, currencyCode)}
     </p>
+  )
+}
+
+/**
+ * A line's unit price, typed for this order only.
+ *
+ * Inline where the price already was, rather than behind a "change price"
+ * button: the merchant is on a call agreeing a number, and a price that has to
+ * be revealed before it can be changed reads as a price that cannot be. It sits
+ * in the subtitle line so the row's shape — quantity, line total, gift, remove
+ * — does not move.
+ *
+ * The catalogue is never touched. A changed field says what the price started
+ * at, because "what was it before?" is the next question on that call, and once
+ * the field is overwritten the row is the only place the old number was.
+ */
+function PriceField({
+  value,
+  originalCents,
+  typedCents,
+  currencyCode,
+  disabled,
+  label,
+  onChange,
+}: {
+  value: string
+  originalCents: number
+  /** What `value` resolves to, so "changed" agrees with the running total. */
+  typedCents: number
+  currencyCode: string
+  disabled: boolean
+  label: string
+  onChange: (next: string) => void
+}) {
+  const changed = typedCents !== originalCents
+
+  return (
+    <span className="flex items-center gap-1.5">
+      <Input
+        value={value}
+        inputMode="decimal"
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+        aria-label={`Price of ${label}, per item`}
+        title={
+          disabled
+            ? 'Some of this line has already been returned or refunded'
+            : `Price of ${label} on this order only`
+        }
+        className={cn(
+          'h-7 w-20 px-2 text-xs tabular-nums',
+          changed && 'border-lime text-foreground font-medium'
+        )}
+      />
+      <span>each</span>
+      {changed && (
+        <span className="whitespace-nowrap">
+          · was {formatMoneyAmount(originalCents, currencyCode)}
+        </span>
+      )}
+    </span>
   )
 }
 

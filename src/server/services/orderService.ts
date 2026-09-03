@@ -4,7 +4,7 @@ import { requireOrgAccess, requireHumanOrgAccess } from '@/server/auth/rbac'
 import { releaseInventoryForOrder, restockInventory } from './inventoryService'
 import { legacyFulfillmentStatus } from '@/server/courier/statusMap'
 import { emitWebhook } from './webhookService'
-import { clampNonNegative } from '@/lib/money'
+import { clampNonNegative, formatMoney } from '@/lib/money'
 import { isOrderCancelled, orderStatus } from '@/lib/order-status'
 import type { WebhookTopic } from '@/generated/prisma/client'
 import type { OrderWorkflowState } from '@/generated/prisma/enums'
@@ -499,7 +499,9 @@ export async function refundOrder(
       data: {
         orderId,
         type: 'refund_created',
-        message: `Refunded ${amountCents} ${order.currencyCode}`,
+        // Formatted, not raw minor units: this line used to read
+        // "Refunded 50000 BDT" for a ৳500 refund.
+        message: `Refunded ${formatMoney(amountCents, order.currencyCode)}`,
         actorUserId: session.user.id,
       },
     })

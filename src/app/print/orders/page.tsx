@@ -281,7 +281,17 @@ function Invoice({ label }: { label: OrderLabel }) {
         />
         {label.discountCents > 0 && (
           <Row
-            label={`Discount${label.discountCode ? ` (${label.discountCode})` : ''}`}
+            // The code is named only when the code is the whole of it. The
+            // discount total also carries a bundle's saving, anything given
+            // away, and money taken off by hand — printing all of that beside
+            // a customer's code told them the code was worth several times
+            // what it was, on the document they keep.
+            label={
+              label.discountCode &&
+              label.couponDiscountCents === label.discountCents
+                ? `Discount (${label.discountCode})`
+                : 'Discount'
+            }
             value={`−${formatMoney(label.discountCents, label.currencyCode)}`}
           />
         )}

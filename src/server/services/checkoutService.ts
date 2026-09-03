@@ -279,10 +279,20 @@ export async function placeOrder(
           campaign?.discountCode ??
           campaign?.discountLabel ??
           undefined,
-        couponDiscountCents: Math.max(
-          0,
-          Math.round(campaign?.couponDiscountCents ?? 0)
-        ),
+        // What the code alone was worth, kept apart from the sum of everything
+        // in `discountTotalCents` — see the note on the column in schema.prisma.
+        //
+        // A campaign page evaluates its own coupon and hands the figure over.
+        // An ordinary cart has no other discount, so the pricing engine's total
+        // *is* the code's worth. This used to write zero on that second path,
+        // which meant an edit made after the campaign behind the code had
+        // expired found nothing to carry forward and silently withdrew a
+        // discount the customer had already been given.
+        couponDiscountCents: campaign
+          ? Math.max(0, Math.round(campaign.couponDiscountCents ?? 0))
+          : cart.discountCode
+            ? Math.max(0, pricing.discountTotalCents)
+            : 0,
         note: cart.note,
         lines: {
           create: cart.lines.flatMap((line) =>

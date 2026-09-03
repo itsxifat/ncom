@@ -14,6 +14,7 @@ import { WorkflowStateBadge } from '@/components/store/fraud-badges'
 import { formatMoney } from '@/lib/money'
 import { orderStatus } from '@/lib/order-status'
 import { PageHeader } from '@/components/app/page-header'
+import { LocalTime } from '@/components/app/local-time'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -104,6 +105,45 @@ export default async function OrderDetailPage({
   const refundableCents = order.paidTotalCents - order.refundedTotalCents
   const outstandingCents = order.totalCents - order.paidTotalCents
 
+  // ── What the discount is actually made of ──────────────────────────────
+  //
+  // `discountTotalCents` is the sum of four separate things — the code, the
+  // campaign's own saving, gifts given away, and money granted by hand — and
+  // none of them can be recovered from it afterwards, which is why each is
+  // recorded on its own. This page used to show the sum as "Discount" and then
+  // show one of its parts again as "Extra discount", so the column stopped
+  // adding up: a merchant reading it back subtracted the goodwill twice and
+  // landed short of the total by exactly that amount. It also labelled the
+  // whole sum with the discount code, crediting a typed code for the bundle
+  // saving and the gift.
+  //
+  // Each part is now its own row, and the rows sum to the discount that was
+  // taken off the total.
+  const giftDiscountCents = order.lines
+    .filter((line) => line.isGift)
+    .reduce((sum, line) => sum + line.totalDiscountCents, 0)
+
+  // Whatever the recorded parts do not account for is the campaign's own
+  // saving, which is not stored separately. It can come out negative on an
+  // order written before these columns existed, or one where the total was
+  // clamped to the subtotal — there is nothing honest to break down in that
+  // case, so the single figure is shown instead of a set of rows that disagree
+  // with it.
+  const otherDiscountCents =
+    order.discountTotalCents -
+    (order.couponDiscountCents + order.manualDiscountCents + giftDiscountCents)
+  const discountBreaksDown =
+    order.discountTotalCents > 0 && otherDiscountCents >= 0
+
+  // An offer order names its campaign. An order whose code's own worth was
+  // never recorded — every order placed before that column was filled in —
+  // has its whole remainder credited to the code, which is where it came from.
+  const otherDiscountLabel =
+    order.offerLabel ??
+    (order.discountCode && order.couponDiscountCents === 0
+      ? `Discount (${order.discountCode})`
+      : 'Discount')
+
   // The order's one status, and the single question every action below asks of
   // it. The page used to read the two columns separately — a workflow badge
   // beside a "Cancelled" badge, and every guard keyed on `cancelledAt` alone —
@@ -134,7 +174,7 @@ export default async function OrderDetailPage({
       <PageHeader
         backHref={`/orders`}
         backLabel="Orders"
-        eyebrow={order.createdAt.toLocaleString()}
+        eyebrow={<LocalTime at={order.createdAt.toISOString()} />}
         title={order.orderNumber}
         description={
           <span className="flex flex-wrap items-center gap-2">
@@ -299,21 +339,47 @@ export default async function OrderDetailPage({
                   label="Subtotal"
                   value={formatMoney(order.subtotalCents, currency)}
                 />
-                {order.discountTotalCents > 0 && (
+                {!discountBreaksDown && order.discountTotalCents > 0 && (
                   <Row
                     label={`Discount${order.discountCode ? ` (${order.discountCode})` : ''}`}
                     value={`−${formatMoney(order.discountTotalCents, currency)}`}
                   />
                 )}
-                {order.manualDiscountCents > 0 && (
-                  <Row
-                    label={`Extra discount${
-                      order.manualDiscountReason
-                        ? ` (${order.manualDiscountReason})`
-                        : ''
-                    }`}
-                    value={`−${formatMoney(order.manualDiscountCents, currency)}`}
-                  />
+                {discountBreaksDown && (
+                  <>
+                    {order.couponDiscountCents > 0 && (
+                      <Row
+                        label={`Discount${order.discountCode ? ` (${order.discountCode})` : ''}`}
+                        value={`−${formatMoney(order.couponDiscountCents, currency)}`}
+                      />
+                    )}
+                    {otherDiscountCents > 0 && (
+                      <Row
+                        label={otherDiscountLabel}
+                        value={`−${formatMoney(otherDiscountCents, currency)}`}
+                      />
+                    )}
+                    {giftDiscountCents > 0 && (
+                      <Row
+                        label={
+                          order.lines.filter((line) => line.isGift).length === 1
+                            ? 'Gift'
+                            : 'Gifts'
+                        }
+                        value={`−${formatMoney(giftDiscountCents, currency)}`}
+                      />
+                    )}
+                    {order.manualDiscountCents > 0 && (
+                      <Row
+                        label={`Extra discount${
+                          order.manualDiscountReason
+                            ? ` (${order.manualDiscountReason})`
+                            : ''
+                        }`}
+                        value={`−${formatMoney(order.manualDiscountCents, currency)}`}
+                      />
+                    )}
+                  </>
                 )}
                 <Row
                   label={order.shippingMethodTitle ?? 'Shipping'}
@@ -435,9 +501,10 @@ export default async function OrderDetailPage({
                     <span className="bg-lime mt-1.5 size-2 shrink-0 rounded-full" />
                     <div>
                       <p>{event.message}</p>
-                      <p className="text-muted-foreground text-xs">
-                        {event.createdAt.toLocaleString()}
-                      </p>
+                      <LocalTime
+                        at={event.createdAt.toISOString()}
+                        className="text-muted-foreground block text-xs"
+                      />
                     </div>
                   </li>
                 ))}

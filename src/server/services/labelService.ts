@@ -50,7 +50,13 @@ export interface OrderLabel {
    */
   codCents: number
   subtotalCents: number
+  /** Everything taken off: the code, a bundle's saving, gifts, and by hand. */
   discountCents: number
+  /**
+   * What the code alone was worth, so the invoice only credits the code when
+   * the code is the whole of the discount.
+   */
+  couponDiscountCents: number
   shippingCents: number
   taxCents: number
   totalCents: number
@@ -100,6 +106,7 @@ export async function getOrdersForLabels(
       shippingAddress: true,
       subtotalCents: true,
       discountTotalCents: true,
+      couponDiscountCents: true,
       shippingTotalCents: true,
       taxTotalCents: true,
       totalCents: true,
@@ -168,6 +175,7 @@ export async function getOrdersForLabels(
       codCents: Math.max(0, order.totalCents - order.paidTotalCents),
       subtotalCents: order.subtotalCents,
       discountCents: order.discountTotalCents,
+      couponDiscountCents: order.couponDiscountCents,
       shippingCents: order.shippingTotalCents,
       taxCents: order.taxTotalCents,
       totalCents: order.totalCents,

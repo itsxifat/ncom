@@ -3,8 +3,14 @@ import { ArrowLeft } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface PageHeaderProps {
-  /** One-word category. Use it only where the page really belongs to a set. */
-  eyebrow?: string
+  /**
+   * One-word category. Use it only where the page really belongs to a set.
+   *
+   * A node rather than a string so a page can put a live element here — an
+   * order's placed-at timestamp has to be formatted in the reader's timezone,
+   * which only the browser knows.
+   */
+  eyebrow?: React.ReactNode
   title: string
   description?: React.ReactNode
   actions?: React.ReactNode

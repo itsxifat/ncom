@@ -36,6 +36,12 @@ import type { OfferVariantChoice, PublicOffer } from '@/lib/offers/types'
  * than dropped. Withdrawing a discount because the campaign was deleted last
  * month — during a phone call about a completely different change — is not a
  * conversation any merchant can win.
+ *
+ * Line prices are taken as given. A merchant who has agreed a price on the
+ * phone has agreed it, and every figure below — the subtotal, what a gift was
+ * worth, the basket a minimum-spend code is judged against — is derived from
+ * the prices on the lines rather than from the catalogue. The one rule that
+ * cannot survive that is the offer's; see priceAgainstOffer.
  */
 
 export interface OrderEditQuoteLine {
@@ -229,6 +235,32 @@ function priceAgainstOffer(
     return {
       savingCents: 0,
       note: `${offer.label} no longer covers everything on this order, so it is priced at the normal prices.`,
+    }
+  }
+
+  // A price set by hand is not a price this offer knows about.
+  //
+  // The saving below is derived from the catalogue — quoteOffer sums each
+  // chosen variant's list price and takes the offer's price off that — while
+  // the subtotal it gets subtracted from is derived from the order's own line
+  // prices. The two only reconcile while they agree on what a unit costs. Once
+  // a merchant has negotiated a line down, subtracting the catalogue saving
+  // from the negotiated subtotal takes the same money off twice, and the clamp
+  // on the total hides the overflow rather than failing loudly.
+  //
+  // So the offer stops pricing the basket and says so. The merchant is left
+  // with the arithmetic they actually described: the prices they typed. (The
+  // order-level "extra discount" is the lever for taking more off an offer
+  // order without disturbing its saving.)
+  const repriced = lines.find((line) => {
+    if (!line.variantId) return false
+    const variant = variants.get(line.variantId)
+    return variant ? line.unitPriceCents !== variant.priceCents : false
+  })
+  if (repriced) {
+    return {
+      savingCents: 0,
+      note: `${offer.label} prices these items itself, and one of them is no longer at its offer price — this order is priced at the prices on its lines.`,
     }
   }
 
