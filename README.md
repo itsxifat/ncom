@@ -197,65 +197,82 @@ ever sees a mask. The split exists so verification codes and marketing mail neve
 share a sending reputation. Every attempt is recorded in `EmailLog` — subject and
 recipient, never the body and never the code.
 
-## Products and stock come from the merchant's website
+## Two catalogues: your website, and NCOM
 
-**NCOM stores no catalogue.** There is no product table in use, no stock table,
-and no copy of a merchant's photographs. Products, variants, prices, images and
-stock levels are read from the merchant's own website on every request that
-needs them, and thrown away when the response is sent.
+A workspace sells from two places at once, and most end up using both.
 
-A workspace connects one website under _Settings → Product source_. That site
-implements a small read contract — `/ping`, `/products`, `/products/{id}`,
-`/stock`, and optionally `/categories`, `/reserve` and `/release` — and NCOM
-calls it with an HMAC-signed request. The full contract, the field rules and a
-go-live checklist are in [`docs/product-source.md`](docs/product-source.md);
-working implementations for WooCommerce, plain PHP and Express are in
-[`connectors/`](connectors).
+**Your own website**, connected under _Settings → Product source_. NCOM keeps no
+copy of it: products, variants, prices, images and stock are read from it live,
+on every request that needs them, and thrown away when the response is sent.
+That site implements a small read contract — `/ping`, `/products`,
+`/products/{id}`, `/stock`, and optionally `/categories`, `/reserve` and
+`/release` — which NCOM calls with an HMAC-signed request. The full contract,
+the field rules and a go-live checklist are in
+[`docs/product-source.md`](docs/product-source.md); working implementations for
+WooCommerce, plain PHP and Express are in [`connectors/`](connectors).
 
-**Why.** The previous design had merchants push their catalogue in through
-`POST /api/v1/products` and keep it in step with a nightly sync. Every problem
-that produced came from one root: two copies of one fact. A price raised at 3pm
-was still the old price on the landing page; stock drifted by exactly what had
-sold through the channel the other copy could not see; and every merchant had to
-write and operate an importer before they could sell anything. Reading live
-deletes the copy — there is one price, it lives where the merchant edits it, and
-a page shows it because it asked a moment ago.
+**Products stored in NCOM**, created under _Products → Add product_ or through
+`/api/v1/products`. Ordinary rows in this database, with their own images in the
+media library and their own stock. This is for what the merchant's shop does not
+carry: a bundle-only item, a campaign gift, a sample, something being tested
+before it goes on the real site.
 
-**What it costs.** The merchant's server is on the critical path of every
-storefront render. If it is down, product blocks do not render and checkout
-refuses; if it is slow, the page is slow. There is no cache to hide behind:
-every read is `cache: 'no-store'` and reads are only deduplicated _within_ a
-single request. A five-second cache would be a stored catalogue with a short
-attention span, which is the thing this design exists to remove.
+Neither is a mode anyone switches between. A workspace with no connection is a
+perfectly good local-only shop; one with no local products is a perfectly good
+remote-only shop; and a single offer may mix the two — a bundle of the
+merchant's own shirts plus a tote that exists only for this campaign.
 
-**Stock is no longer atomic here, and that is a real trade.** The local
-`InventoryLevel` conditional decrement is gone — NCOM does not own the number,
-so it cannot move it. A connector implementing `/reserve` gets the same
-guarantee it always had, decided by the merchant's own database. One that does
-not gets a live check moments before the order is written and nothing more, so
-two shoppers can take the same last unit. The Product source screen says which
-mode a workspace is in rather than letting anyone assume the stronger one.
+### What differs between them
 
-**Where the code is.** `src/server/catalog/` — `source.ts` is the API every
-service calls, `contract.ts` is the deliberately forgiving parser (snake_case or
-camelCase, decimals or cents, images as objects or bare URLs), `client.ts` is
-the signed fetch, and `connection.ts` holds the one thing that _is_ stored: the
-URL, the key id and the encrypted secret.
+|          | On your website                                | Stored in NCOM                          |
+| -------- | ---------------------------------------------- | --------------------------------------- |
+| Edited   | in your own admin; NCOM links out to it        | here, in the product editor             |
+| Read     | live, per request, never cached                | from this database                      |
+| Stock    | yours; held via `/reserve` if you implement it | ours; atomic conditional decrement      |
+| Images   | your URLs, served from your site               | media library, on the platform CDN      |
+| API      | the connector contract you implement           | `/api/v1/products`, `/api/v1/inventory` |
+| Webhooks | none — your site already knows                 | `product.*`, `inventory.updated`        |
 
-**What NCOM still stores**, to be exact about the line: pages, offers (which
-reference the merchant's own product ids), carts, orders, customers, discounts,
-shipping zones and courier shipments. Order lines snapshot the title, price,
-SKU, weight and image URL at the moment of sale — that is a record of what was
-sold, not a cached catalogue, and it is why an order still reads correctly after
-the merchant deletes the product.
+**Why the live half exists.** The previous design had merchants push their whole
+catalogue in through `POST /api/v1/products` and keep it in step with a nightly
+sync. Every problem that produced came from one root: two copies of one fact. A
+price raised at 3pm was still the old price on the landing page; stock drifted by
+exactly what had sold through the channel the other copy could not see; and every
+merchant had to write and operate an importer before they could sell anything.
+Reading live deletes the copy for the goods that already exist somewhere else.
 
-**Retired with the old model**: `/api/v1/products`, `/api/v1/products/import`,
-`/api/v1/categories` and `/api/v1/inventory` answer `410 Gone`; the dashboard's
-product, category and stock screens are read-only mirrors; Collections and
-Locations are gone, as are the `product.*`, `category.*` and `inventory.*`
-webhook topics. The `Product`, `ProductVariant`, `InventoryLevel` and related
-tables are still in `schema.prisma` but nothing reads or writes them — they are
-dropped in a follow-up migration once every workspace has a connection.
+**What it costs.** For remote products the merchant's server is on the critical
+path of every storefront render. If it is down, those product blocks do not
+render and checkout refuses them; if it is slow, the page is slow. There is no
+cache to hide behind: every read is `cache: 'no-store'` and reads are only
+deduplicated _within_ a single request. A five-second cache would be a stored
+catalogue with a short attention span, which is the thing that design removes.
+Local products are unaffected by any of this — they are a database query.
+
+**Stock is atomic for local products only.** NCOM owns those rows and takes them
+with `UPDATE … WHERE available >= n` inside the checkout transaction. For a
+remote product it owns nothing: a connector implementing `/reserve` gets the same
+guarantee, decided by the merchant's own database, and one that does not gets a
+live check moments before the order is written and nothing more, so two shoppers
+can take the same last unit. The Product source screen says which mode a
+workspace is in rather than letting anyone assume the stronger one.
+
+**Where the code is.** `src/server/catalog/` — `source.ts` merges the two and is
+the API every service calls, `local.ts` reads this database, `client.ts` is the
+signed fetch, `contract.ts` is the deliberately forgiving parser (snake_case or
+camelCase, decimals or cents, images as objects or bare URLs), and
+`connection.ts` holds the connector's URL, key id and encrypted secret. Local
+writes stay where they always were, in `productService`, `categoryService` and
+`inventoryService`.
+
+**Everything references ids, not rows.** Offers, cart lines and order lines hold
+a `(productId, variantId)` pair that may belong to either catalogue — so those
+columns are no longer foreign keys, and `resolveVariants` answers "what is this
+right now" by asking the local tables first and the website for the rest. Order
+lines additionally snapshot the title, price, SKU, weight and image URL at the
+moment of sale: that is a record of what was sold, not a cached catalogue, and it
+is why an order still reads correctly after the product is deleted from either
+place.
 
 ## Commerce & Liquid
 
@@ -426,10 +443,10 @@ table in the database within a month. Retries need the
 - Redis and PostgreSQL are both required at runtime (not optional
   dev-only dependencies) — rate limiting and the auth session/adapter both
   depend on them.
-- Egress matters now: the app server makes outbound HTTPS requests to every
-  connected merchant's website on the storefront path. Whatever fronts it must
-  allow that, and any egress proxy has to be fast — a 4-second default timeout
-  is a shopper waiting.
+- Egress matters for connected websites: the app server makes outbound HTTPS
+  requests to them on the storefront path. Whatever fronts it must allow that,
+  and any egress proxy has to be fast — a 4-second default timeout is a shopper
+  waiting. Workspaces selling only NCOM-stored products are unaffected.
 
 ## Scripts
 

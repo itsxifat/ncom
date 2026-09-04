@@ -13,7 +13,12 @@ import {
   orderLineImageUrl,
   ORDER_LINE_IMAGE_SELECT,
 } from './orderService'
-import { returnToStock } from './inventoryService'
+import {
+  consumeCommittedStock,
+  resolveStoreLocationId,
+  returnToStock,
+} from './inventoryService'
+import { splitBySource } from '@/server/catalog'
 import {
   courierClientFor,
   defaultCourierProvider,
@@ -1338,12 +1343,35 @@ async function consumeStockForDispatch(
   const shipped = order.lines.filter((line) => line.requiresShipping)
   if (shipped.length === 0) return
 
-  // Nothing moves here any more. The units left the merchant's own count when
-  // the order was placed and their site held them for it; a courier picking the
-  // parcel up does not change a number NCOM owns, because NCOM owns none. What
-  // is still recorded is the fact and the time of it — `stockConsumedAt` is
-  // what stops a cancellation putting back goods that are already on a van.
+  // Only NCOM's own products have a commitment to consume: their units moved
+  // from `available` to `committed` when the order was placed, and leave the
+  // building now. A line from the merchant's website has nothing to consume —
+  // their site was asked to take the units at order time, and a parcel being
+  // collected does not change a number NCOM owns.
+  //
+  // Either way `stockConsumedAt` is recorded, because it is what stops a later
+  // cancellation putting back goods that are already on a van.
+  const { local } = await splitBySource(
+    organizationId,
+    shipped
+      .filter((line) => line.variantId)
+      .map((line) => ({ variantId: line.variantId!, quantity: line.quantity }))
+  )
+
+  const locationId = await resolveStoreLocationId(
+    prisma,
+    organizationId,
+    order.storeId
+  )
+
   await prisma.$transaction(async (tx) => {
+    await consumeCommittedStock(
+      tx,
+      reference,
+      locationId,
+      local.map((line) => ({ ...line, inventoryTracked: true }))
+    )
+
     await tx.order.update({
       where: { id: orderId },
       data: { stockConsumedAt: new Date() },

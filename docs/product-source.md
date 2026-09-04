@@ -1,27 +1,38 @@
 # Product source: reading a merchant's catalogue live
 
-NCOM does not store products.
+A workspace sells from two catalogues, and this document is about one of them.
 
-There is no product table, no variant table, no stock table and no copy of a
-merchant's photographs. When a shopper opens a landing page, NCOM asks the
-merchant's own website what it sells, what it costs and how many are left, and
-renders the answer. When that shopper places an order, NCOM asks again, and
-records what it was told.
+**Your website.** Connected here, read live, never copied. There is no product
+table, no variant table and no copy of your photographs on this platform for
+these goods. When a shopper opens a landing page, NCOM asks your site what you
+sell, what it costs and how many are left, and renders the answer. When that
+shopper places an order, NCOM asks again, and records what it was told.
 
-This document is the contract that makes that possible: what NCOM calls, what it
-sends, what it expects back, and what a merchant has to put on their website for
-any of it to work.
+**Products stored in NCOM.** Added under **Products → Add product** or through
+`/api/v1/products`, kept in this platform's own database, edited here. That is
+for the things your shop does not carry — a bundle-only item, a campaign gift, a
+sample, something you are testing before it goes live on your real site.
+
+Use either. Use both; most workspaces do, and a single offer can mix them —
+three of your own shirts plus a tote that only exists for this campaign.
+
+This document is the contract for the first kind: what NCOM calls on your site,
+what it sends, what it expects back, and what you have to deploy for any of it to
+work. If you only want the second kind, you can stop reading — nothing here is
+required to sell products you keep in NCOM.
 
 ---
 
-## 1. Why it is built this way
+## 1. Why the live half exists
 
-The previous design was the ordinary one: merchants pushed their catalogue into
-NCOM through `POST /api/v1/products`, kept it in step with a nightly sync, and
-posted stock corrections to `POST /api/v1/inventory`. Both endpoints are now
-retired (`410 Gone`).
+The obvious design is the one this replaced: push your catalogue into NCOM
+through `POST /api/v1/products`, keep it in step with a nightly sync, and post
+stock corrections to `POST /api/v1/inventory`. Those endpoints still exist — they
+are how you manage products NCOM _stores_ — but they are no longer how you sell
+what is already on your own shop.
 
-Every problem that design had came from the same root: two copies of one fact.
+Every problem the sync-everything design had came from the same root: two copies
+of one fact.
 
 - A price raised at 3pm on the merchant's shop was still the old price on their
   landing page until a sync ran. The page was not wrong about _a_ price — it was
@@ -33,14 +44,19 @@ Every problem that design had came from the same root: two copies of one fact.
   retry-handling piece of software that has to run forever, and it was the first
   thing they had to build and the first thing that broke.
 
-Reading live removes the copy. There is exactly one price, it lives where the
-merchant edits it, and a landing page shows it because it asked a moment ago.
+Reading live removes the copy _for goods that already exist somewhere else_.
+There is exactly one price, it lives where you edit it, and a landing page shows
+it because it asked a moment ago.
 
-**What it costs.** The merchant's website is now on the critical path of every
-storefront render. If their server is down, product blocks do not render; if it
-is slow, the page is slow. There is no cache to hide behind — deliberately, see
-§7. A merchant connecting a site is choosing that trade, and the dashboard says
-so plainly rather than hiding it.
+A product you add in NCOM has no second copy either — there is only the one, and
+it is here. The rule is the same in both directions: one fact, one home.
+
+**What it costs.** For your products, your website is on the critical path of
+every storefront render. If your server is down, those product blocks do not
+render; if it is slow, the page is slow. There is no cache to hide behind —
+deliberately, see §7. Connecting a site is choosing that trade, and the dashboard
+says so plainly rather than hiding it. Products stored in NCOM are unaffected: no
+network call is involved in showing one.
 
 ---
 
@@ -364,16 +380,19 @@ platform already produces.
 
 ## 6. What NCOM does with a bad answer
 
-| Situation                               | What happens                                                                                                                      |
-| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| Connector unreachable / times out       | The landing page still renders; the order form says "unavailable for a moment". Checkout refuses. The reason is in the dashboard. |
-| `401` from your connector               | Same, and the dashboard says the key or the clock is wrong.                                                                       |
-| HTML instead of JSON                    | Treated as a misconfigured base URL and says so — this is the most common first-time failure.                                     |
-| A product in an offer is missing        | That offer is hidden from the page. The Offers screen names the product id.                                                       |
-| A product is `draft`                    | Same as missing: hidden from shoppers, visible in the dashboard.                                                                  |
-| Every variant is out of stock           | The offer still shows, marked sold out. Checkout refuses it.                                                                      |
-| Stock ran out between page and checkout | The order is refused with "sold out while you were checking out".                                                                 |
-| A response over 8MB                     | Refused. Page your products with `nextCursor`.                                                                                    |
+Only the products read from your site are affected. A page selling something NCOM
+stores keeps working through every row of this table.
+
+| Situation                               | What happens                                                                                                                                                                                                               |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Connector unreachable / times out       | The landing page still renders; offers holding one of your products are hidden, and an order form left with nothing to sell says "unavailable for a moment". Checkout refuses those lines. The reason is in the dashboard. |
+| `401` from your connector               | Same, and the dashboard says the key or the clock is wrong.                                                                                                                                                                |
+| HTML instead of JSON                    | Treated as a misconfigured base URL and says so — this is the most common first-time failure.                                                                                                                              |
+| A product in an offer is missing        | That offer is hidden from the page. The Offers screen names the product id.                                                                                                                                                |
+| A product is `draft`                    | Same as missing: hidden from shoppers, visible in the dashboard.                                                                                                                                                           |
+| Every variant is out of stock           | The offer still shows, marked sold out. Checkout refuses it.                                                                                                                                                               |
+| Stock ran out between page and checkout | The order is refused with "sold out while you were checking out".                                                                                                                                                          |
+| A response over 8MB                     | Refused. Page your products with `nextCursor`.                                                                                                                                                                             |
 
 Nothing here fails silently in a way that sells something at the wrong price. The
 rule NCOM applies throughout: when the catalogue cannot be read, refuse to sell,
@@ -383,9 +402,9 @@ never guess.
 
 ## 7. Performance, and why there is no cache
 
-There is no cache. Not in Redis, not in the page, not for five seconds. Every
-read is `cache: 'no-store'` and every value dies with the request that fetched
-it.
+There is no cache of your catalogue. Not in Redis, not in the page, not for five
+seconds. Every read is `cache: 'no-store'` and every value dies with the request
+that fetched it.
 
 That is the design. The entire reason this platform stopped storing a catalogue
 was that a stored catalogue goes stale, and a five-second cache is a stored
@@ -431,6 +450,10 @@ What a merchant should do on their side:
    implemented `/reserve` — that your own stock went down by exactly the amount
    sold.
 
+If you also want to sell something your shop does not carry, add it under
+**Products → Add product**. It appears in the same list marked _In NCOM_, and can
+go into the same offers as anything read from your site.
+
 ### Checking a connector automatically
 
 ```bash
@@ -470,19 +493,24 @@ at the dot.)
 
 ---
 
-## 9. What NCOM still stores
+## 9. Where the line falls
 
-To be exact about where the line falls, because "we store nothing" is not true
+Exactly what is stored and what is not, because "we store nothing" is not true
 and the difference matters.
 
-**Read from the merchant's website, never stored:** products, titles,
+**Read from your website, never stored:** the products you keep there — titles,
 descriptions, handles, prices, compare-at prices, options, variants, SKUs,
 barcodes, weights, images, stock levels, backorder policy, categories.
 
+**Stored by NCOM, because you put it here:** the products you add in NCOM, with
+their variants, prices, images and stock. These are yours to edit here and are
+not related to your website in any way; NCOM will never push them to it or read
+them from it.
+
 **Stored by NCOM, because NCOM produced it:** landing pages and their design,
-offers and bundle pricing (which reference the merchant's ids), carts, orders and
-order lines, customers, discounts, delivery zones, courier shipments, and the
-connection settings on this page.
+offers and bundle pricing (which reference product ids from either catalogue),
+carts, orders and order lines, customers, discounts, delivery zones, courier
+shipments, and the connection settings on this page.
 
 Order lines are the interesting case. They **snapshot** the title, variant title,
 SKU, price, weight and image URL at the moment of sale. That is not a cached

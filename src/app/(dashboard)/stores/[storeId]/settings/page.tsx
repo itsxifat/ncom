@@ -104,6 +104,7 @@ export default async function StoreSettingsPage({
             { href: '/tracking', label: 'Pixels & tracking' },
             { href: '/settings/payments', label: 'Payments' },
             { href: '/settings/shipping', label: 'Shipping' },
+            { href: '/settings/locations', label: 'Locations' },
             { href: '/settings/taxes', label: 'Taxes' },
           ].map((item) => (
             <Link

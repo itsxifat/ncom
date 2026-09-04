@@ -41,21 +41,57 @@ export const WEBHOOK_TOPICS: {
   wire: string
   description: string
 }[] = [
-  // No product.*, inventory.* or category.* topics.
+  // The catalogue topics fire for the products NCOM *stores* — the ones a
+  // merchant adds here for what their own shop does not carry.
   //
-  // They existed to tell a merchant's system that *our* copy of their catalogue
-  // had changed. There is no copy: products, stock and categories are read from
-  // their site when they are needed, so the only system that could announce a
-  // change to them is theirs, and it does not need us to relay it back.
-  //
-  // The enum values are still in the database for the rows that referenced
-  // them, and any endpoint still subscribed simply never fires. They are
-  // dropped with the catalogue tables in the follow-up migration.
+  // They deliberately never fire for a product read from a connected website. A
+  // change there is announced by that site to whatever it already tells, and
+  // relaying it back would mean either polling their catalogue or pretending to
+  // know something we only find out when a shopper happens to load a page.
+  {
+    topic: 'PRODUCT_CREATED',
+    wire: 'product.created',
+    description: 'A product was added to the catalogue NCOM stores.',
+  },
+  {
+    topic: 'PRODUCT_UPDATED',
+    wire: 'product.updated',
+    description:
+      'A product NCOM stores changed — title, description, price, options, images, status or category.',
+  },
+  {
+    topic: 'PRODUCT_DELETED',
+    wire: 'product.deleted',
+    description:
+      'A product NCOM stores was deleted. Archiving sends product.updated.',
+  },
+  {
+    topic: 'INVENTORY_UPDATED',
+    wire: 'inventory.updated',
+    description:
+      'The sellable stock of a variant NCOM stores changed, from a sale, a return or a manual adjustment. Stock on your own website is yours and is never reported back to you.',
+  },
+  {
+    topic: 'CATEGORY_CREATED',
+    wire: 'category.created',
+    description: 'A category, subcategory or child category was created here.',
+  },
+  {
+    topic: 'CATEGORY_UPDATED',
+    wire: 'category.updated',
+    description:
+      'A category here was renamed, moved, reordered or deactivated.',
+  },
+  {
+    topic: 'CATEGORY_DELETED',
+    wire: 'category.deleted',
+    description: 'A category here was deleted.',
+  },
   {
     topic: 'ORDER_CREATED',
     wire: 'order.created',
     description:
-      'An order was placed. Sent after the reservation call to your own site, so any stock it holds is already held.',
+      'An order was placed. Sent after stock has moved — decremented here for products NCOM stores, and requested from your site for the rest — so the quantities in it are already committed.',
   },
   {
     topic: 'ORDER_UPDATED',

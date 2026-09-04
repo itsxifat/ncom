@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { ExternalLink, Package, PlugZap } from 'lucide-react'
+import { ExternalLink, Package, PlugZap, Plus } from 'lucide-react'
 import { getActiveOrganization } from '@/server/services/organizationService'
 import { listProducts } from '@/server/services/productService'
 import { getOrganizationSettings } from '@/server/services/organizationSettingsService'
@@ -14,17 +14,20 @@ import { formatMoneyAmount } from '@/lib/money'
 const PAGE_SIZE = 50
 
 /**
- * The catalogue, read from the merchant's own website.
+ * The catalogue: both of them, in one list.
  *
- * Read-only, and that is the design rather than a stage of it. There is no
- * "add product" button because adding one here would mean storing it here, and
- * the entire point of this version is that the merchant's site is the only
- * place a product exists. Every row links out to their admin, which is where
- * the edit belongs.
+ * Products stored in NCOM come first and can be edited here. Products read from
+ * the merchant's connected website follow, and link out to their own admin —
+ * they are theirs, and the closest this screen gets to editing one is opening
+ * the page where it can be edited.
  *
- * Paging is by cursor, not by page number: a remote catalogue has no stable
- * offset to jump to, and pretending otherwise produces a "page 7" that shows
- * different products depending on what sold in the meantime.
+ * Every row says which it is, because a merchant looking at two similarly named
+ * shirts needs to know which one is on their shop and which one they typed in
+ * here, and because only one of the two has an edit link.
+ *
+ * Paging is by cursor rather than page number: half of this list is a website
+ * that can only be asked for "the next page", and pretending to a page 7 would
+ * produce different products depending on what sold in the meantime.
  */
 export default async function ProductsPage({
   searchParams,
@@ -47,24 +50,6 @@ export default async function ProductsPage({
     getConnectionStatus(organization.id),
   ])
 
-  if (!connection) {
-    return (
-      <EmptyState
-        icon={PlugZap}
-        title="No product source connected"
-        description="NCOM reads your products, prices and stock from your own website — nothing is copied here. Connect your site and your catalogue appears on this screen and in every offer."
-        action={
-          <Button
-            render={<Link href="/settings/product-source" />}
-            nativeButton={false}
-          >
-            Connect your website
-          </Button>
-        }
-      />
-    )
-  }
-
   let items: Awaited<ReturnType<typeof listProducts>>['items'] = []
   let nextCursor: string | null = null
   let failure: string | null = null
@@ -83,6 +68,34 @@ export default async function ProductsPage({
   }
 
   const currency = settings?.currencyCode ?? 'BDT'
+
+  // Nothing here at all, and no website connected: the merchant has not started.
+  // Both routes out are offered, because either is a legitimate way to run this.
+  if (!connection && items.length === 0 && !search && !status && !failure) {
+    return (
+      <EmptyState
+        icon={Package}
+        title="No products yet"
+        description="Sell what is already on your website by connecting it — nothing is copied, we read it live — or add products here for the things it does not carry. Most workspaces end up doing both."
+        action={
+          <div className="flex flex-wrap gap-2">
+            <Button render={<Link href="/products/new" />} nativeButton={false}>
+              <Plus />
+              Add product
+            </Button>
+            <Button
+              variant="outline"
+              render={<Link href="/settings/product-source" />}
+              nativeButton={false}
+            >
+              <PlugZap />
+              Connect your website
+            </Button>
+          </div>
+        }
+      />
+    )
+  }
 
   if (failure) {
     return (
@@ -107,17 +120,28 @@ export default async function ProductsPage({
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-muted-foreground text-sm">
-          Read live from{' '}
-          <span className="font-medium">{hostOf(connection.baseUrl)}</span>.
-          Products are edited there, not here.
+          {connection ? (
+            <>
+              Your own products, plus everything read live from{' '}
+              <span className="font-medium">{hostOf(connection.baseUrl)}</span>.
+            </>
+          ) : (
+            <>
+              Your own products.{' '}
+              <Link href="/settings/product-source" className="underline">
+                Connect a website
+              </Link>{' '}
+              to sell what it already carries.
+            </>
+          )}
         </p>
         <Button
-          variant="outline"
           size="sm"
-          render={<Link href="/settings/product-source" />}
+          render={<Link href="/products/new" />}
           nativeButton={false}
         >
-          Product source
+          <Plus />
+          Add product
         </Button>
       </div>
 
@@ -196,6 +220,13 @@ export default async function ProductsPage({
                     {product.status === 'DRAFT' ? 'Draft' : 'Archived'}
                   </Badge>
                 )}
+
+                <Badge
+                  variant="outline"
+                  className="text-muted-foreground shrink-0"
+                >
+                  {product.source === 'LOCAL' ? 'In NCOM' : 'Your website'}
+                </Badge>
 
                 {product.url && (
                   <Link

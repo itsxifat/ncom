@@ -4,8 +4,8 @@ import {
   listCategories,
   searchProducts,
   isCatalogError,
-  type RemoteCategory,
-  type RemoteProduct,
+  type CatalogCategory,
+  type CatalogProduct,
 } from '@/server/catalog'
 
 /**
@@ -35,8 +35,10 @@ export async function loadDiscountTargets(organizationId: string) {
     searchProducts(organizationId, '', {
       limit: 200,
       includeDrafts: true,
-    }).catch(emptyOnCatalogFailure<RemoteProduct>),
-    listCategories(organizationId).catch(emptyOnCatalogFailure<RemoteCategory>),
+    }).catch(emptyOnCatalogFailure<CatalogProduct>),
+    listCategories(organizationId).catch(
+      emptyOnCatalogFailure<CatalogCategory>
+    ),
     prisma.store.findMany({
       where: { organizationId },
       orderBy: { name: 'asc' },

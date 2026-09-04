@@ -74,34 +74,47 @@ export default async function DocsPage() {
           <article className="prose-docs min-w-0">
             <Section id="quickstart" title="Quickstart">
               <P>
-                There are two separate things here, and only the first one is
-                required.
+                Start with whichever of these describes what you are selling.
+                Most workspaces end up doing both.
               </P>
 
               <Ol>
                 <li>
-                  <strong>Connect your website as the product source.</strong>{' '}
+                  <strong>
+                    Selling what is already on your own shop? Connect it.
+                  </strong>{' '}
                   Deploy the connector endpoints described below, paste the URL
-                  into <strong>Settings → Product source</strong>, and your
-                  catalogue is live on every landing page. Nothing is imported.
-                  About an hour of work, most of it copying one of the reference
-                  implementations.
+                  into <strong>Settings → Product source</strong>, and that
+                  catalogue is live on every landing page. Nothing is imported
+                  and there is no sync to run. About an hour of work, most of it
+                  copying one of the reference implementations.
                 </li>
                 <li>
-                  <strong>Optionally, use the REST API</strong> to read orders
-                  back into your own system, or take webhooks when one is
+                  <strong>
+                    Selling something your shop does not carry? Add it in NCOM.
+                  </strong>{' '}
+                  <strong>Products → Add product</strong> in the dashboard, or{' '}
+                  <Code>POST /api/v1/products</Code> for a batch. Stored here,
+                  edited here, and shown in the same lists and sold in the same
+                  offers as everything read from your site.
+                </li>
+                <li>
+                  <strong>Either way, the REST API</strong> reads orders back
+                  into your own system, and webhooks tell you when one is
                   placed. Create a key under{' '}
                   <strong>Developers → API keys</strong> and confirm it with{' '}
                   <Code>GET /api/v1/me</Code>.
                 </li>
               </Ol>
 
-              <Callout title="If you built an importer for an older version of this platform, switch it off">
-                <Code>POST /api/v1/products/import</Code>,{' '}
-                <Code>/api/v1/products</Code>, <Code>/api/v1/categories</Code>{' '}
-                and <Code>/api/v1/inventory</Code> are retired and answer{' '}
-                <Code>410 Gone</Code>. Nothing needs to replace the sync — that
-                is the point of reading live. Connect a product source instead.
+              <Callout title="If you built a catalogue importer for an older version of this platform">
+                It is no longer how you sell what your shop already carries —
+                connect the site instead, and delete the sync along with every
+                bug that came of keeping two copies of one price in step.{' '}
+                <Code>/api/v1/products</Code> and <Code>/api/v1/inventory</Code>{' '}
+                still work, and now mean something narrower: they manage the
+                products <em>NCOM stores</em>. See “Products stored in NCOM”
+                below.
               </Callout>
 
               <CodeBlock
@@ -782,20 +795,27 @@ curl -s "$BASE/ping" \\
                 <Code>printf</Code> ends at the dot.
               </P>
 
-              <H3>What NCOM still stores</H3>
+              <H3>Where the line falls</H3>
 
               <P>
-                To be exact about where the line falls. Read from your website
-                and never stored: products, titles, descriptions, handles,
-                prices, options, variants, SKUs, barcodes, weights, images,
-                stock levels, backorder policy, categories.
+                Read from your website and never stored: the products you keep
+                there — titles, descriptions, handles, prices, options,
+                variants, SKUs, barcodes, weights, images, stock levels,
+                backorder policy, categories.
+              </P>
+
+              <P>
+                Stored by NCOM because you put it here: the products you add in
+                NCOM, with their variants, prices, images and stock. Yours to
+                edit here, unrelated to your website, and never pushed to it.
               </P>
 
               <P>
                 Stored by NCOM because NCOM produced it: landing pages and their
-                design, offers and bundle pricing (which reference your ids),
-                carts, orders and order lines, customers, discounts, delivery
-                zones, courier shipments, and your connection settings.
+                design, offers and bundle pricing (which reference product ids
+                from either catalogue), carts, orders and order lines,
+                customers, discounts, delivery zones, courier shipments, and
+                your connection settings.
               </P>
 
               <Callout title="Order lines are a record, not a cache">
@@ -805,6 +825,155 @@ curl -s "$BASE/ping" \\
                 tonight and last March&apos;s order still reads correctly, which
                 is precisely why the copy is taken.
               </Callout>
+            </Section>
+
+            <Section id="own-products" title="Products stored in NCOM">
+              <P>
+                The other half of the catalogue: products this platform keeps.
+                Add one when your own shop does not carry it — a bundle-only
+                item, a campaign gift, a sample, something you are testing
+                before it goes live on your real site.
+              </P>
+
+              <P>
+                They behave like any other product everywhere it matters. They
+                appear in the same list, go into the same offers alongside
+                products read from your website, and sell through the same
+                checkout. What differs is who owns them.
+              </P>
+
+              <Table
+                head={['', 'On your website', 'Stored in NCOM']}
+                rows={[
+                  [
+                    'Edited',
+                    'In your own admin. NCOM links out to it.',
+                    'Here, in the product editor or through this API.',
+                  ],
+                  [
+                    'Read',
+                    'Live, on every request. Never cached, never copied.',
+                    'From this database.',
+                  ],
+                  [
+                    'Stock',
+                    <>
+                      Yours. Held at checkout only if you implement{' '}
+                      <Code>/reserve</Code>.
+                    </>,
+                    'Ours. Taken with an atomic decrement, so two shoppers cannot buy the same last unit.',
+                  ],
+                  [
+                    'Images',
+                    'Your URLs, served from your own site.',
+                    'Uploaded to the media library.',
+                  ],
+                  [
+                    'If your site is down',
+                    'Those products cannot be shown or sold.',
+                    'Unaffected — no network call is involved.',
+                  ],
+                ]}
+              />
+
+              <H3>The endpoints</H3>
+
+              <EndpointTable
+                rows={[
+                  ['GET', '/api/v1/products', 'List the products NCOM stores'],
+                  ['POST', '/api/v1/products', 'Create one'],
+                  ['GET', '/api/v1/products/{id}', 'Fetch one'],
+                  ['PATCH', '/api/v1/products/{id}', 'Update one'],
+                  ['DELETE', '/api/v1/products/{id}', 'Delete one'],
+                  [
+                    'POST',
+                    '/api/v1/products/import',
+                    'Create or update in bulk, keyed on your own id',
+                  ],
+                  ['GET', '/api/v1/inventory', 'Stock, from both catalogues'],
+                  [
+                    'POST',
+                    '/api/v1/inventory',
+                    'Set or adjust the counts NCOM keeps',
+                  ],
+                  ['GET', '/api/v1/categories', 'The merged category tree'],
+                  ['POST', '/api/v1/categories', 'Create a category here'],
+                ]}
+              />
+
+              <Callout title="These do not reach your website">
+                A product on your own shop is read through the connector and
+                edited in your admin. Asking for one by id here answers 404 with
+                a sentence saying so, and pushing a stock count for one is
+                refused per line rather than accepted and dropped. Nothing in
+                this section will ever write to your site.
+              </Callout>
+
+              <P>
+                Prices are integers in the minor unit of the workspace currency
+                — 12.99 is <Code>1299</Code> — and weights are always grams. The
+                shape below is what <Code>product.created</Code> carries too, so
+                an integration written against one is already written against
+                the other.
+              </P>
+
+              <CodeBlock
+                title="POST /api/v1/products"
+                language="bash"
+                code={`curl -X POST ${baseUrl}/api/v1/products \\\\
+  -H "Authorization: Bearer $NCOM_API_KEY" \\\\
+  -H "Content-Type: application/json" \\\\
+  -d '{
+    "title": "Campaign tote",
+    "status": "ACTIVE",
+    "externalId": "TOTE-1",
+    "images": [{ "url": "https://yourshop.com/img/tote.jpg" }],
+    "variants": [
+      { "priceCents": 25000, "sku": "TOTE-1", "inventoryTracked": true, "stock": 200 }
+    ]
+  }'`}
+              />
+
+              <H3>Bulk, and running it twice</H3>
+
+              <P>
+                <Code>POST /api/v1/products/import</Code> upserts on{' '}
+                <Code>externalId</Code> — the id the product already has in
+                whatever you are loading it from. That is what makes a run safe
+                to repeat: an importer that only creates turns three interrupted
+                runs into three copies of every product, and one that matches on
+                title breaks the first time two products are called “Classic
+                Tee”.
+              </P>
+
+              <Callout title="This is not a catalogue sync">
+                It is a bulk create for products NCOM stores. If you find
+                yourself running it nightly against your whole shop, connect the
+                shop instead — that is what the product source above is for, and
+                it removes the second copy this endpoint would create.
+              </Callout>
+
+              <H3>Stock</H3>
+
+              <P>
+                <Code>POST /api/v1/inventory</Code> takes <Code>available</Code>{' '}
+                for an absolute count (“there are 42”) or <Code>delta</Code> for
+                a movement (“twelve arrived”). Every line is applied or refused
+                on its own and the response says which, because a batch that
+                half-applied and returned 500 leaves nobody able to tell what
+                happened.
+              </P>
+
+              <CodeBlock
+                title="POST /api/v1/inventory"
+                language="json"
+                code={`{
+  "updates": [
+    { "sku": "TOTE-1", "available": 42 },
+    { "variantId": "clx8f…", "delta": -3, "reason": "DAMAGED" }
+  ]
+}`}
+              />
             </Section>
 
             <Section id="orders" title="Orders">

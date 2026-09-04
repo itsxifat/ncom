@@ -503,8 +503,8 @@ model Offer {
   /// labelled as a gift on the order rather than discounted, because "free
   /// tote with every combo" is a different promise from "1000 off".
   ///
-  /// The merchant's own variant id — resolved against their site at render
-  /// time, like every other reference to a product here.
+  /// Resolved at render time against whichever catalogue holds it, like every
+  /// other reference to goods here.
   giftVariantId String?
   giftQuantity  Int     @default(1)
 
@@ -550,8 +550,8 @@ model OfferVariantRule {
   id      String @id @default(cuid())
   offerId String
 
-  /// The merchant's own variant id, read live from their site. Not a foreign
-  /// key: there is no variant table here to point at.
+  /// The variant this rule is about, from either catalogue. Not a foreign key:
+  /// it may name a variant on the merchant's own website.
   variantId String
 
   excluded Boolean @default(false)
@@ -1611,22 +1611,34 @@ enum WeightUnit {
 
 // ── Catalog ──────────────────────────────────────────────────────────────
 //
-// NCOM does not keep a catalogue. Products, variants, prices, images and stock
-// are read from the merchant's own website on every request that needs them —
-// see server/catalog and docs/product-source.md. What lives here is the
-// *connection*: where to call, how to sign the call, and what that site said it
-// could do the last time we asked.
+// A workspace sells from two catalogues at once, and both are represented here.
 //
-// The Product/ProductVariant/InventoryLevel tables below are the previous
-// design, in which merchants pushed their catalogue into this database. Nothing
-// reads or writes them any more; they are kept for one release so a workspace
-// that has not finished moving still has its old rows to look at, and are
-// dropped in a follow-up migration.
+//   **The merchant's own website**, read live on every request that needs it and
+//   never copied. No product row exists here for those goods. What is stored is
+//   the CatalogConnection below: where to call, how to sign the call, and what
+//   that site said it could do the last time we asked.
+//
+//   **Products NCOM keeps**, in the Product/ProductVariant/ProductImage/
+//   InventoryLevel tables that follow. These are for what a merchant's shop does
+//   not carry — a bundle-only item, a campaign gift, a sample — and NCOM owns
+//   them completely: it creates, edits, deletes and moves their stock itself.
+//
+// Neither is a mode. A workspace may use either or both, and a single offer may
+// mix them. See server/catalog/source.ts for the merge and
+// docs/product-source.md for the connector contract.
+//
+// The consequence that shows up all over this file: a reference to goods — an
+// OfferItem, a CartLine, an OrderLine — is a plain (productId, variantId) pair
+// and *not* a foreign key, because the row it names may not be in this database
+// at all. Those constraints were dropped deliberately; see the migration
+// 20260904120000_products_read_live_from_merchant_site.
 
 /// One merchant website NCOM reads products and stock from.
 ///
-/// Exactly one per organisation: the catalogue belongs to the business, the
-/// same way it did when it was a table here, and a workspace running three
+/// Exactly one per organisation, and optional: a workspace with no connection
+/// sells only the products it keeps here, which is a perfectly ordinary way to
+/// use this platform. Where there is one, the catalogue belongs to the business
+/// the same way it did when it was only a table here — a workspace running three
 /// landing pages sells one website's stock across all of them.
 model CatalogConnection {
   id             String @id @default(cuid())
@@ -2137,8 +2149,9 @@ model CartLine {
   id     String @id @default(cuid())
   cartId String
 
-  /// The merchant's own ids. No foreign key: the variant lives on their site
-  /// and is re-read on every render of this cart.
+  /// The product and variant chosen, from either catalogue. No foreign key: the
+  /// variant may live on the merchant's own site, and is re-read on every render
+  /// of this cart wherever it lives.
   variantId String
   productId String?
   quantity  Int
@@ -2436,9 +2449,10 @@ model OrderLine {
   id      String @id @default(cuid())
   orderId String
 
-  /// The merchant's own product and variant ids, copied at the moment of sale.
-  /// References rather than foreign keys — the catalogue lives on their site,
-  /// and an order must still read correctly after they delete the product.
+  /// The product and variant sold, from whichever catalogue they were in.
+  /// References rather than foreign keys: the row may live on the merchant's own
+  /// website, and either way an order must still read correctly after the
+  /// product is deleted.
   productId String?
   variantId String?
 
@@ -2447,16 +2461,17 @@ model OrderLine {
   sku          String?
   vendor       String?
 
-  /// The photo the goods were sold with, on the merchant's own site.
+  /// The photo the goods were sold with.
   ///
-  /// Snapshotted like the title and the price, which is a reversal: while the
-  /// catalogue lived in this database a line could cheaply join to the current
-  /// image, and showing the current one was the better answer. Reading it now
-  /// means a call to the merchant's website per line, on screens that list
-  /// hundreds of them — order lists, packing labels, courier payloads — and an
-  /// order from last March would fire those calls to display a product that may
-  /// not exist. So the URL is copied at the moment of sale. It points at their
-  /// own CDN and keeps working for as long as they keep the file.
+  /// Snapshotted like the title and the price, which is a reversal: while every
+  /// product lived in this database a line could cheaply join to the current
+  /// image, and showing the current one was the better answer. Now that half of
+  /// them may live on a merchant's website, reading it means a call to their
+  /// server per line — on screens that list hundreds, like order lists, packing
+  /// labels and courier payloads — and an order from last March would fire those
+  /// calls to display a product that may no longer exist. So the URL is copied
+  /// at the moment of sale, for both kinds, and keeps working for as long as the
+  /// file does.
   imageUrl String?
 
   quantity           Int

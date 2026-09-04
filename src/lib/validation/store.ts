@@ -92,6 +92,14 @@ export const taxRateSchema = z.object({
 
 export type TaxRateInput = z.infer<typeof taxRateSchema>
 
+export const locationSchema = z.object({
+  name: z.string().trim().min(1, 'Name is required').max(120),
+  isActive: z.boolean().default(true),
+  fulfillsOnlineOrders: z.boolean().default(true),
+})
+
+export type LocationInput = z.infer<typeof locationSchema>
+
 export const paymentProviderSchema = z.object({
   provider: z.enum([
     'STRIPE',

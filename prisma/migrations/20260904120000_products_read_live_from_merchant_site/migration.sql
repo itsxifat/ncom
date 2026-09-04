@@ -1,19 +1,24 @@
--- Products and stock are read from the merchant's own website, live, on every
--- request that needs them. Nothing about a catalogue is stored here any more.
+-- A workspace can now sell from two catalogues at once: the products it keeps
+-- here, and the products on a merchant's own website, read live on every request
+-- that needs them.
 --
 -- Three things this migration does:
 --
 --   1. adds the connection — where to call, which key, which secret;
---   2. drops the foreign keys that bound carts, orders and offers to a local
---      catalogue, so those columns can hold the merchant's own ids;
+--   2. drops the foreign keys that bound carts, orders and offers to the local
+--      catalogue, because those columns may now name a product that is not in
+--      this database at all;
 --   3. gives CartLine its own copy of the descriptive fields it used to read
 --      through that foreign key.
 --
--- The Product/ProductVariant/InventoryLevel tables are deliberately left in
--- place. Nothing reads them after this release, but a workspace mid-migration
--- still has its rows to look at, and dropping data is not something to do in
--- the same deploy that changes how it is read. A follow-up migration removes
--- them once every organisation has a connection.
+-- The Product/ProductVariant/InventoryLevel tables stay exactly as they are and
+-- are still read and written: they hold the products NCOM keeps. What changed is
+-- that they are no longer the only place a product can be.
+--
+-- Dropping the foreign keys is the load-bearing part. A cart line holding a
+-- WooCommerce post id cannot reference a row in ProductVariant, and the
+-- alternative — minting local ids for remote products — would be a mapping
+-- table, which is storing their catalogue by another name.
 
 CREATE TABLE "CatalogConnection" (
     "id" TEXT NOT NULL,
@@ -52,7 +57,8 @@ ALTER TABLE "OfferVariantRule" DROP CONSTRAINT IF EXISTS "OfferVariantRule_varia
 ALTER TABLE "Offer" DROP CONSTRAINT IF EXISTS "Offer_giftVariantId_fkey";
 
 -- What the cart used to reach through the foreign key. Display only: prices and
--- stock are re-read live, and these columns are never used to charge anyone.
+-- stock are re-read from whichever catalogue owns the line, and these columns
+-- are never used to charge anyone.
 ALTER TABLE "CartLine" ADD COLUMN "productId" TEXT;
 ALTER TABLE "CartLine" ADD COLUMN "title" TEXT;
 ALTER TABLE "CartLine" ADD COLUMN "variantTitle" TEXT;
@@ -76,9 +82,9 @@ FROM "ProductVariant" AS v
 JOIN "Product" AS p ON p."id" = v."productId"
 WHERE cl."variantId" = v."id";
 
--- Order lines keep the photo they were sold with. Reading the current one now
--- means a call to the merchant's website per line, on screens that render
--- hundreds — see the note on the column in schema.prisma.
+-- Order lines keep the photo they were sold with. Reading the current one for a
+-- remote product means a call to the merchant's website per line, on screens
+-- that render hundreds — see the note on the column in schema.prisma.
 ALTER TABLE "OrderLine" ADD COLUMN "imageUrl" TEXT;
 
 UPDATE "OrderLine" AS ol

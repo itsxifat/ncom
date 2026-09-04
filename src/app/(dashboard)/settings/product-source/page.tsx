@@ -18,7 +18,7 @@ export default async function ProductSourcePage() {
     <PageShell>
       <PageHeader
         title="Product source"
-        description="The website your products, prices, photos and stock are read from. NCOM keeps no copy of them."
+        description="Connect the website you already sell from. Its products, prices, photos and stock are read live on every request and never copied here — and they sit alongside any products you add in NCOM."
       />
 
       <ProductSourceManager
@@ -46,7 +46,11 @@ export default async function ProductSourcePage() {
         <Link href="/docs#product-source" className="underline">
           the contract and copy-paste implementations are in the docs
         </Link>
-        .
+        . You do not need one to sell:{' '}
+        <Link href="/products/new" className="underline">
+          products added in NCOM
+        </Link>{' '}
+        work without any of this.
       </p>
     </PageShell>
   )

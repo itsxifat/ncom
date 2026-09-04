@@ -16,15 +16,22 @@ import { FakeShop } from './support/product-source'
  * written straight to the database, because reaching them through a storefront
  * checkout would be testing checkout.
  *
- * The catalogue cannot be written at all: NCOM does not store one. It is served
- * by a fake merchant website (see support/product-source.ts) which the workspace
- * is pointed at through the real settings screen, so what the editor reads here
- * is a live HTTP read exactly as production does it.
+ * A workspace sells from two catalogues, so this file seeds both and the first
+ * test deliberately mixes them in one order:
  *
- * The assertions that matter are the ones about money and stock. An order
- * editor that renders correctly and books the wrong inventory is worse than one
- * that does not render at all — so money is read back from the database, and
- * stock from the shop that owns it.
+ *   - the shirt lives on a fake merchant website (support/product-source.ts)
+ *     which the workspace is pointed at through the real settings screen, so
+ *     reading it is a live HTTP call exactly as production does it;
+ *   - the cap is a product NCOM stores, written straight into the database.
+ *
+ * That mix is the point. The two halves move stock by completely different
+ * mechanisms — a conditional decrement here, an HTTP reservation there — and an
+ * order that contains both is where a routing mistake would show up.
+ *
+ * The assertions that matter are the ones about money and stock. An order editor
+ * that renders correctly and books the wrong inventory is worse than one that
+ * does not render at all — so money is read back from the database, local stock
+ * from InventoryLevel, and remote stock from the shop that owns it.
  */
 
 /**
@@ -152,15 +159,70 @@ function seedProduct(title: string, priceCents: number, available: number) {
 }
 
 /**
- * What the shop says is left.
+ * A product NCOM keeps, with a known amount of stock at one location.
  *
- * There is no `committed` any more: that column existed because NCOM held its
- * own copy of the count and had to remember which part of it was promised. The
- * merchant's shop holds one number, and an order either took units out of it or
- * did not.
+ * The other half of the catalogue. Written with SQL for the reason the orders
+ * are: reaching it through the product editor would be testing the product
+ * editor.
  */
+async function seedLocalProduct(
+  title: string,
+  priceCents: number,
+  available: number
+) {
+  const existing = await all<{ id: string }>(
+    `SELECT id FROM "Location" WHERE "organizationId" = $1 LIMIT 1`,
+    [organizationId]
+  )
+  const locationId =
+    existing[0]?.id ??
+    (
+      await one<{ id: string }>(
+        `INSERT INTO "Location" (id, "organizationId", name)
+         VALUES ($1, $2, 'Main') RETURNING id`,
+        [id('loc'), organizationId]
+      )
+    ).id
+
+  const productId = id('prod')
+  await db.query(
+    `INSERT INTO "Product" (id, "organizationId", title, handle, status, "updatedAt")
+     VALUES ($1, $2, $3, $4, 'ACTIVE', now())`,
+    [productId, organizationId, title, title.toLowerCase().replace(/\s+/g, '-')]
+  )
+
+  const variantId = id('var')
+  const sku = `${title.replace(/\s+/g, '')}-SKU`
+  await db.query(
+    `INSERT INTO "ProductVariant"
+       (id, "productId", title, sku, "priceCents", "inventoryTracked", "inventoryPolicy", "updatedAt")
+     VALUES ($1, $2, 'Default Title', $3, $4, true, 'DENY', now())`,
+    [variantId, productId, sku, priceCents]
+  )
+
+  await db.query(
+    `INSERT INTO "InventoryLevel" (id, "variantId", "locationId", available, committed, "updatedAt")
+     VALUES ($1, $2, $3, $4, 0, now())`,
+    [id('lvl'), variantId, locationId, available]
+  )
+
+  return { product: { id: productId, title }, variant: { id: variantId, sku } }
+}
+
+/** What the merchant's shop says is left, for a remote variant. */
 function availableFor(variantId: string): number | null {
   return shop.availableFor(variantId)
+}
+
+/** What NCOM's own ledger says, for a local one. */
+async function localStockFor(variantId: string) {
+  const row = await one<{ available: string; committed: string }>(
+    `SELECT COALESCE(SUM(available), 0) AS available,
+            COALESCE(SUM(committed), 0) AS committed
+       FROM "InventoryLevel" WHERE "variantId" = $1`,
+    [variantId]
+  )
+  return { available: num(row.available), committed: num(row.committed) }
 }
 
 test('edit a placed order: change quantity, add a product, and see stock move', async ({
@@ -168,8 +230,9 @@ test('edit a placed order: change quantity, add a product, and see stock move', 
 }) => {
   const stamp = Date.now()
 
+  // One from each catalogue, in one order.
   const shirt = seedProduct(`Shirt ${stamp}`, 50_000, 10)
-  const cap = seedProduct(`Cap ${stamp}`, 20_000, 10)
+  const cap = await seedLocalProduct(`Cap ${stamp}`, 20_000, 10)
 
   // One order for two shirts, with the stock reserved the way checkout would
   // have left it: two units out of `available`, two sitting in `committed`.
@@ -276,9 +339,12 @@ test('edit a placed order: change quantity, add a product, and see stock move', 
     expect(availableFor(shirt.variant.id)).toBe(7)
     expect(shop.reservedFor(shirt.variant.id)).toBe(1)
 
-    // The cap was never on this order before, so one unit leaves the shelf.
-    expect(availableFor(cap.variant.id)).toBe(9)
-    expect(shop.reservedFor(cap.variant.id)).toBe(1)
+    // The cap is one of ours, so its units move in our own ledger: available
+    // goes down and committed goes up, atomically, the way they always did.
+    expect(await localStockFor(cap.variant.id)).toEqual({
+      available: 9,
+      committed: 1,
+    })
 
     // The edit is on the record, with a human-readable summary.
     const edited = await one<{ message: string }>(
@@ -313,8 +379,11 @@ test('edit a placed order: change quantity, add a product, and see stock move', 
     expect(remaining).toHaveLength(1)
     expect(num(saved.subtotalCents)).toBe(150_000)
 
-    // Released back to the shop, which is the only place it can go now.
-    expect(availableFor(cap.variant.id)).toBe(10)
+    // Back where it came from — our ledger, not the merchant's shop.
+    expect(await localStockFor(cap.variant.id)).toEqual({
+      available: 10,
+      committed: 0,
+    })
     expect(shop.reservedFor(cap.variant.id)).toBe(0)
   })
 })

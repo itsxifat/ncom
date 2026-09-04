@@ -1,9 +1,13 @@
 # Reference connectors
 
 Working implementations of the product source contract. Copy one onto the
-merchant's own site, fill in the credentials NCOM generated, and their catalogue
-is live on every landing page. Nothing is copied into NCOM — these files are
-asked, and they answer.
+merchant's own site, fill in the credentials NCOM generated, and the catalogue
+that already lives there is live on every landing page. Nothing is copied into
+NCOM — these files are asked, and they answer.
+
+None of this is required to sell. A workspace can add products directly in NCOM
+and never connect a website; a connector is how it also sells what its own shop
+already carries. Most end up doing both.
 
 | Directory      | For                                | Notes                                                                                                                                                                                        |
 | -------------- | ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

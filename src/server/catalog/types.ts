@@ -1,17 +1,32 @@
 /**
- * The catalogue, as NCOM sees it.
+ * The catalogue, as NCOM sees it — from either of the two places it can live.
  *
- * These are *not* database rows and there is no table behind them. Every value
- * here was read from the merchant's own website within the current request and
- * is thrown away when the response is sent — see server/catalog/client.ts for
- * why nothing is stored or cached.
+ * A workspace sells from two sources at once:
  *
- * Ids are the merchant's ids. A `productId` in an offer, a cart line or an
- * order line is whatever their system calls that product (a WooCommerce post
- * id, a SKU, a UUID) — NCOM never mints one, because the moment it does it owns
- * a mapping table, and a mapping table is storage of the catalogue by another
- * name.
+ *   **REMOTE** — the merchant's own website, read live on every request that
+ *   needs it and never stored here. There is no table behind these values; they
+ *   are thrown away when the response is sent. See server/catalog/client.ts.
+ *
+ *   **LOCAL** — products created in NCOM itself, stored in this database like
+ *   any other row. A merchant who wants to sell something their shop does not
+ *   carry — a bundle-only item, a campaign gift, a product they have not
+ *   launched on their own site yet — adds it here.
+ *
+ * Both appear in one merged catalogue. An offer, a cart and an order can mix
+ * them freely, and nothing downstream of server/catalog needs to know which is
+ * which except the two places where it genuinely matters: editing (only local
+ * products can be edited here) and stock movements (local stock is moved by us,
+ * remote stock is asked of them).
+ *
+ * Ids are whoever's ids they are. A local product's id is a cuid we minted; a
+ * remote one's is whatever the merchant's system calls it — a WooCommerce post
+ * id, a SKU, a UUID. NCOM never mints an id for a remote product, because the
+ * moment it does it owns a mapping table, and a mapping table is storage of
+ * their catalogue by another name.
  */
+
+/** Where a product is kept, and therefore who may change it. */
+export type CatalogSource = 'LOCAL' | 'REMOTE'
 
 /** Whether a variant can be sold, and how many. */
 export interface StockState {
@@ -25,13 +40,14 @@ export interface StockState {
   policy: 'DENY' | 'CONTINUE'
 }
 
-export interface RemoteImage {
+export interface CatalogImage {
   /** Absolute URL on the merchant's own site or CDN. Never copied here. */
   url: string
   alt: string | null
 }
 
-export interface RemoteVariant extends StockState {
+export interface CatalogVariant extends StockState {
+  source: CatalogSource
   id: string
   productId: string
   title: string
@@ -48,7 +64,9 @@ export interface RemoteVariant extends StockState {
   taxCode: string | null
 }
 
-export interface RemoteProduct {
+export interface CatalogProduct {
+  /** Which of the two catalogues this came from. */
+  source: CatalogSource
   id: string
   handle: string
   title: string
@@ -65,13 +83,14 @@ export interface RemoteProduct {
   categoryId: string | null
   /** Category or collection ids this product belongs to, for discount scoping. */
   groupIds: string[]
-  images: RemoteImage[]
+  images: CatalogImage[]
   options: { name: string; values: string[] }[]
-  variants: RemoteVariant[]
+  variants: CatalogVariant[]
   url: string | null
 }
 
-export interface RemoteCategory {
+export interface CatalogCategory {
+  source: CatalogSource
   id: string
   name: string
   handle: string
@@ -93,7 +112,7 @@ export interface ProductQuery {
 }
 
 export interface ProductPage {
-  products: RemoteProduct[]
+  products: CatalogProduct[]
   /** Opaque, passed straight back on the next call. Null when exhausted. */
   nextCursor: string | null
   /** Total matching products, when the site is able to count them cheaply. */

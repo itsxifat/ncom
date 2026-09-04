@@ -6,10 +6,10 @@ import {
   type CatalogCapabilities,
   type CatalogIdentity,
   type ProductPage,
-  type RemoteCategory,
-  type RemoteImage,
-  type RemoteProduct,
-  type RemoteVariant,
+  type CatalogCategory,
+  type CatalogImage,
+  type CatalogProduct,
+  type CatalogVariant,
   type ReserveResult,
 } from './types'
 
@@ -381,7 +381,7 @@ function readStock(row: {
   return { available: null, policy }
 }
 
-function readImage(value: unknown): RemoteImage | null {
+function readImage(value: unknown): CatalogImage | null {
   if (typeof value === 'string') {
     const url = value.trim()
     return url ? { url, alt: null } : null
@@ -399,7 +399,9 @@ function readImage(value: unknown): RemoteImage | null {
   return null
 }
 
-function readStatus(value: string | null | undefined): RemoteProduct['status'] {
+function readStatus(
+  value: string | null | undefined
+): CatalogProduct['status'] {
   const word = (value ?? '').toLowerCase()
   if (word === 'draft' || word === 'pending' || word === 'unpublished') {
     return 'DRAFT'
@@ -424,7 +426,7 @@ function toVariant(
   },
   currencyCode: string,
   index: number
-): RemoteVariant {
+): CatalogVariant {
   const priceCents =
     toCents(raw.priceCents, raw.price, currencyCode) ?? product.priceCents ?? 0
 
@@ -441,6 +443,10 @@ function toVariant(
   const weight = toCount(raw.weightGrams) ?? 0
 
   return {
+    // Everything parsed here arrived over the wire from a merchant's website,
+    // so it is remote by construction. Local products never pass through this
+    // file — see server/catalog/local.ts.
+    source: 'REMOTE',
     id: raw.id ?? (index === 0 ? product.id : `${product.id}:${index}`),
     productId: raw.productId ?? product.id,
     // A variant with no title of its own is named by its option values, and
@@ -475,11 +481,11 @@ function toVariant(
 function toProduct(
   raw: z.infer<typeof productSchema>,
   currencyCode: string
-): RemoteProduct {
+): CatalogProduct {
   const title = raw.title ?? raw.name ?? 'Untitled product'
   const images = (raw.images ?? [])
     .map(readImage)
-    .filter((image): image is RemoteImage => image !== null)
+    .filter((image): image is CatalogImage => image !== null)
 
   if (images.length === 0 && raw.imageUrl) {
     images.push({ url: raw.imageUrl, alt: null })
@@ -496,7 +502,7 @@ function toProduct(
   // A product with no variants is a simple product: one sellable line whose id
   // is the product's own id, built from the top-level price and stock. Sites
   // selling one SKU per product never have to invent a variant model for us.
-  const variants: RemoteVariant[] =
+  const variants: CatalogVariant[] =
     raw.variants && raw.variants.length > 0
       ? raw.variants.map((variant, index) =>
           toVariant(variant, context, currencyCode, index)
@@ -540,6 +546,7 @@ function toProduct(
   ]
 
   return {
+    source: 'REMOTE',
     id: raw.id,
     handle: raw.handle ?? raw.slug ?? raw.id,
     title,
@@ -581,7 +588,7 @@ export function parseProductPage(
 export function parseProduct(
   payload: unknown,
   currencyCode: string
-): RemoteProduct | null {
+): CatalogProduct | null {
   const wrapper = parse(singleProductSchema, payload, 'product')
   const row = wrapper.product ?? wrapper.data
   if (row) return toProduct(row, currencyCode)
@@ -595,7 +602,7 @@ export function parseProduct(
 export function parseVariants(
   payload: unknown,
   currencyCode: string
-): RemoteVariant[] {
+): CatalogVariant[] {
   const raw = parse(variantListSchema, payload, 'variant')
   const rows = raw.variants ?? raw.data ?? []
 
@@ -632,11 +639,12 @@ export interface StockRow {
   policy: 'DENY' | 'CONTINUE'
 }
 
-export function parseCategories(payload: unknown): RemoteCategory[] {
+export function parseCategories(payload: unknown): CatalogCategory[] {
   const raw = parse(categoryListSchema, payload, 'category')
   const rows = raw.categories ?? raw.data ?? []
 
   return rows.map((row) => ({
+    source: 'REMOTE' as const,
     id: row.id,
     name: row.name ?? row.title ?? row.id,
     handle: row.handle ?? row.slug ?? row.id,

@@ -26,6 +26,7 @@ export { isSellable } from './rules'
 export { CONTRACT_VERSION } from './contract'
 export {
   hasCatalogSource,
+  splitBySource,
   listProducts,
   searchProducts,
   getProduct,

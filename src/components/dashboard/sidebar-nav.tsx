@@ -23,6 +23,7 @@ import {
   BarChart3,
   ScanLine,
   Printer,
+  Layers,
   PlugZap,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -53,6 +54,7 @@ const NAV_GROUPS: Array<{ label: string | null; items: NavItem[] }> = [
       { href: '/tracking', label: 'Tracking', icon: Activity },
       { href: '/products', label: 'Products', icon: Package },
       { href: '/categories', label: 'Categories', icon: FolderTree },
+      { href: '/collections', label: 'Collections', icon: Layers },
       { href: '/inventory', label: 'Inventory', icon: Warehouse },
       { href: '/customers', label: 'Customers', icon: UserRound },
       { href: '/discounts', label: 'Discounts & offers', icon: Tag },

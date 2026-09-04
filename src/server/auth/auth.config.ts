@@ -24,6 +24,7 @@ const PROTECTED_PREFIXES = [
   '/billing',
   '/builder-canvas',
   '/categories',
+  '/collections',
   '/customers',
   '/dashboard',
   '/discounts',

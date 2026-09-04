@@ -33,9 +33,9 @@ export default async function InventoryPage({
 
   const { organization } = await getActiveOrganization()
 
-  // Read from the merchant's own website. A workspace with no product source
-  // connected has no stock to show and is told what to do about it, rather than
-  // being shown an empty table that looks like a shop with nothing in it.
+  // Both catalogues: the counts NCOM keeps for its own products, and whatever
+  // the connected website reports for its. Local rows are editable here; the
+  // rest are read where they live.
   let items: Awaited<ReturnType<typeof listInventory>>['items'] = []
   let total = 0
   let truncated = false
@@ -68,7 +68,7 @@ export default async function InventoryPage({
       <EmptyState
         icon={Boxes}
         title="Stock could not be read"
-        description={`${failure} Stock lives on your own website — check Settings → Product source.`}
+        description={`${failure} Check Settings → Product source — your own products will appear here again once the connected website answers.`}
       />
     )
   }
@@ -78,7 +78,7 @@ export default async function InventoryPage({
       <EmptyState
         icon={Boxes}
         title="Nothing counted yet"
-        description="Your website reports no stock counts. Products whose stock it does count appear here, read live — set the numbers on your own site and this follows."
+        description="Nothing here tracks stock. Switch inventory tracking on for a product you keep in NCOM to count it here, or let your connected website report the counts for its own."
       />
     )
   }
@@ -97,7 +97,8 @@ export default async function InventoryPage({
       </div>
 
       <p className="text-muted-foreground text-sm">
-        Read live from your website. Counts change there, not here.
+        Counts for products you keep in NCOM can be typed here. Counts from your
+        connected website are read live and change there.
       </p>
 
       <InventoryFilters search={search ?? ''} stock={stock} sort={sort} />
@@ -117,9 +118,9 @@ export default async function InventoryPage({
 
           {truncated && (
             <p className="text-muted-foreground text-sm">
-              Showing the first {total} variants your website returned. Search
-              to narrow this down — the whole catalogue is not read on every
-              page view, because it is your server answering.
+              Showing the first {total} variants. Search to narrow this down — a
+              connected website&apos;s whole catalogue is not read on every page
+              view, because it is their server answering.
             </p>
           )}
 

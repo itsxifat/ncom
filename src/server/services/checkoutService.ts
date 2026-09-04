@@ -2,15 +2,17 @@ import 'server-only'
 import { prisma } from '@/server/db/client'
 import { priceCartById } from './pricingService'
 import {
-  canReserve,
   getStock,
   isSellable,
-  releaseStock,
-  reserveStock,
   resolveVariants,
   shopperMessage,
   type ResolvedVariant,
 } from '@/server/catalog'
+import {
+  commitInventoryForOrder,
+  holdRemoteStock,
+  returnRemoteStock,
+} from './inventoryService'
 import { emitOrderWebhook } from './orderService'
 import { verifyPayment } from './paymentService'
 import { scheduleCourierEvaluation } from './courierService'
@@ -41,16 +43,18 @@ import type { PaymentProvider } from '@/generated/prisma/enums'
  *                  is trusted, including values this same server sent it a
  *                  moment ago.
  *
- *   Honest stock.  The goods are re-read from the merchant's website, and
- *                  where their connector implements a reservation, the units
- *                  are held there before the order is written and handed back
- *                  if writing it fails. Where it does not, the check moments
- *                  earlier is the whole guarantee and two shoppers can still
- *                  race for the last unit — see reserveOrRefuse below, and the
- *                  reservation section of docs/product-source.md.
- *
- * What is *not* here any more: an inventory decrement. NCOM does not own the
- * stock figure, so it cannot move it. It asks, and it records what it was told.
+ *   Honest stock.  A cart can hold goods from both catalogues, and they move
+ *                  differently. Units of NCOM's own products are taken with a
+ *                  conditional decrement inside this transaction, so two
+ *                  checkouts cannot both take the last one. Units on the
+ *                  merchant's website are asked for *before* the transaction
+ *                  opens — a request across the internet must never be made
+ *                  with a Postgres transaction held open — and handed back if
+ *                  the write then fails. Where a connector implements no
+ *                  reservation at all, the re-read moments earlier is the whole
+ *                  guarantee; see the reservation section of
+ *                  docs/product-source.md, and the badge on the Product source
+ *                  screen that tells a merchant which of the two they have.
  */
 
 export interface PlaceOrderResult {
@@ -244,14 +248,28 @@ export async function placeOrder(
     )
   }
 
-  // Ask the merchant's system to hold the units, before anything is written.
+  // Which half of the cart is whose. Read off the resolution rather than asked
+  // for again — it already knows, and a second lookup could disagree with the
+  // prices this order is about to be written at.
+  const localLines = cart.lines.filter(
+    (line) => resolved.get(line.variantId)?.source === 'LOCAL'
+  )
+  const remoteLines = cart.lines.filter(
+    (line) => resolved.get(line.variantId)?.source === 'REMOTE'
+  )
+
+  // Ask the merchant's system to hold their units, before anything is written.
   //
   // Outside the transaction on purpose: this is a call across the internet to
   // someone else's server, and holding a Postgres transaction open for the
   // length of it would put every checkout in the platform behind one merchant's
   // slow host. The cost is that a reservation can outlive a failed order, which
   // is what the release below is for.
-  const reservation = await reserveOrRefuse(organizationId, cart.id, cart.lines)
+  const reservation = await reserveOrRefuse(
+    organizationId,
+    cart.id,
+    remoteLines
+  )
 
   // Set when the transaction found this cart already converted — a second
   // submit that raced past the check at the top of this function. The units
@@ -368,6 +386,37 @@ export async function placeOrder(
         },
       })
 
+      // NCOM's own products, taken atomically. This is the guarantee a local
+      // product has and a remote one can only borrow from its connector: the
+      // check and the decrement are one statement under a row lock, so two
+      // checkouts racing for the last unit cannot both win.
+      const committed = await commitInventoryForOrder(
+        tx,
+        order.id,
+        localLines.map((line) => {
+          const entry = resolved.get(line.variantId)
+          return {
+            variantId: line.variantId,
+            quantity: line.quantity,
+            // An untracked local variant reports null availability, which is
+            // the same statement `inventoryTracked: false` makes on the row.
+            inventoryTracked: entry?.variant.available !== null,
+            inventoryPolicy: entry?.variant.policy ?? 'DENY',
+          }
+        })
+      )
+
+      if (!committed.ok) {
+        const sold = cart.lines.find(
+          (line) => line.variantId === committed.variantId
+        )
+        // Throwing rolls back the order and the number we just consumed. A gap
+        // in order numbers is acceptable; overselling is not.
+        throw new Error(
+          `${sold?.title ?? 'An item'} sold out while you were checking out`
+        )
+      }
+
       if (cart.discountCode) {
         await redeemDiscountCode(tx, organizationId, cart.discountCode)
       }
@@ -440,7 +489,7 @@ export async function placeOrder(
     // The order did not save, so the units the merchant is holding for it are
     // not owed to anyone. Handing them back is best effort — see releaseStock.
     if (reservation) {
-      await handBack(organizationId, cart.id, cart.lines)
+      await handBack(organizationId, cart.id, remoteLines)
     }
     throw error
   }
@@ -450,7 +499,7 @@ export async function placeOrder(
   // connection quietly takes twice the units off the merchant's shelf while
   // showing the buyer one perfectly ordinary order.
   if (replayed && reservation) {
-    await handBack(organizationId, cart.id, cart.lines)
+    await handBack(organizationId, cart.id, remoteLines)
   }
 
   // After the commit, so a receiver that immediately reads stock sees the
@@ -542,9 +591,12 @@ async function reserveOrRefuse(
   orderRef: string,
   lines: CartLineRow[]
 ): Promise<boolean> {
-  if (!(await canReserve(organizationId))) return false
+  if (lines.length === 0) return false
 
-  const result = await reserveStock(
+  // The merchant's site refuses with its own sentence — "only 1 left" — which
+  // holdRemoteStock throws verbatim. It is more specific than anything that
+  // could be written here, so it is passed through.
+  return holdRemoteStock(
     organizationId,
     orderRef,
     lines.map((line) => ({
@@ -552,38 +604,27 @@ async function reserveOrRefuse(
       quantity: line.quantity,
     }))
   )
-
-  if (result.ok) return true
-
-  const rejected = result.rejected[0]
-  const line = lines.find((row) => row.variantId === rejected?.variantId)
-  throw new Error(
-    rejected?.reason ??
-      `${line?.title ?? 'An item'} sold out while you were checking out`
-  )
 }
 
-/** Gives a reservation back after a failed write. Never throws. */
+/**
+ * Gives a remote reservation back after a failed write. Never throws.
+ *
+ * Local units need no equivalent: they were taken inside the transaction that
+ * failed, so they were never taken at all.
+ */
 async function handBack(
   organizationId: string,
   orderRef: string,
   lines: CartLineRow[]
 ): Promise<void> {
-  try {
-    await releaseStock(
-      organizationId,
-      orderRef,
-      lines.map((line) => ({
-        variantId: line.variantId,
-        quantity: line.quantity,
-      }))
-    )
-  } catch (error) {
-    // The order failed and the merchant is holding stock for it. Loud in the
-    // logs, silent to the shopper: they are already being told the checkout
-    // did not go through, and a second failure is not their problem.
-    console.error('[checkout] could not release reservation', orderRef, error)
-  }
+  await returnRemoteStock(
+    organizationId,
+    orderRef,
+    lines.map((line) => ({
+      variantId: line.variantId,
+      quantity: line.quantity,
+    }))
+  )
 }
 
 /**

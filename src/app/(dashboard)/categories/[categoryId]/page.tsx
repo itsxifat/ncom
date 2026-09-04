@@ -1,21 +1,26 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { getActiveOrganization } from '@/server/services/organizationService'
-import { getCategory, getCategoryPath } from '@/server/services/categoryService'
+import {
+  descendantIds,
+  getCategory,
+  getCategoryPath,
+  getEditableCategory,
+  listCategoryOptions,
+} from '@/server/services/categoryService'
 import { listProducts } from '@/server/services/productService'
 import { PageHeader } from '@/components/app/page-header'
 import { PageShell } from '@/components/app/page-shell'
+import { CategoryForm } from '@/components/store/category-form'
 import { SettingsSection } from '@/components/app/settings-section'
 import { Badge } from '@/components/ui/badge'
 
 /**
- * One category and what is filed under it, as the merchant's website says.
+ * One category — and which of two screens that means.
  *
- * The products list is the category's own — not the whole subtree, which the
- * local version could compute because it held every row. Asking a connector for
- * "everything under this node" would mean one request per descendant, and a
- * department with forty children would be forty requests to a merchant's shared
- * host to render one admin screen.
+ * NCOM's own categories get the editor. A category on the merchant's website is
+ * shown with what is filed under it and nothing to change, because renaming it
+ * here would rename nothing: their tree lives in their admin.
  */
 export default async function CategoryPage({
   params,
@@ -23,13 +28,15 @@ export default async function CategoryPage({
   const { categoryId } = await params
   const { organization } = await getActiveOrganization()
 
-  const category = await getCategory(organization.id, categoryId).catch(
-    () => null
-  )
-  if (!category) notFound()
+  const editable = await getEditableCategory(organization.id, categoryId)
 
-  const [path, listed] = await Promise.all([
+  const [node, path, listed] = await Promise.all([
+    getCategory(organization.id, categoryId),
     getCategoryPath(organization.id, categoryId),
+    // What is filed directly under this node. Not the whole subtree: asking a
+    // connector for "everything under here" is one request per descendant, and
+    // a department with forty children would be forty requests to a merchant's
+    // shared host to render one admin screen.
     listProducts(organization.id, { categoryId, take: 20 }).catch(() => ({
       items: [],
       nextCursor: null,
@@ -37,45 +44,97 @@ export default async function CategoryPage({
     })),
   ])
 
+  if (!editable && !node) notFound()
+
+  const subtree = editable
+    ? await descendantIds(organization.id, categoryId)
+    : [categoryId]
+
+  const options = editable
+    ? await listCategoryOptions(organization.id, { localOnly: true })
+    : []
+
   return (
     <PageShell>
       <PageHeader
         backHref="/categories"
         backLabel="Categories"
-        title={category.name}
+        title={editable?.name ?? node?.name ?? 'Category'}
         description={path.map((step) => step.name).join(' → ')}
       />
 
+      {editable ? (
+        <CategoryForm
+          parentOptions={options.filter(
+            // A category cannot be moved inside its own subtree, so those are
+            // not offered — the service refuses it, and a select that can
+            // produce an error is a worse select.
+            (option) => !subtree.includes(option.id)
+          )}
+          initial={{
+            id: editable.id,
+            name: editable.name,
+            handle: editable.handle,
+            parentId: editable.parentId,
+            description: editable.description ?? '',
+            code: editable.code ?? '',
+            isActive: editable.isActive,
+            isFeatured: editable.isFeatured,
+            seoTitle: editable.seoTitle ?? '',
+            seoDescription: editable.seoDescription ?? '',
+          }}
+        />
+      ) : (
+        <p className="text-muted-foreground text-sm">
+          This category is on your own website and is edited there. It is shown
+          here so you can see what your storefront filters by.
+        </p>
+      )}
+
       <SettingsSection
         title="Products"
-        description="Filed under this category on your website."
+        description={
+          editable
+            ? 'Filed directly in this category.'
+            : 'Filed under this category on your website.'
+        }
       >
         {listed.items.length === 0 ? (
           <p className="text-muted-foreground text-sm">
-            Nothing is filed here, or your connector does not filter by
-            category.
+            Nothing is filed here yet.
           </p>
         ) : (
-          <ul className="divide-y text-sm">
+          <div className="bg-card divide-y overflow-hidden rounded-xl border">
             {listed.items.map((product) => (
-              <li
+              <div
                 key={product.id}
-                className="flex items-center justify-between gap-3 py-2"
+                className="flex items-center gap-3 p-3 text-sm"
               >
+                <div className="bg-muted size-9 shrink-0 overflow-hidden rounded-md">
+                  {product.images[0] && (
+                    // eslint-disable-next-line @next/next/no-img-element -- tenant CDN and merchant domains are not in next/image's allowlist
+                    <img
+                      src={product.images[0].url}
+                      alt=""
+                      className="size-full object-cover"
+                      loading="lazy"
+                    />
+                  )}
+                </div>
                 <Link
                   href={`/products/${encodeURIComponent(product.id)}`}
-                  className="truncate hover:underline"
+                  className="flex-1 truncate font-medium hover:underline"
                 >
                   {product.title}
                 </Link>
-                {product.status !== 'ACTIVE' && (
-                  <Badge variant="outline">
-                    {product.status === 'DRAFT' ? 'Draft' : 'Archived'}
-                  </Badge>
-                )}
-              </li>
+                <Badge
+                  variant={product.status === 'ACTIVE' ? 'lime' : 'secondary'}
+                >
+                  {product.status.toLowerCase()}
+                </Badge>
+              </div>
             ))}
-          </ul>
+          </div>
         )}
       </SettingsSection>
     </PageShell>

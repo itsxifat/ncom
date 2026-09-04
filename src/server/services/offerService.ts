@@ -4,8 +4,8 @@ import {
   getProductsByIds,
   isCatalogError,
   isSellable,
-  type RemoteProduct,
-  type RemoteVariant,
+  type CatalogProduct,
+  type CatalogVariant,
 } from '@/server/catalog'
 import {
   applyOfferPricing,
@@ -72,7 +72,7 @@ type OfferRow = Awaited<
  * One call for every product on the page, whatever the offers are: a lander
  * with six bundles over the same four products is four ids and one request.
  */
-type Catalogue = Map<string, RemoteProduct>
+type Catalogue = Map<string, CatalogProduct>
 
 async function loadCatalogue(
   organizationId: string,
@@ -88,7 +88,7 @@ async function loadCatalogue(
 type VariantRules = Map<string, OfferRow['variantRules'][number]>
 
 function toVariantChoice(
-  variant: RemoteVariant,
+  variant: CatalogVariant,
   rules: VariantRules
 ): OfferVariantChoice {
   const rule = rules.get(variant.id)

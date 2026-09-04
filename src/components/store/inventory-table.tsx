@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { ExternalLink, Infinity as InfinityIcon } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
+import { VariantStockInput } from '@/components/store/variant-stock-input'
 
 export interface InventoryTableRow {
   id: string
@@ -11,25 +12,24 @@ export interface InventoryTableRow {
   productId: string
   productTitle: string
   imageUrl: string | null
-  /** Null when the merchant's site does not count this line. */
+  /** Null when nothing counts this line. */
   available: number | null
+  /** Which catalogue owns the number, and therefore who may change it. */
+  source: 'LOCAL' | 'REMOTE'
 }
 
 /**
- * The stock table, which no longer edits anything.
+ * The stock table, over both catalogues.
  *
- * It used to: two ways to change a count, inline on the row, because "+12
- * arrived" and "there are 40" are different sentences a merchant says. Both are
- * gone, and their absence is the point. The numbers on this screen live in the
- * merchant's own system — the one their warehouse staff, their POS and their
- * accountant already use — and a second place to type them would be a second
- * answer to "how many are there", which is the exact problem this platform
- * stopped having.
+ * A row for one of NCOM's own products is editable inline: type the count you
+ * counted. A row read from the merchant's website is not, and shows where the
+ * number lives instead — their warehouse staff, their POS and their accountant
+ * already use that system, and a second place to type the figure would be a
+ * second answer to "how many are there", which is the exact problem a live read
+ * exists to avoid.
  *
- * So the row links out to the product on their site instead. One number, one
- * owner, and a page that is honest about which one it is.
- *
- * A server component: with nothing to click there is nothing to hydrate.
+ * So the difference between the two halves of this table is a text box. That is
+ * the whole of it, and it is deliberate that it is visible at a glance.
  */
 export function InventoryTable({
   rows,
@@ -74,7 +74,20 @@ export function InventoryTable({
                 </p>
               </div>
 
-              <StockBadge row={row} lowStockThreshold={lowStockThreshold} />
+              {/* Untracked local variants have no count to type, so they get
+                  the badge like a remote row does. */}
+              {row.source === 'LOCAL' && row.available !== null ? (
+                <VariantStockInput variantId={row.id} initial={row.available} />
+              ) : (
+                <StockBadge row={row} lowStockThreshold={lowStockThreshold} />
+              )}
+
+              <Badge
+                variant="outline"
+                className="text-muted-foreground shrink-0"
+              >
+                {row.source === 'LOCAL' ? 'In NCOM' : 'Your website'}
+              </Badge>
 
               {href && (
                 <Link
