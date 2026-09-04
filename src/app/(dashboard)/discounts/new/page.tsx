@@ -1,5 +1,4 @@
 import { getActiveOrganization } from '@/server/services/organizationService'
-import { listCollections } from '@/server/services/collectionService'
 import { getOrganizationSettings } from '@/server/services/organizationSettingsService'
 import { PageHeader } from '@/components/app/page-header'
 import { DiscountForm } from '@/components/store/discount-form'
@@ -14,9 +13,8 @@ function toLocalInput(date: Date): string {
 export default async function NewDiscountPage() {
   const { organization } = await getActiveOrganization()
 
-  const [targets, collections, settings] = await Promise.all([
+  const [targets, settings] = await Promise.all([
     loadDiscountTargets(organization.id),
-    listCollections(organization.id),
     getOrganizationSettings(organization.id),
   ])
 
@@ -30,7 +28,7 @@ export default async function NewDiscountPage() {
       <DiscountForm
         currencyCode={settings?.currencyCode ?? 'USD'}
         products={targets.products}
-        collections={collections.map((c) => ({ id: c.id, title: c.title }))}
+        collections={targets.collections}
         stores={targets.stores}
         variants={targets.variants}
         initial={{

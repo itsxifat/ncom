@@ -62,6 +62,15 @@ export interface StorefrontCommerce {
   offers: PublicOffer[]
   shipping: PublicShipping
   promotions: PublicPromotions
+  /**
+   * The merchant's website did not answer this render, so there is nothing to
+   * sell — as distinct from a page whose merchant has not built an offer yet.
+   *
+   * Two different sentences for the shopper and two different actions for the
+   * merchant, which is why sections are told which one happened rather than
+   * being handed an empty list and left to guess.
+   */
+  catalogUnavailable?: boolean
 }
 
 export interface SectionDefinition<T = unknown> {

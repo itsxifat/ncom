@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test'
 import path from 'node:path'
 import { Client } from 'pg'
+import { FakeShop } from './support/product-source'
 
 /**
  * Order editing, the status dropdown and the analytics plan gate.
@@ -11,13 +12,19 @@ import { Client } from 'pg'
  * registers per test starts failing on its second run and looks like a product
  * bug.
  *
- * Registration goes through the UI so the session is a real one; the catalogue
- * and the orders are written straight to the database, because reaching them
- * through a storefront checkout would be testing checkout.
+ * Registration goes through the UI so the session is a real one; the orders are
+ * written straight to the database, because reaching them through a storefront
+ * checkout would be testing checkout.
+ *
+ * The catalogue cannot be written at all: NCOM does not store one. It is served
+ * by a fake merchant website (see support/product-source.ts) which the workspace
+ * is pointed at through the real settings screen, so what the editor reads here
+ * is a live HTTP read exactly as production does it.
  *
  * The assertions that matter are the ones about money and stock. An order
  * editor that renders correctly and books the wrong inventory is worse than one
- * that does not render at all, so every case here reads the database back.
+ * that does not render at all — so money is read back from the database, and
+ * stock from the shop that owns it.
  */
 
 /**
@@ -26,6 +33,7 @@ import { Client } from 'pg'
  * These are assertions about rows, which SQL says perfectly well.
  */
 let db: Client
+let shop: FakeShop
 
 async function one<T = Record<string, unknown>>(
   sql: string,
@@ -66,6 +74,9 @@ test.beforeAll(async ({ browser }) => {
   db = new Client({ connectionString: process.env.DATABASE_URL })
   await db.connect()
 
+  shop = new FakeShop()
+  const shopPort = await shop.listen()
+
   // `storageState: undefined` explicitly: Playwright's `browser` fixture merges
   // the file's `test.use` context options into `newContext()`, and this is the
   // context that has to run signed *out* in order to create that state.
@@ -102,74 +113,54 @@ test.beforeAll(async ({ browser }) => {
     )
   ).organizationId
 
+  // Point the workspace at the fake shop before saving the session, so every
+  // test below opens with a catalogue already connected.
+  await shop.connect(page, shopPort)
+
   await context.storageState({ path: STORAGE_STATE })
   await context.close()
 })
 
 test.afterAll(async () => {
+  await shop?.close()
   await db?.end()
 })
 
 // Every test below runs as the owner registered above.
 test.use({ storageState: STORAGE_STATE })
 
-/** A product with one variant and a known amount of stock at one location. */
-async function seedProduct(
-  organizationId: string,
-  title: string,
-  priceCents: number,
-  available: number
-) {
-  const existing = await all<{ id: string }>(
-    `SELECT id FROM "Location" WHERE "organizationId" = $1 LIMIT 1`,
-    [organizationId]
-  )
-  const locationId =
-    existing[0]?.id ??
-    (
-      await one<{ id: string }>(
-        `INSERT INTO "Location" (id, "organizationId", name)
-         VALUES ($1, $2, 'Main') RETURNING id`,
-        [id('loc'), organizationId]
-      )
-    ).id
-
+/**
+ * A product with one variant and a known amount of stock, on the fake shop.
+ *
+ * Synchronous, and no SQL: the catalogue is not in this database. The ids are
+ * the shop's own, which is exactly what an order line stores.
+ */
+function seedProduct(title: string, priceCents: number, available: number) {
   const productId = id('prod')
-  await db.query(
-    `INSERT INTO "Product" (id, "organizationId", title, handle, status, "updatedAt")
-     VALUES ($1, $2, $3, $4, 'ACTIVE', now())`,
-    [productId, organizationId, title, title.toLowerCase().replace(/\s+/g, '-')]
-  )
-
   const variantId = id('var')
-  await db.query(
-    `INSERT INTO "ProductVariant"
-       (id, "productId", title, sku, "priceCents", "inventoryTracked", "inventoryPolicy", "updatedAt")
-     VALUES ($1, $2, 'Default Title', $3, $4, true, 'DENY', now())`,
-    [variantId, productId, `${title.replace(/\s+/g, '')}-SKU`, priceCents]
-  )
+  const sku = `${title.replace(/\s+/g, '')}-SKU`
 
-  await db.query(
-    `INSERT INTO "InventoryLevel" (id, "variantId", "locationId", available, committed, "updatedAt")
-     VALUES ($1, $2, $3, $4, 0, now())`,
-    [id('lvl'), variantId, locationId, available]
-  )
+  shop.add({
+    id: productId,
+    title,
+    variants: [
+      { id: variantId, title: 'Default Title', sku, priceCents, available },
+    ],
+  })
 
-  return {
-    product: { id: productId, title },
-    variant: { id: variantId, sku: `${title.replace(/\s+/g, '')}-SKU` },
-    locationId,
-  }
+  return { product: { id: productId, title }, variant: { id: variantId, sku } }
 }
 
-async function availableFor(variantId: string) {
-  const row = await one<{ available: string; committed: string }>(
-    `SELECT COALESCE(SUM(available), 0) AS available,
-            COALESCE(SUM(committed), 0) AS committed
-       FROM "InventoryLevel" WHERE "variantId" = $1`,
-    [variantId]
-  )
-  return { available: num(row.available), committed: num(row.committed) }
+/**
+ * What the shop says is left.
+ *
+ * There is no `committed` any more: that column existed because NCOM held its
+ * own copy of the count and had to remember which part of it was promised. The
+ * merchant's shop holds one number, and an order either took units out of it or
+ * did not.
+ */
+function availableFor(variantId: string): number | null {
+  return shop.availableFor(variantId)
 }
 
 test('edit a placed order: change quantity, add a product, and see stock move', async ({
@@ -177,8 +168,8 @@ test('edit a placed order: change quantity, add a product, and see stock move', 
 }) => {
   const stamp = Date.now()
 
-  const shirt = await seedProduct(organizationId, `Shirt ${stamp}`, 50_000, 10)
-  const cap = await seedProduct(organizationId, `Cap ${stamp}`, 20_000, 10)
+  const shirt = seedProduct(`Shirt ${stamp}`, 50_000, 10)
+  const cap = seedProduct(`Cap ${stamp}`, 20_000, 10)
 
   // One order for two shirts, with the stock reserved the way checkout would
   // have left it: two units out of `available`, two sitting in `committed`.
@@ -207,14 +198,9 @@ test('edit a placed order: change quantity, add a product, and see stock move', 
     ]
   )
 
-  // The stock left the way checkout would have left it: two units out of
-  // `available`, two sitting in `committed`.
-  await db.query(
-    `UPDATE "InventoryLevel"
-        SET available = available - 2, committed = committed + 2
-      WHERE "variantId" = $1`,
-    [shirt.variant.id]
-  )
+  // The stock left the way checkout would have left it: the shop reserved two
+  // when the order was placed, so it has eight.
+  shop.variant(shirt.variant.id)!.available = 8
 
   await test.step('the editor opens with the order in it', async () => {
     await page.goto(`/orders/${orderId}`)
@@ -286,17 +272,13 @@ test('edit a placed order: change quantity, add a product, and see stock move', 
     expect(capLine?.title).toBe(cap.product.title)
     expect(num(capLine?.unitPriceCents)).toBe(20_000)
 
-    // One more shirt reserved: 8 available -> 7, 2 committed -> 3.
-    expect(await availableFor(shirt.variant.id)).toEqual({
-      available: 7,
-      committed: 3,
-    })
+    // One more shirt asked for: the shop went 8 -> 7.
+    expect(availableFor(shirt.variant.id)).toBe(7)
+    expect(shop.reservedFor(shirt.variant.id)).toBe(1)
 
-    // The cap was never reserved before, so one unit moves across.
-    expect(await availableFor(cap.variant.id)).toEqual({
-      available: 9,
-      committed: 1,
-    })
+    // The cap was never on this order before, so one unit leaves the shelf.
+    expect(availableFor(cap.variant.id)).toBe(9)
+    expect(shop.reservedFor(cap.variant.id)).toBe(1)
 
     // The edit is on the record, with a human-readable summary.
     const edited = await one<{ message: string }>(
@@ -331,10 +313,9 @@ test('edit a placed order: change quantity, add a product, and see stock move', 
     expect(remaining).toHaveLength(1)
     expect(num(saved.subtotalCents)).toBe(150_000)
 
-    expect(await availableFor(cap.variant.id)).toEqual({
-      available: 10,
-      committed: 0,
-    })
+    // Released back to the shop, which is the only place it can go now.
+    expect(availableFor(cap.variant.id)).toBe(10)
+    expect(shop.reservedFor(cap.variant.id)).toBe(0)
   })
 })
 
@@ -343,7 +324,7 @@ test('the order list colours rows by status and changes status inline', async ({
 }) => {
   const stamp = Date.now()
 
-  const item = await seedProduct(organizationId, `Widget ${stamp}`, 30_000, 5)
+  const item = seedProduct(`Widget ${stamp}`, 30_000, 5)
 
   const orderId = id('ord')
   await db.query(
@@ -525,12 +506,7 @@ test('a cancelled order reads as cancelled in the list, not only on its own page
   page,
 }) => {
   const stamp = Date.now()
-  const item = await seedProduct(
-    organizationId,
-    `Boxed set ${stamp}`,
-    25_000,
-    6
-  )
+  const item = seedProduct(`Boxed set ${stamp}`, 25_000, 6)
 
   const line = (orderId: string) =>
     db.query(
@@ -637,7 +613,7 @@ test('a line can be repriced for one order without touching the catalogue', asyn
 }) => {
   const stamp = Date.now()
 
-  const mug = await seedProduct(organizationId, `Mug ${stamp}`, 50_000, 10)
+  const mug = seedProduct(`Mug ${stamp}`, 50_000, 10)
 
   const orderId = id('ord')
   await db.query(
@@ -663,12 +639,7 @@ test('a line can be repriced for one order without touching the catalogue', asyn
       mug.variant.sku,
     ]
   )
-  await db.query(
-    `UPDATE "InventoryLevel"
-        SET available = available - 2, committed = committed + 2
-      WHERE "variantId" = $1`,
-    [mug.variant.id]
-  )
+  shop.variant(mug.variant.id)!.available = 8
 
   await test.step('type a new price on the line', async () => {
     await page.goto(`/orders/${orderId}`)
@@ -708,18 +679,14 @@ test('a line can be repriced for one order without touching the catalogue', asyn
     expect(num(saved.subtotalCents)).toBe(90_000)
     expect(num(saved.totalCents)).toBe(96_000)
 
-    // The whole point: the product still lists at 500 for the next customer.
-    const variant = await one<{ priceCents: number }>(
-      `SELECT "priceCents" FROM "ProductVariant" WHERE id = $1`,
-      [mug.variant.id]
-    )
-    expect(num(variant.priceCents)).toBe(50_000)
+    // The whole point: the shop still lists it at 500 for the next customer.
+    // A negotiated price is written to the order and never back to the
+    // catalogue — which NCOM could not write to even if it wanted to.
+    expect(shop.variant(mug.variant.id)?.priceCents).toBe(50_000)
 
     // Repricing moves no stock — the customer is buying the same two mugs.
-    expect(await availableFor(mug.variant.id)).toEqual({
-      available: 8,
-      committed: 2,
-    })
+    expect(availableFor(mug.variant.id)).toBe(8)
+    expect(shop.reservedFor(mug.variant.id)).toBe(0)
 
     // And the history says what happened, in money rather than in paisa.
     const edited = await one<{ message: string }>(

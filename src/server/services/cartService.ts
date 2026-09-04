@@ -2,7 +2,12 @@ import 'server-only'
 import { prisma } from '@/server/db/client'
 import type { Prisma } from '@/generated/prisma/client'
 import { priceCartById, type PricedCart } from './pricingService'
-import { getAvailability } from './inventoryService'
+import {
+  getStock,
+  isSellable,
+  resolveVariants,
+  type StockState,
+} from '@/server/catalog'
 import type {
   AddToCartInput,
   CartContactInput,
@@ -22,6 +27,11 @@ import type { AddressInput } from '@/lib/validation/address'
  *
  * Carts are never priced by the client. Every mutation returns a freshly
  * computed PricedCart from pricingService.
+ *
+ * Nothing about the goods is stored on the cart beyond the merchant's own ids
+ * and a display snapshot. Title, price, image and stock are read from the
+ * merchant's website on every render — a cart open in a tab for an hour shows
+ * what their shop says right now, not what it said when the shopper started.
  */
 
 /** Abandoned carts stop being reachable after this, freeing their tokens. */
@@ -55,27 +65,7 @@ export interface CartWithPricing {
 }
 
 const CART_INCLUDE = {
-  lines: {
-    orderBy: { createdAt: 'asc' as const },
-    include: {
-      variant: {
-        include: {
-          product: {
-            select: {
-              title: true,
-              handle: true,
-              status: true,
-              images: {
-                orderBy: { position: 'asc' as const },
-                take: 1,
-                include: { media: { select: { url: true } } },
-              },
-            },
-          },
-        },
-      },
-    },
-  },
+  lines: { orderBy: { createdAt: 'asc' as const } },
 } as const
 
 export async function getOrCreateCart(
@@ -127,21 +117,21 @@ export async function addToCart(
 ): Promise<CartWithPricing> {
   const cart = await requireOpenCart(organizationId, token)
 
-  // Scoping the variant lookup through product.organizationId is what stops a
-  // crafted request adding another store's product to this cart.
-  const variant = await prisma.productVariant.findFirst({
-    where: {
-      id: input.variantId,
-      product: { organizationId, status: 'ACTIVE' },
-    },
-    select: {
-      id: true,
-      priceCents: true,
-      inventoryTracked: true,
-      inventoryPolicy: true,
-    },
-  })
-  if (!variant) throw new Error('This product is no longer available')
+  // Resolved against this organisation's own connected website, which is what
+  // stops a crafted request adding another tenant's product to this cart — the
+  // connection is per workspace, so a variant id from someone else's shop
+  // simply does not resolve here.
+  const entry = (
+    await resolveVariants(organizationId, [
+      { variantId: input.variantId, productId: input.productId ?? null },
+    ])
+  ).get(input.variantId)
+
+  if (!entry || entry.product.status !== 'ACTIVE') {
+    throw new Error('This product is no longer available')
+  }
+
+  const { variant, product } = entry
 
   const existingLine = await prisma.cartLine.findUnique({
     where: { cartId_variantId: { cartId: cart.id, variantId: variant.id } },
@@ -150,12 +140,26 @@ export async function addToCart(
 
   const desiredQuantity = (existingLine?.quantity ?? 0) + input.quantity
 
-  await assertPurchasable(variant, desiredQuantity)
+  assertPurchasable(variant, desiredQuantity)
+
+  // The snapshot is rewritten on every add, so a line's description keeps up
+  // with a renamed product for as long as anyone touches the cart.
+  const snapshot = {
+    productId: product.id,
+    title: product.title,
+    variantTitle: variant.title,
+    handle: product.handle,
+    sku: variant.sku,
+    imageUrl: variant.imageUrl ?? product.images[0]?.url ?? null,
+    requiresShipping: variant.requiresShipping,
+    weightGrams: variant.weightGrams,
+  }
 
   if (existingLine) {
     await prisma.cartLine.update({
       where: { id: existingLine.id },
       data: {
+        ...snapshot,
         quantity: desiredQuantity,
         unitPriceCents: variant.priceCents,
         properties: input.properties ?? undefined,
@@ -164,6 +168,7 @@ export async function addToCart(
   } else {
     await prisma.cartLine.create({
       data: {
+        ...snapshot,
         cartId: cart.id,
         variantId: variant.id,
         quantity: input.quantity,
@@ -186,28 +191,26 @@ export async function updateCartLine(
 
   const line = await prisma.cartLine.findFirst({
     where: { id: input.lineId, cartId: cart.id },
-    include: {
-      variant: {
-        select: {
-          id: true,
-          inventoryTracked: true,
-          inventoryPolicy: true,
-          priceCents: true,
-        },
-      },
-    },
+    select: { id: true, variantId: true, productId: true },
   })
   if (!line) throw new Error('Cart line not found')
 
   if (input.quantity === 0) {
     await prisma.cartLine.delete({ where: { id: line.id } })
   } else {
-    await assertPurchasable(line.variant, input.quantity)
+    const entry = (
+      await resolveVariants(organizationId, [
+        { variantId: line.variantId, productId: line.productId },
+      ])
+    ).get(line.variantId)
+    if (!entry) throw new Error('This product is no longer available')
+
+    assertPurchasable(entry.variant, input.quantity)
     await prisma.cartLine.update({
       where: { id: line.id },
       data: {
         quantity: input.quantity,
-        unitPriceCents: line.variant.priceCents,
+        unitPriceCents: entry.variant.priceCents,
       },
     })
   }
@@ -352,35 +355,29 @@ async function requireOpenCart(organizationId: string, token: string) {
 }
 
 /**
- * Rejects a quantity that stock cannot cover.
+ * Rejects a quantity the merchant's own stock figure cannot cover.
  *
- * This is a courtesy check for a useful error message, not the guarantee —
- * between here and checkout another shopper can take the last unit. The real
- * protection is the conditional decrement in
- * inventoryService.commitInventoryForOrder, which runs inside the checkout
- * transaction.
+ * A courtesy check for a useful error message, not a guarantee — between here
+ * and checkout another shopper can take the last unit, and that race is now
+ * settled on the merchant's side rather than ours. The real protection is the
+ * reservation checkout asks their site for; where a site does not implement
+ * one, this check plus the re-read at checkout is all there is, which the
+ * connector documentation says plainly.
+ *
+ * Takes the variant it was already given rather than re-reading: the caller
+ * resolved it a line ago in this same request, and a second call would be a
+ * second round trip to the merchant's server for a number that cannot have
+ * changed meaningfully in between.
  */
-async function assertPurchasable(
-  variant: {
-    id: string
-    inventoryTracked: boolean
-    inventoryPolicy: 'DENY' | 'CONTINUE'
-  },
-  quantity: number
-) {
-  if (!variant.inventoryTracked || variant.inventoryPolicy === 'CONTINUE')
-    return
+function assertPurchasable(variant: StockState, quantity: number) {
+  if (isSellable(variant, quantity)) return
 
-  const availability = await getAvailability([variant.id])
-  const available = availability.get(variant.id) ?? 0
-
-  if (available < quantity) {
-    throw new Error(
-      available > 0
-        ? `Only ${available} left in stock`
-        : 'This item is out of stock'
-    )
-  }
+  const available = variant.available ?? 0
+  throw new Error(
+    available > 0
+      ? `Only ${available} left in stock`
+      : 'This item is out of stock'
+  )
 }
 
 async function touchCart(cartId: string) {
@@ -402,25 +399,42 @@ async function loadDecorated(cartId: string): Promise<CartWithPricing> {
 
 type CartRow = Prisma.CartGetPayload<{ include: typeof CART_INCLUDE }>
 
+/**
+ * Turns cart rows into what a storefront renders, reading the goods live.
+ *
+ * Three reads happen per cart render — the pricing engine's own resolution, the
+ * stock call, and whatever a section asks for — and they are deduplicated
+ * within the request, so one render is one round trip per distinct question.
+ *
+ * A line whose variant no longer resolves is still shown, from its snapshot,
+ * and marked unavailable. Dropping it silently would leave a shopper looking at
+ * a cart that lost an item with no explanation; pricing has already excluded it
+ * from every total.
+ */
 async function decorateCart(cart: CartRow): Promise<CartWithPricing> {
-  const pricing = await priceCartById(cart.id)
+  const refs = cart.lines.map((line) => ({
+    variantId: line.variantId,
+    productId: line.productId,
+  }))
 
-  const trackedVariantIds = cart.lines
-    .filter(
-      (line) =>
-        line.variant.inventoryTracked && line.variant.inventoryPolicy === 'DENY'
-    )
-    .map((line) => line.variantId)
-
-  const availability = await getAvailability(trackedVariantIds)
+  const [pricing, resolved, stock] = await Promise.all([
+    priceCartById(cart.id),
+    resolveVariants(cart.organizationId, refs),
+    getStock(cart.organizationId, refs),
+  ])
 
   const unavailableLineIds = cart.lines
     .filter((line) => {
-      // A product unpublished after the item was added is as unavailable as
-      // one that sold out.
-      if (line.variant.product.status !== 'ACTIVE') return true
-      if (!trackedVariantIds.includes(line.variantId)) return false
-      return (availability.get(line.variantId) ?? 0) < line.quantity
+      const entry = resolved.get(line.variantId)
+      // Gone from the catalogue, or unpublished after the item was added: both
+      // are as unavailable as sold out.
+      if (!entry || entry.product.status !== 'ACTIVE') return true
+
+      const state = stock.get(line.variantId) ?? {
+        available: entry.variant.available,
+        policy: entry.variant.policy,
+      }
+      return !isSellable(state, line.quantity)
     })
     .map((line) => line.id)
 
@@ -434,19 +448,32 @@ async function decorateCart(cart: CartRow): Promise<CartWithPricing> {
     shippingRateId: cart.shippingRateId,
     shippingAddress: cart.shippingAddress,
     billingAddress: cart.billingAddress,
-    lines: cart.lines.map((line) => ({
-      id: line.id,
-      variantId: line.variantId,
-      quantity: line.quantity,
-      title: line.variant.product.title,
-      variantTitle: line.variant.title,
-      handle: line.variant.product.handle,
-      sku: line.variant.sku,
-      imageUrl: line.variant.product.images[0]?.media.url ?? null,
-      unitPriceCents: line.variant.priceCents,
-      properties: line.properties,
-    })),
+    lines: cart.lines.map((line) => {
+      const entry = resolved.get(line.variantId)
+      return {
+        id: line.id,
+        variantId: line.variantId,
+        quantity: line.quantity,
+        title: entry?.product.title ?? line.title ?? 'Item',
+        variantTitle: entry?.variant.title ?? line.variantTitle ?? '',
+        handle: entry?.product.handle ?? line.handle ?? '',
+        sku: entry?.variant.sku ?? line.sku ?? null,
+        imageUrl:
+          entry?.variant.imageUrl ??
+          entry?.product.images[0]?.url ??
+          line.imageUrl ??
+          null,
+        // The live price, or the last one the shopper was shown when the item
+        // can no longer be read. The line is marked unavailable either way, and
+        // pricing has already left it out of the totals — this number is a
+        // label on a struck-through row, not a charge.
+        unitPriceCents: entry?.variant.priceCents ?? line.unitPriceCents,
+        properties: line.properties,
+      }
+    }),
     pricing,
-    unavailableLineIds,
+    unavailableLineIds: [
+      ...new Set([...unavailableLineIds, ...pricing.unpricedLineIds]),
+    ],
   }
 }

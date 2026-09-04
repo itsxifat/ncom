@@ -169,6 +169,26 @@ export async function getCurrencyContext(organizationId: string) {
  * the dashboard disagree with the merchant's bank account. Cancelled orders
  * are excluded from the order count for the same reason.
  */
+async function countProducts(organizationId: string): Promise<number | null> {
+  try {
+    const { listProducts } = await import('@/server/catalog')
+    const page = await listProducts(organizationId, { limit: 1 })
+    return page.total
+  } catch {
+    return null
+  }
+}
+
+async function countLowStock(organizationId: string): Promise<number | null> {
+  try {
+    const { getInventorySummary } = await import('./inventoryService')
+    const summary = await getInventorySummary(organizationId)
+    return summary.low + summary.out
+  } catch {
+    return null
+  }
+}
+
 export async function getStoreOverview(organizationId: string) {
   await requireOrgAccess(organizationId, 'VIEWER')
 
@@ -193,14 +213,14 @@ export async function getStoreOverview(organizationId: string) {
         createdAt: { gte: thirtyDaysAgo },
       },
     }),
-    prisma.product.count({ where: { organizationId, status: 'ACTIVE' } }),
+    // Products and low stock come from the merchant's own website, and both
+    // are best-effort: an overview screen must still render its revenue and its
+    // orders when someone's shop is having a bad minute. Null reads as "not
+    // available right now" rather than as zero, which would look like a shop
+    // that lost its catalogue.
+    countProducts(organizationId),
     prisma.customer.count({ where: { organizationId } }),
-    prisma.inventoryLevel.count({
-      where: {
-        available: { lte: 5 },
-        variant: { inventoryTracked: true, product: { organizationId } },
-      },
-    }),
+    countLowStock(organizationId),
     prisma.order.findMany({
       where: { organizationId },
       select: {

@@ -9,9 +9,9 @@ import { API_SCOPES } from '@/server/services/apiKeyService'
 import { WEBHOOK_TOPICS } from '@/server/services/webhookService'
 
 export const metadata: Metadata = {
-  title: 'API & webhooks — NCOM developer documentation',
+  title: 'Product source & API — NCOM developer documentation',
   description:
-    'Import your existing catalogue, keep stock in sync in both directions, and receive signed webhooks when products, stock or orders change.',
+    'Connect your website so NCOM reads your products, prices and stock live on every request, read orders back, and receive signed webhooks.',
 }
 
 /**
@@ -23,6 +23,13 @@ export const metadata: Metadata = {
  * Splitting it into twelve routes optimises for a reader who is browsing, and
  * nobody browses integration docs.
  *
+ * The Product source section is the important one and is placed before the REST
+ * API for that reason: it is what a merchant has to build, and everything else
+ * here is optional next to it. The catalogue endpoints this page used to
+ * document — products, categories, inventory, the importer — are retired and
+ * answer 410; the model they belonged to is described in the section that
+ * replaced them.
+ *
  * The scope and topic tables are generated from the same constants the server
  * enforces, so a permission renamed in code cannot go on being documented under
  * its old name.
@@ -32,15 +39,10 @@ const NAV_SECTIONS = [
   { id: 'quickstart', label: 'Quickstart' },
   { id: 'authentication', label: 'Authentication' },
   { id: 'conventions', label: 'Conventions' },
-  { id: 'products', label: 'Products' },
-  { id: 'images', label: 'Images' },
-  { id: 'import', label: 'Importing a catalogue' },
-  { id: 'categories', label: 'Categories' },
-  { id: 'inventory', label: 'Inventory' },
+  { id: 'product-source', label: 'Product source' },
   { id: 'orders', label: 'Orders' },
   { id: 'courier', label: 'Courier automation' },
   { id: 'webhooks', label: 'Webhooks' },
-  { id: 'stock-sync', label: 'Two-way stock sync' },
   { id: 'errors', label: 'Errors & limits' },
 ]
 
@@ -58,12 +60,13 @@ export default async function DocsPage() {
             Developer documentation
           </p>
           <h1 className="font-display mt-2 text-4xl font-semibold tracking-tight sm:text-5xl">
-            API &amp; webhooks
+            Product source &amp; API
           </h1>
           <p className="text-muted-foreground mt-4 text-lg">
-            Move your catalogue in from the system you already use, and keep
-            stock correct on both sides as orders come in. Every code sample on
-            this page is copyable.
+            Your website keeps your catalogue. NCOM reads it live — on every
+            page view, every cart and every checkout — and never stores a copy.
+            This page is how to build the endpoint it reads. Every code sample
+            is copyable.
           </p>
         </header>
 
@@ -71,34 +74,34 @@ export default async function DocsPage() {
           <article className="prose-docs min-w-0">
             <Section id="quickstart" title="Quickstart">
               <P>
-                Three steps: create a key, check it works, pull your products
-                in. The whole thing takes about ten minutes.
+                There are two separate things here, and only the first one is
+                required.
               </P>
 
               <Ol>
                 <li>
-                  In your dashboard, go to{' '}
-                  <strong>Developers → API keys</strong> and create a key with
-                  the permissions you need. Copy it — it is shown once.
+                  <strong>Connect your website as the product source.</strong>{' '}
+                  Deploy the connector endpoints described below, paste the URL
+                  into <strong>Settings → Product source</strong>, and your
+                  catalogue is live on every landing page. Nothing is imported.
+                  About an hour of work, most of it copying one of the reference
+                  implementations.
                 </li>
                 <li>
-                  Confirm it is pointed at the right workspace with{' '}
+                  <strong>Optionally, use the REST API</strong> to read orders
+                  back into your own system, or take webhooks when one is
+                  placed. Create a key under{' '}
+                  <strong>Developers → API keys</strong> and confirm it with{' '}
                   <Code>GET /api/v1/me</Code>.
-                </li>
-                <li>
-                  Push your catalogue with{' '}
-                  <Code>POST /api/v1/products/import</Code> — images included,
-                  by URL — then register a webhook so stock stays in step.
                 </li>
               </Ol>
 
-              <Callout title="Check currencyConfigured before your first import">
-                Prices are minor units of the workspace currency and nothing
-                downstream can detect a mismatch afterwards. If{' '}
-                <Code>currencyConfigured</Code> is <Code>false</Code>, the
-                workspace is still on a default nobody chose — set it under
-                Settings first, and send <Code>expectCurrency</Code> on the
-                import so a mismatch is refused rather than guessed.
+              <Callout title="If you built an importer for an older version of this platform, switch it off">
+                <Code>POST /api/v1/products/import</Code>,{' '}
+                <Code>/api/v1/products</Code>, <Code>/api/v1/categories</Code>{' '}
+                and <Code>/api/v1/inventory</Code> are retired and answer{' '}
+                <Code>410 Gone</Code>. Nothing needs to replace the sync — that
+                is the point of reading live. Connect a product source instead.
               </Callout>
 
               <CodeBlock
@@ -124,12 +127,21 @@ export default async function DocsPage() {
     },
     "key": {
       "id": "clx8f3m1a0001",
-      "name": "Main site sync",
-      "scopes": ["PRODUCTS_READ", "PRODUCTS_WRITE", "INVENTORY_WRITE"]
+      "name": "Order export",
+      "scopes": ["ORDERS_READ"]
     }
   }
 }`}
               />
+
+              <Callout title="Set your currency before connecting a shop">
+                Prices read from your website are interpreted in the workspace
+                currency, and nothing downstream can detect a mismatch. If{' '}
+                <Code>currencyConfigured</Code> is <Code>false</Code>, the
+                workspace is still on a default nobody chose — set it under
+                Settings first. The connection panel compares your site&apos;s
+                reported currency against it and warns rather than converting.
+              </Callout>
             </Section>
 
             <Section id="authentication" title="Authentication">
@@ -228,690 +240,570 @@ curl ${baseUrl}/api/v1/products \\
               />
             </Section>
 
-            <Section id="products" title="Products">
-              <EndpointTable
-                rows={[
-                  ['GET', '/api/v1/products', 'List products'],
-                  ['POST', '/api/v1/products', 'Create a product'],
-                  ['GET', '/api/v1/products/{id}', 'Fetch one product'],
-                  ['PATCH', '/api/v1/products/{id}', 'Update a product'],
-                  ['DELETE', '/api/v1/products/{id}', 'Delete a product'],
-                ]}
-              />
-
+            <Section id="product-source" title="Product source">
               <P>
-                List accepts <Code>?search=</Code> (title, handle, vendor, SKU
-                or barcode), <Code>?status=active|draft|archived</Code> and{' '}
-                <Code>?categoryId=</Code>. Filtering by a category includes
-                everything beneath it, so asking for a department returns the
-                products in its subcategories too.
+                This is the part to read first, because everything else on this
+                page assumes it. NCOM does not store your catalogue. There is no
+                product table, no stock table and no copy of your photographs.
+                When a shopper opens one of your landing pages, NCOM asks your
+                website what you sell, what it costs and how many are left, and
+                renders the answer.
               </P>
 
-              <H3>Pulling only what changed</H3>
               <P>
-                <Code>?updatedSince=</Code> and <Code>?createdSince=</Code> take
-                an ISO 8601 timestamp and are what make an incremental sync
-                possible — without them the only way to find recent changes is
-                to page the whole catalogue and diff it locally, which burns
-                your read budget on rows that did not move. Results are ordered
-                newest-changed first.
+                So there is nothing to import and no sync to keep running. What
+                you build instead is one small read-only endpoint group on your
+                own site, and NCOM calls it.
               </P>
 
-              <CodeBlock
-                title="Everything touched in the last hour"
-                language="bash"
-                code={`SINCE=$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ)
-
-curl "${baseUrl}/api/v1/products?updatedSince=$SINCE&limit=250" \\
-  -H "Authorization: Bearer $NCOM_API_KEY"`}
-              />
-
-              <Callout title="Store the cursor from your own clock, not ours">
-                Take the timestamp <em>before</em> you start a pull and use it
-                as the next cursor, rather than the newest{' '}
-                <Code>updatedAt</Code> you saw. A product changed while the pull
-                was in flight would otherwise fall between the two and never be
-                seen again. Overlap by a minute — events are idempotent, so
-                re-reading a handful of rows is free.
+              <Callout title="What you get for it">
+                A price you change at 3pm is the price on every landing page at
+                3pm. A product you unpublish stops being sold. Stock is your
+                stock, in your database, counted once. Nothing drifts, because
+                there is no second copy to drift from.
               </Callout>
 
-              <H3>Addressing a product by your own id</H3>
-              <P>
-                Anywhere <Code>{'{id}'}</Code> appears you can pass{' '}
-                <Code>externalId:YOUR-ID</Code> instead of ours. That means you
-                never have to store our ids or keep a mapping table.
-              </P>
-
-              <CodeBlock
-                language="bash"
-                code={`# Both fetch the same product
-curl ${baseUrl}/api/v1/products/clx8f2k9v0000 \\
-  -H "Authorization: Bearer $NCOM_API_KEY"
-
-curl ${baseUrl}/api/v1/products/externalId:SKU-1042 \\
-  -H "Authorization: Bearer $NCOM_API_KEY"`}
-              />
-
-              <H3>Creating a product</H3>
-              <P>
-                A product needs a title and at least one variant. A product
-                without options still has exactly one variant — that is what
-                carries the price and the stock.
-              </P>
-
-              <CodeBlock
-                title="POST /api/v1/products"
-                language="bash"
-                code={`curl -X POST ${baseUrl}/api/v1/products \\
-  -H "Authorization: Bearer $NCOM_API_KEY" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "title": "Classic Cotton Tee",
-    "description": "<p>Heavyweight combed cotton.</p>",
-    "status": "ACTIVE",
-    "vendor": "Elysium",
-    "productType": "T-shirt",
-    "tags": ["cotton", "summer"],
-    "categoryId": "clx8category0001",
-    "externalId": "SKU-1042",
-    "options": [
-      { "name": "Size", "position": 1, "values": ["S", "M", "L"] }
-    ],
-    "variants": [
-      { "option1": "S", "priceCents": 1299, "sku": "TEE-S", "weightGrams": 180 },
-      { "option1": "M", "priceCents": 1299, "sku": "TEE-M", "weightGrams": 190 },
-      { "option1": "L", "priceCents": 1499, "sku": "TEE-L", "weightGrams": 200 }
-    ]
-  }'`}
-              />
-
-              <Callout title="Variants and options have to agree">
-                If you declare an option with three values, send three variants
-                — one per combination. Two variants sharing the same combination
-                are rejected, because the storefront would have no way to decide
-                which one a shopper picked.
-              </Callout>
-
-              <H3>Updating</H3>
-              <P>
-                <Code>PATCH</Code> is a partial update: fields you omit are left
-                alone. Two exceptions are worth knowing —{' '}
-                <Code>{'"categoryId": null'}</Code> removes a product from its
-                category, and sending <Code>variants</Code> replaces the whole
-                set, so include every variant you want to keep.
-              </P>
-
-              <CodeBlock
-                language="bash"
-                code={`curl -X PATCH ${baseUrl}/api/v1/products/externalId:SKU-1042 \\
-  -H "Authorization: Bearer $NCOM_API_KEY" \\
-  -H "Content-Type: application/json" \\
-  -d '{ "status": "DRAFT" }'`}
-              />
-
-              <H3>Deleting</H3>
-              <P>
-                A product that appears on an order cannot be deleted — the
-                request is refused with <Code>invalid_request</Code>. Archive it
-                instead (<Code>{'{ "status": "ARCHIVED" }'}</Code>): it leaves
-                the storefront, and past orders stay readable.
-              </P>
-            </Section>
-
-            <Section id="images" title="Images">
-              <P>
-                Send <Code>images[].src</Code> and we fetch the file, re-encode
-                it to WebP and store it. You do not have to upload anything
-                first — a catalogue whose photographs live on your existing CDN
-                can be moved across in one call per product.
-              </P>
-
-              <CodeBlock
-                title="Images by URL, on create or update"
-                language="bash"
-                code={`curl -X POST ${baseUrl}/api/v1/products \\
-  -H "Authorization: Bearer $NCOM_API_KEY" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "title": "Classic Cotton Tee",
-    "variants": [{ "priceCents": 1299 }],
-    "images": [
-      { "src": "https://cdn.yourshop.com/tee-front.jpg", "altText": "Front", "position": 0 },
-      { "src": "https://cdn.yourshop.com/tee-back.jpg",  "altText": "Back",  "position": 1 }
-    ]
-  }'`}
-              />
+              <H3>What you have to build</H3>
 
               <P>
-                Fetches are deduplicated on the URL. Re-running an import does
-                not download the same photographs again, and the product keeps
-                pointing at the asset that is already there — so an import you
-                run nightly costs one request per image the first time and none
-                afterwards.
-              </P>
-
-              <H3>The media library directly</H3>
-              <EndpointTable
-                rows={[
-                  ['GET', '/api/v1/media', 'List assets'],
-                  [
-                    'POST',
-                    '/api/v1/media',
-                    'Add one, from a URL or an uploaded file',
-                  ],
-                ]}
-              />
-
-              <P>
-                Use this when you want the <Code>mediaId</Code> before creating
-                the product, or when the bytes are local rather than on a public
-                URL. Assets are workspace-wide, so one uploaded image can be
-                used by several products.
-              </P>
-
-              <CodeBlock
-                title="From a URL"
-                language="bash"
-                code={`curl -X POST ${baseUrl}/api/v1/media \\
-  -H "Authorization: Bearer $NCOM_API_KEY" \\
-  -H "Content-Type: application/json" \\
-  -d '{ "src": "https://cdn.yourshop.com/tee-front.jpg", "altText": "Front" }'
-
-# 201 {"data":{"id":"clx8media0001","url":"https://cdn.ncom…/x.webp",
-#              "width":1600,"height":2000,"sourceUrl":"https://cdn.yourshop.com/tee-front.jpg"}}
-#
-# 200 instead of 201 means this URL was already in the library and
-# the existing asset was returned.`}
-              />
-
-              <CodeBlock
-                title="From a local file"
-                language="bash"
-                code={`curl -X POST ${baseUrl}/api/v1/media \\
-  -H "Authorization: Bearer $NCOM_API_KEY" \\
-  -F "file=@tee-front.jpg" \\
-  -F "altText=Front"`}
-              />
-
-              <P>
-                Then reference it by id, which behaves exactly like a{' '}
-                <Code>src</Code> did:
-              </P>
-
-              <CodeBlock
-                language="json"
-                code={`{ "images": [{ "mediaId": "clx8media0001", "position": 0 }] }`}
-              />
-
-              <H3>Rules and limits</H3>
-              <Ul>
-                <li>
-                  PNG, JPEG, WebP and GIF. Everything is re-encoded to WebP and
-                  scaled to fit 2400×2400, so upload the largest version you
-                  have.
-                </li>
-                <li>
-                  10&nbsp;MB per image. A URL that returns something bigger is
-                  refused without being downloaded in full.
-                </li>
-                <li>
-                  URLs must be public http or https. Private, loopback and
-                  link-local addresses are refused — this server does the
-                  fetching, so it will not be pointed at an internal one.
-                </li>
-                <li>
-                  <Code>position</Code> 0 is the product&rsquo;s main image: the
-                  one on cards, order lines and offer thumbnails.
-                </li>
-                <li>
-                  Image ingest has its own budget of 60 per minute, separate
-                  from the general write limit, because each one is a download,
-                  a re-encode and an upload.
-                </li>
-              </Ul>
-
-              <Callout title="Sending images replaces the gallery">
-                Like <Code>variants</Code>, an <Code>images</Code> array on{' '}
-                <Code>PATCH</Code> is the complete new gallery — anything you
-                leave out is removed from the product. Omit the key entirely to
-                leave the existing images alone. The underlying assets stay in
-                the library either way.
-              </Callout>
-            </Section>
-
-            <Section id="import" title="Importing your existing catalogue">
-              <P>
-                This is the endpoint to use when moving in from another system.
-                It takes up to 100 products per request and matches on{' '}
-                <Code>externalId</Code> — the id each product already has in
-                your database — so running it twice updates rather than
-                duplicates.
+                Everything hangs off a base URL you choose, for example{' '}
+                <Code>https://yourshop.com/ncom/v1</Code>. Enter it in{' '}
+                <strong>Settings → Product source</strong>.
               </P>
 
               <EndpointTable
                 rows={[
                   [
-                    'POST',
-                    '/api/v1/products/import',
-                    'Create or update up to 100 products',
+                    'GET',
+                    '{base}/ping',
+                    'Required. Handshake: who you are and what you implement',
                   ],
+                  ['GET', '{base}/products', 'Required. A page of products'],
+                  [
+                    'GET',
+                    '{base}/products/{id}',
+                    'Required. One product, by id or handle',
+                  ],
+                  [
+                    'POST',
+                    '{base}/stock',
+                    'Recommended. Current stock for a list of variants',
+                  ],
+                  ['GET', '{base}/categories', 'Optional. Your browse tree'],
+                  [
+                    'POST',
+                    '{base}/reserve',
+                    'Optional. Hold units for an order',
+                  ],
+                  ['POST', '{base}/release', 'Optional. Give held units back'],
                 ]}
               />
 
+              <P>
+                The shortest honest implementation is about 120 lines. Three
+                working ones are in the <Code>connectors/</Code> directory of
+                the NCOM repository: a WooCommerce plugin that needs no SQL at
+                all, a plain PHP + PDO file, and an Express router. Copy the
+                closest one and rename the columns.
+              </P>
+
+              <H3>Authentication</H3>
+
+              <P>
+                Every request NCOM makes is signed with a secret generated when
+                you connect and shown exactly once. Your endpoint verifies it
+                and refuses everything else — it exposes your prices, your
+                drafts and your stock, and on sites that implement{' '}
+                <Code>/reserve</Code> it can move that stock.
+              </P>
+
               <CodeBlock
-                title="POST /api/v1/products/import"
+                title="Headers on every request"
+                language="http"
+                code={`X-NCOM-Key:       ncomcat_9f2b1c4d7e08
+X-NCOM-Contract:  1
+X-NCOM-Timestamp: 1772630400
+X-NCOM-Signature: t=1772630400,v1=6f1d…c3
+User-Agent:       NCOM-Catalog/1`}
+              />
+
+              <P>
+                The signature is{' '}
+                <Code>
+                  hmac_sha256(secret, timestamp + &quot;.&quot; + raw body)
+                </Code>{' '}
+                in hex. The body is the exact bytes sent, and the empty string
+                for every GET. Reject a timestamp more than five minutes from
+                your own clock, and compare in constant time.
+              </P>
+
+              <Callout title="You may already have this function">
+                It is byte-for-byte the scheme NCOM signs outgoing webhooks
+                with. If you verify our webhooks today, paste the same function
+                here and change nothing.
+              </Callout>
+
+              <CodeBlock
+                title="Verifying, in PHP"
+                language="php"
+                code={`$parts = [];
+foreach (explode(',', $_SERVER['HTTP_X_NCOM_SIGNATURE'] ?? '') as $piece) {
+    [$k, $v] = array_pad(explode('=', trim($piece), 2), 2, '');
+    $parts[$k] = $v;
+}
+
+$timestamp = (int) ($parts['t'] ?? 0);
+$body = file_get_contents('php://input') ?: '';
+
+if (abs(time() - $timestamp) > 300) {
+    http_response_code(401);
+    exit;
+}
+
+$expected = hash_hmac('sha256', $timestamp . '.' . $body, NCOM_SECRET);
+
+if (!hash_equals($expected, $parts['v1'] ?? '')) {
+    http_response_code(401);
+    exit;
+}`}
+              />
+
+              <CodeBlock
+                title="Verifying, in Node"
+                language="javascript"
+                code={`const crypto = require('node:crypto')
+
+function verify(req, rawBody, secret) {
+  const parts = Object.fromEntries(
+    String(req.headers['x-ncom-signature'] ?? '')
+      .split(',')
+      .map((piece) => {
+        const [key, ...rest] = piece.trim().split('=')
+        return [key, rest.join('=')]
+      })
+  )
+
+  const timestamp = Number(parts.t)
+  if (Math.abs(Date.now() / 1000 - timestamp) > 300) return false
+
+  const expected = crypto
+    .createHmac('sha256', secret)
+    .update(\`\${timestamp}.\${rawBody}\`)
+    .digest('hex')
+
+  const a = Buffer.from(expected)
+  const b = Buffer.from(String(parts.v1 ?? ''))
+  return a.length === b.length && crypto.timingSafeEqual(a, b)
+}`}
+              />
+
+              <H3>The handshake</H3>
+
+              <P>
+                <Code>GET {'{base}'}/ping</Code> is called when you press Test,
+                never while a shopper is waiting. Tell the truth in{' '}
+                <Code>capabilities</Code>: NCOM shows the merchant exactly what
+                their site can do, and claiming something you have not built
+                turns a clear warning into a mysterious checkout failure.
+              </P>
+
+              <CodeBlock
+                title="GET {base}/ping"
                 language="json"
                 code={`{
-  "source": "my-old-shop",
-  "expectCurrency": "BDT",
+  "ok": true,
+  "contract": "1",
+  "platform": "woocommerce/8.6",
+  "currency": "BDT",
+  "capabilities": {
+    "products": true,
+    "stock": true,
+    "search": true,
+    "categories": false,
+    "reserve": true,
+    "release": true
+  }
+}`}
+              />
+
+              <Callout title="Currency is compared, never converted">
+                If your site quotes USD and the workspace sells in BDT, the
+                connection panel says so and nothing tries to reconcile it.
+                Reading a price as one currency and charging it as another is a
+                hundredfold error, so it is reported and left to a human.
+              </Callout>
+
+              <H3>Listing products</H3>
+
+              <P>
+                <Code>GET {'{base}'}/products</Code> takes <Code>limit</Code>{' '}
+                (1–100), <Code>cursor</Code>, <Code>q</Code>,{' '}
+                <Code>category</Code>, <Code>status</Code> and <Code>ids</Code>.
+                Return <Code>nextCursor</Code> — anything opaque you can page
+                from — or <Code>null</Code> when there are no more.
+              </P>
+
+              <Callout title="Honour ids before anything else">
+                It is how NCOM re-reads the exact products a saved offer names,
+                on every render of that landing page. A connector that ignores{' '}
+                <Code>ids</Code> and returns its first page instead makes an
+                offer appear to sell the wrong things.
+              </Callout>
+
+              <CodeBlock
+                title="GET {base}/products?limit=2"
+                language="json"
+                code={`{
   "products": [
     {
-      "externalId": "42",
-      "title": "Silk Maxi Dress",
-      "status": "ACTIVE",
-      "categoryId": "clx8category0002",
-      "images": [{ "src": "https://cdn.yourshop.com/42.jpg" }],
-      "options": [{ "name": "Size", "position": 1, "values": ["S", "M"] }],
+      "id": "42",
+      "handle": "classic-tee",
+      "title": "Classic Tee",
+      "status": "active",
+      "description": "Soft cotton, boxy fit.",
+      "vendor": "Acme",
+      "categoryId": "12",
+      "url": "https://yourshop.com/product/classic-tee",
+      "images": [
+        { "url": "https://yourshop.com/img/tee.jpg", "alt": "Classic tee" }
+      ],
+      "options": [{ "name": "Size", "values": ["S", "M", "L"] }],
       "variants": [
-        { "option1": "S", "priceCents": 4999, "sku": "DRS-42-S" },
-        { "option1": "M", "priceCents": 4999, "sku": "DRS-42-M" }
-      ]
-    }
-  ]
-}`}
-              />
-
-              <H3>Always send expectCurrency</H3>
-              <P>
-                <Code>priceCents</Code> is minor units{' '}
-                <em>of the workspace currency</em>. If the workspace prices in
-                USD and you send taka, ৳1,290 becomes $1,290.00 — the import
-                reports complete success, and nothing in the resulting numbers
-                can tell you afterwards that it happened.
-              </P>
-              <P>
-                <Code>expectCurrency</Code> is the guard. If it does not match
-                the workspace, the batch is refused with <Code>conflict</Code>{' '}
-                before a single row is written.
-              </P>
-
-              <CodeBlock
-                title="A mismatch, refused"
-                language="json"
-                code={`409 {
-  "error": {
-    "code": "conflict",
-    "message": "This workspace prices in USD, but the import declared BDT. Nothing was imported.",
-    "workspaceCurrency": "USD",
-    "declaredCurrency": "BDT"
-  }
-}`}
-              />
-
-              <P>
-                Every import response echoes <Code>currencyCode</Code> whether
-                you asserted or not, and a workspace still sitting on the
-                default currency nobody has ever chosen comes back with a{' '}
-                <Code>warnings</Code> entry. <Code>GET /api/v1/me</Code> reports
-                the same thing as <Code>currencyConfigured</Code>, which is
-                worth checking once at the top of a migration script.
-              </P>
-
-              <P>
-                The response reports each row separately. One bad product does
-                not fail the batch — fix the rows in <Code>errors</Code> and
-                re-send just those.
-              </P>
-
-              <CodeBlock
-                title="Response"
-                language="json"
-                code={`{
-  "data": {
-    "created": 98,
-    "updated": 1,
-    "failed": 1,
-    "createdIds": ["clx8…", "clx9…"],
-    "updatedIds": ["clxa…"],
-    "errors": [
-      { "externalId": "77", "error": "A product needs at least one variant" }
-    ]
-  }
-}`}
-              />
-
-              <H3>A complete migration script</H3>
-              <P>
-                Read your products in pages, map them to our shape, and send
-                them in batches. This is the whole job.
-              </P>
-
-              <CodeBlock
-                title="migrate.mjs"
-                language="javascript"
-                code={`const API = '${baseUrl}/api/v1'
-const KEY = process.env.NCOM_API_KEY
-const BATCH = 100
-
-async function post(path, body) {
-  const response = await fetch(API + path, {
-    method: 'POST',
-    headers: {
-      Authorization: \`Bearer \${KEY}\`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  })
-
-  if (!response.ok) {
-    const problem = await response.json().catch(() => ({}))
-    throw new Error(problem.error?.message ?? \`HTTP \${response.status}\`)
-  }
-  return response.json()
-}
-
-async function get(path) {
-  const response = await fetch(API + path, {
-    headers: { Authorization: \`Bearer \${KEY}\` },
-  })
-  if (!response.ok) throw new Error(\`HTTP \${response.status} on \${path}\`)
-  return response.json()
-}
-
-// Map one row from YOUR database into our product shape.
-function toProduct(row) {
-  return {
-    externalId: String(row.id),
-    title: row.name,
-    description: row.description ?? '',
-    status: row.isPublished ? 'ACTIVE' : 'DRAFT',
-    vendor: row.brand ?? undefined,
-    tags: row.tags ?? [],
-    // Images travel by URL — we fetch and store them, deduplicated on the
-    // URL so a re-run costs nothing.
-    images: (row.images ?? []).map((url, index) => ({
-      src: url,
-      position: index,
-    })),
-    // Prices in minor units: 12.99 becomes 1299.
-    options: row.variants.length > 1
-      ? [{
-          name: 'Size',
-          position: 1,
-          values: [...new Set(row.variants.map((v) => v.size))],
-        }]
-      : [],
-    variants: row.variants.map((variant) => ({
-      option1: row.variants.length > 1 ? variant.size : null,
-      sku: variant.sku,
-      priceCents: Math.round(variant.price * 100),
-      inventoryTracked: true,
-    })),
-  }
-}
-
-// Fail before writing anything if the workspace is not set up as expected.
-const me = await get('/me')
-if (!me.data.organization.currencyConfigured) {
-  throw new Error(
-    'Workspace currency was never explicitly set — choose it under Settings first'
-  )
-}
-
-const CURRENCY = me.data.organization.currencyCode
-console.log('importing as', CURRENCY)
-
-const all = await loadProductsFromYourDatabase() // your code
-
-for (let i = 0; i < all.length; i += BATCH) {
-  const chunk = all.slice(i, i + BATCH).map(toProduct)
-  const { data } = await post('/products/import', {
-    source: 'my-old-shop',
-    // Refused outright if the workspace prices in anything else.
-    expectCurrency: CURRENCY,
-    products: chunk,
-  })
-
-  console.log(\`\${i + chunk.length}/\${all.length}\`,
-    \`created \${data.created}, updated \${data.updated}, failed \${data.failed}\`)
-
-  for (const warning of data.warnings ?? []) console.warn('  ', warning)
-
-  for (const problem of data.errors) {
-    console.error('  failed', problem.externalId, '—', problem.error)
-  }
-}`}
-              />
-
-              <Callout title="Import stock separately">
-                The import sets up products, options and prices. Stock is not
-                part of it, because stock changes on its own schedule and a
-                re-run of the import should not silently reset counts a sale has
-                since moved. Push counts with the inventory endpoint below.
-              </Callout>
-            </Section>
-
-            <Section id="categories" title="Categories">
-              <P>
-                Categories go three levels deep — category, subcategory, child
-                category. A product is filed in exactly one of them, normally
-                the most specific one that applies.
-              </P>
-
-              <EndpointTable
-                rows={[
-                  ['GET', '/api/v1/categories', 'The tree, nested'],
-                  ['POST', '/api/v1/categories', 'Create a category'],
-                  ['GET', '/api/v1/categories/{id}', 'Fetch one'],
-                  ['PATCH', '/api/v1/categories/{id}', 'Rename, move, reorder'],
-                  ['DELETE', '/api/v1/categories/{id}', 'Delete'],
-                ]}
-              />
-
-              <P>
-                Add <Code>?flat=true</Code> to get rows instead of a tree.
-                Deleting defaults to lifting the children up a level; pass{' '}
-                <Code>?mode=cascade</Code> to remove the whole branch. Either
-                way, products are only unfiled — never deleted.
-              </P>
-
-              <CodeBlock
-                title="Build a three-level tree"
-                language="bash"
-                code={`# 1. Top level
-WOMEN=$(curl -s -X POST ${baseUrl}/api/v1/categories \\
-  -H "Authorization: Bearer $NCOM_API_KEY" \\
-  -H "Content-Type: application/json" \\
-  -d '{ "name": "Womenswear", "code": "WMN" }' | jq -r '.data.id')
-
-# 2. Subcategory
-DRESSES=$(curl -s -X POST ${baseUrl}/api/v1/categories \\
-  -H "Authorization: Bearer $NCOM_API_KEY" \\
-  -H "Content-Type: application/json" \\
-  -d "{ \\"name\\": \\"Dresses\\", \\"parentId\\": \\"$WOMEN\\", \\"code\\": \\"DRS\\" }" | jq -r '.data.id')
-
-# 3. Child category
-curl -X POST ${baseUrl}/api/v1/categories \\
-  -H "Authorization: Bearer $NCOM_API_KEY" \\
-  -H "Content-Type: application/json" \\
-  -d "{ \\"name\\": \\"Maxi\\", \\"parentId\\": \\"$DRESSES\\" }"`}
-              />
-
-              <Callout title="Three levels is the limit">
-                Creating a child under a third-level category is refused. The
-                cap is deliberate: storefront navigation, breadcrumbs and
-                filters all render the whole tree, and an unbounded one is
-                unusable long before it is slow.
-              </Callout>
-            </Section>
-
-            <Section id="inventory" title="Inventory">
-              <EndpointTable
-                rows={[
-                  ['GET', '/api/v1/inventory', 'Stock per variant'],
-                  ['POST', '/api/v1/inventory', 'Set or adjust stock'],
-                ]}
-              />
-
-              <P>
-                Reads accept <Code>?search=</Code>,{' '}
-                <Code>?stock=low|out|in</Code> and <Code>?locationId=</Code>.
-                Every row reports <Code>available</Code> (what can still be
-                sold) and <Code>committed</Code> (reserved by orders that are
-                placed but not yet shipped).
-              </P>
-
-              <CodeBlock
-                title="GET /api/v1/inventory?stock=low"
-                language="json"
-                code={`{
-  "data": [
-    {
-      "variantId": "clx8variant0001",
-      "productId": "clx8product0001",
-      "productTitle": "Classic Cotton Tee",
-      "variantTitle": "M",
-      "sku": "TEE-M",
-      "available": 3,
-      "committed": 2,
-      "inventoryPolicy": "deny",
-      "locations": [
-        { "id": "clx8loc0001", "name": "Main warehouse", "available": 3, "committed": 2 }
+        {
+          "id": "4201",
+          "title": "M",
+          "sku": "TEE-M",
+          "price": "1250.00",
+          "compareAtPrice": "1500.00",
+          "options": ["M"],
+          "available": 12,
+          "policy": "deny",
+          "requiresShipping": true,
+          "weightGrams": 220
+        }
       ]
     }
   ],
-  "pagination": { "page": 1, "limit": 50, "total": 1, "hasMore": false }
+  "nextCursor": "eyJpZCI6MTI4fQ",
+  "total": 412
 }`}
               />
 
-              <H3>Writing stock back</H3>
+              <H3>The rules that matter</H3>
+
+              <Table
+                head={['Field', 'What NCOM does with it']}
+                rows={[
+                  [
+                    <Code key="id">id</Code>,
+                    'Your own id — a post id, a UUID, a SKU. It is what offers, carts and order lines store, so it has to be stable. An id that changes is a saved offer that stops resolving. Numbers and strings are the same thing here.',
+                  ],
+                  [
+                    <Code key="price">price</Code>,
+                    <>
+                      A decimal string or number (
+                      <Code>&quot;1250.00&quot;</Code>
+                      ), or send <Code>priceCents</Code> as an integer in minor
+                      units. Send the price a customer pays, tax included if
+                      your shop quotes it that way. Never send cost prices —
+                      there is no field for them.
+                    </>,
+                  ],
+                  [
+                    <Code key="status">status</Code>,
+                    <>
+                      <Code>active</Code>, <Code>draft</Code> or{' '}
+                      <Code>archived</Code>; WordPress statuses are understood.
+                      Only active products can be sold. Drafts appear in the
+                      dashboard so a page can be built before publishing.
+                    </>,
+                  ],
+                  [
+                    <Code key="available">available</Code>,
+                    <>
+                      A number is used as-is. <Code>tracked: false</Code> means
+                      you do not count this line and it is always sellable.{' '}
+                      <Code>inStock: false</Code> is a hard zero. Sending
+                      nothing at all means not counted — silence is not read as
+                      sold out.
+                    </>,
+                  ],
+                  [
+                    <Code key="policy">policy</Code>,
+                    <>
+                      <Code>deny</Code> stops selling at zero,{' '}
+                      <Code>continue</Code> allows backorders.
+                    </>,
+                  ],
+                  [
+                    <Code key="images">images</Code>,
+                    'Absolute URLs on your own site or CDN, over HTTPS. NCOM never downloads or re-hosts them — the landing page points at your server. Objects or bare URL strings both work.',
+                  ],
+                  [
+                    <Code key="variants">variants</Code>,
+                    'Omit it entirely for a simple product: put price, sku and available on the product itself and NCOM synthesises one variant whose id is the product id.',
+                  ],
+                ]}
+              />
+
+              <Callout title="snake_case or camelCase, whichever you already have">
+                <Code>stock_quantity</Code> and <Code>stockQuantity</Code> are
+                the same field, everywhere. Write what your platform already
+                produces rather than converting it.
+              </Callout>
+
+              <H3>Stock</H3>
+
               <P>
-                Each update gives either <Code>available</Code> or{' '}
-                <Code>delta</Code>, never both. The difference matters:
+                <Code>POST {'{base}'}/stock</Code> is the hot endpoint: it is
+                called on every cart render and again inside every checkout.
+                Keep it to one indexed query.
+              </P>
+
+              <CodeBlock
+                title="POST {base}/stock"
+                language="json"
+                code={`// request
+{ "ids": ["4201", "4202", "4203"] }
+
+// response
+{ "stock": [
+    { "id": "4201", "available": 12, "policy": "deny" },
+    { "id": "4202", "available": 0,  "policy": "continue" },
+    { "id": "4203", "available": null }
+] }`}
+              />
+
+              <H3>Holding stock for an order</H3>
+
+              <P>
+                <Code>/reserve</Code> and <Code>/release</Code> are optional,
+                and the choice to implement them is the most consequential one
+                on this page.
               </P>
 
               <Ul>
                 <li>
-                  <Code>available</Code> is an absolute count — &ldquo;there are
-                  42&rdquo;. Use it when your system is the authority on stock.
+                  <strong>With them.</strong> NCOM asks your site to take the
+                  units before it writes the order, and hands them back if
+                  writing fails. Two shoppers cannot buy the same last unit,
+                  because your database decides which of them gets it.
                 </li>
                 <li>
-                  <Code>delta</Code> is a signed change — &ldquo;12
-                  arrived&rdquo;, &ldquo;2 damaged&rdquo;. Use it when more than
-                  one system moves the same stock, because two concurrent
-                  absolute writes discard one of them while two deltas both
-                  apply.
+                  <strong>Without them.</strong> NCOM checks stock moments
+                  before writing the order and no more. Two shoppers reaching
+                  the last unit in the same second both get an order, and you
+                  sort it out — exactly as you did before you had NCOM.
                 </li>
               </Ul>
 
               <P>
-                Address variants by <Code>variantId</Code> or by{' '}
-                <Code>sku</Code>. Up to 250 updates per request.
+                Both are legitimate ways to run a shop. Your dashboard says
+                which mode you are in, on the Product source screen, so nobody
+                has to discover it during a sale.
               </P>
 
               <CodeBlock
-                title="POST /api/v1/inventory"
-                language="bash"
-                code={`curl -X POST ${baseUrl}/api/v1/inventory \\
-  -H "Authorization: Bearer $NCOM_API_KEY" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "updates": [
-      { "sku": "TEE-S", "available": 42 },
-      { "sku": "TEE-M", "delta": -1, "reason": "DAMAGED", "note": "Torn in transit" },
-      { "sku": "TEE-L", "delta": 24, "reason": "RECEIVED" }
-    ]
-  }'`}
+                title="POST {base}/reserve"
+                language="json"
+                code={`// request
+{ "orderRef": "clz3k8x…", "lines": [ { "variantId": "4201", "quantity": 2 } ] }
+
+// held
+{ "ok": true }
+
+// refused — the order is not written, and the shopper is told why
+{ "ok": false, "rejected": [ { "variantId": "4201", "reason": "Only 1 left" } ] }`}
               />
 
-              <P>
-                Every write lands in the stock ledger with its reason and note,
-                so the merchant can see in their dashboard exactly what your
-                integration did and when.
-              </P>
-
-              <H3>Read the response — a 200 does not mean every row applied</H3>
-              <Callout title="This is the most important paragraph on the page">
-                The endpoint applies what it can and reports the rest. A caller
-                that treats <Code>200</Code> as success will silently lose every
-                rejected row and drift out of step without ever seeing an error.
-                Check <Code>failed</Code> and <Code>clamped</Code> on every
-                call.
+              <Callout title="Take the units conditionally, in one statement">
+                The shape is{' '}
+                <Code>
+                  UPDATE … SET stock = stock - :n WHERE id = :id AND stock &gt;=
+                  :n
+                </Code>{' '}
+                and a row count of zero is the refusal. Reading the stock first
+                and then writing it — the obvious implementation — lets two
+                checkouts both see the last unit and both succeed.
               </Callout>
 
-              <CodeBlock
-                title="Response — always 200, always this shape"
-                language="json"
-                code={`{
-  "data": {
-    "applied": 2,        // rows whose stock moved
-    "failed": 1,         // rows that could not be applied at all
-    "clamped": 1,        // rows applied, but by less than you asked for
+              <P>
+                <Code>orderRef</Code> is stable for a checkout and is repeated
+                on the matching <Code>/release</Code>, so an implementation can
+                be idempotent on it. A release arrives when an order is
+                cancelled, when a parcel comes back, and when a checkout failed
+                after the hold.
+              </P>
 
-    "results": [
-      { "variantId": "clx8variant0001", "sku": "TEE-S", "available": 42 },
-      { "variantId": "clx8variant0002", "sku": "TEE-M", "available": 0 }
-    ],
+              <H3>When your site cannot answer</H3>
 
-    "errors": [
-      { "sku": "NO-SUCH-SKU", "error": "No variant with that SKU" }
-    ],
-
-    "clamps": [
-      { "variantId": "clx8variant0002", "sku": "TEE-M",
-        "requested": -100, "applied": -2, "available": 0 }
-    ]
-  }
-}`}
+              <Table
+                head={['Situation', 'What a shopper sees']}
+                rows={[
+                  [
+                    'Unreachable or timed out',
+                    'The landing page still renders. The order form says ordering is unavailable for a moment. Checkout refuses. Your dashboard shows the reason.',
+                  ],
+                  [
+                    '401 from your endpoint',
+                    'The same, and the dashboard says the key or the clock is wrong.',
+                  ],
+                  [
+                    'HTML instead of JSON',
+                    'Reported as a base URL pointing at a web page rather than a connector. This is the most common first-time mistake.',
+                  ],
+                  [
+                    'A product in an offer is missing or draft',
+                    'That offer is hidden from the page. The Offers screen names the product id.',
+                  ],
+                  [
+                    'Everything is out of stock',
+                    'The offer still shows, marked sold out. Checkout refuses it.',
+                  ],
+                  [
+                    'Stock ran out mid-checkout',
+                    'The order is refused with "sold out while you were checking out".',
+                  ],
+                ]}
               />
 
               <P>
-                The status code is <Code>200</Code> whatever the mix — including
-                when nothing applied at all, in which case <Code>applied</Code>{' '}
-                is <Code>0</Code> and every row is in <Code>errors</Code>. The
-                batch was accepted and processed; the per-row outcome is always
-                in the same place, so you need one code path rather than two.
+                The rule throughout: when the catalogue cannot be read, NCOM
+                refuses to sell rather than guessing.
               </P>
 
-              <H3>Clamping</H3>
+              <H3>Performance</H3>
+
               <P>
-                A delta that would push stock below zero is clamped rather than
-                creating a negative count — negative availability has one
-                legitimate meaning here, a backorder backlog on a variant set to
-                keep selling at zero, and a typo should not be able to
-                manufacture one.
+                There is no cache. Not in Redis, not in the page, not for five
+                seconds — every read is <Code>no-store</Code> and every value
+                dies with the request that fetched it. A five-second cache is a
+                stored catalogue with a short attention span, and a stored
+                catalogue is what this design exists to remove.
               </P>
+
+              <P>What NCOM does instead, to keep your server comfortable:</P>
+
+              <Ul>
+                <li>
+                  One request per distinct question per render. A page with six
+                  offers over four products makes one products call, not six.
+                </li>
+                <li>Ids are batched fifty at a time.</li>
+                <li>
+                  A page may reference at most 200 products; the stock screen
+                  reads at most 1,000 and says so when it stops.
+                </li>
+                <li>
+                  Every call times out — 4 seconds by default, adjustable
+                  between 1 and 10. A shopper is waiting on the other end.
+                </li>
+              </Ul>
+
               <P>
-                A clamped row still counts as <Code>applied</Code>, because
-                stock did move. It also appears in <Code>clamps</Code> with what
-                you asked for and what actually happened. That entry is the
-                signal that your side believes it removed stock that was never
-                there — which is exactly when two systems begin to disagree, so
-                it is worth alerting on rather than logging.
+                On your side: serve <Code>/products</Code> and{' '}
+                <Code>/stock</Code> from an index rather than a scan, allow our
+                requests through any rate limiter (a <Code>429</Code> shows as
+                gaps in the storefront), and cache on your own side if you like
+                — you know when your data changes and can invalidate correctly,
+                which is exactly what NCOM cannot do from here.
+              </P>
+
+              <H3>Going live</H3>
+
+              <Ol>
+                <li>
+                  Deploy the connector at a public HTTPS URL. Plain{' '}
+                  <Code>http://</Code> is refused.
+                </li>
+                <li>
+                  <strong>Settings → Product source</strong>, paste the base
+                  URL, press Connect.
+                </li>
+                <li>
+                  Copy the key id and secret into your connector. They are shown
+                  once.
+                </li>
+                <li>
+                  Press Test. The panel reports your platform, your currency and
+                  every capability it found.
+                </li>
+                <li>
+                  Open <strong>Products</strong>. Your catalogue is there, read
+                  live.
+                </li>
+                <li>
+                  Change a price on your shop and reload the landing page. It
+                  changes. That is the whole system, demonstrated in ten
+                  seconds.
+                </li>
+                <li>
+                  Place one real order, and confirm your own stock moved by
+                  exactly what was sold.
+                </li>
+              </Ol>
+
+              <P>
+                Before going live, run the conformance checker against your
+                connector. It exercises every endpoint here and reports what it
+                found — which capabilities you declare, whether you honour{' '}
+                <Code>ids</Code>, whether a missing product answers 404, what
+                your stock endpoint says, and whether <Code>/reserve</Code>{' '}
+                refuses an impossible quantity.
               </P>
 
               <CodeBlock
-                title="Asking to remove 100 from a shelf holding 2"
-                language="json"
-                code={`{ "updates": [{ "sku": "TEE-M", "delta": -100, "reason": "DAMAGED" }] }
-
-200 {
-  "data": {
-    "applied": 1, "failed": 0, "clamped": 1,
-    "results": [{ "variantId": "clx8variant0002", "sku": "TEE-M", "available": 0 }],
-    "errors": [],
-    "clamps": [{ "variantId": "clx8variant0002", "sku": "TEE-M",
-                 "requested": -100, "applied": -2, "available": 0 }]
-  }
-}`}
+                title="Checking a connector"
+                language="bash"
+                code={`pnpm check:connector -- \\
+  --url https://yourshop.com/ncom/v1 \\
+  --key ncomcat_… --secret ncomsec_…`}
               />
 
-              <Callout title="Variants that do not track stock are reported, not silently skipped">
-                Setting a count on a variant with inventory tracking switched
-                off lands in <Code>errors</Code> rather than{' '}
-                <Code>applied</Code>. Such a variant is infinitely available and
-                has no count to hold, and a sync that believes it wrote 40 units
-                there is wrong in a way it needs to see.
+              <CodeBlock
+                title="Testing the handshake by hand"
+                language="bash"
+                code={`BASE="https://yourshop.com/ncom/v1"
+KEY="ncomcat_…"
+SECRET="ncomsec_…"
+
+T=$(date +%s)
+SIG=$(printf '%s.' "$T" | openssl dgst -sha256 -hmac "$SECRET" -hex | sed 's/^.* //')
+
+curl -s "$BASE/ping" \\
+  -H "X-NCOM-Key: $KEY" \\
+  -H "X-NCOM-Contract: 1" \\
+  -H "X-NCOM-Timestamp: $T" \\
+  -H "X-NCOM-Signature: t=$T,v1=$SIG" | jq`}
+              />
+
+              <P>
+                For a GET the signed body is the empty string, which is why the{' '}
+                <Code>printf</Code> ends at the dot.
+              </P>
+
+              <H3>What NCOM still stores</H3>
+
+              <P>
+                To be exact about where the line falls. Read from your website
+                and never stored: products, titles, descriptions, handles,
+                prices, options, variants, SKUs, barcodes, weights, images,
+                stock levels, backorder policy, categories.
+              </P>
+
+              <P>
+                Stored by NCOM because NCOM produced it: landing pages and their
+                design, offers and bundle pricing (which reference your ids),
+                carts, orders and order lines, customers, discounts, delivery
+                zones, courier shipments, and your connection settings.
+              </P>
+
+              <Callout title="Order lines are a record, not a cache">
+                An order line copies the title, price, SKU, weight and image URL
+                at the moment of sale. That is not a stored catalogue — it is
+                what was sold, at what price, to whom. Delete the product
+                tonight and last March&apos;s order still reads correctly, which
+                is precisely why the copy is taken.
               </Callout>
             </Section>
 
@@ -1425,69 +1317,6 @@ def ncom_webhook():
                 resume. Every attempt is listed there with its status code and
                 error, and can be re-sent by hand.
               </P>
-            </Section>
-
-            <Section id="stock-sync" title="Two-way stock sync">
-              <P>
-                The pattern most people want: your existing shop and this one
-                sell the same physical stock, and neither should sell a unit the
-                other already sold.
-              </P>
-
-              <Ol>
-                <li>
-                  <strong>Us → you.</strong> Subscribe to{' '}
-                  <Code>inventory.updated</Code> and <Code>order.created</Code>.
-                  When an order is placed here, the stock is reserved before the
-                  webhook fires, so the <Code>available</Code> figure you
-                  receive is already correct to write straight into your system.
-                </li>
-                <li>
-                  <strong>You → us.</strong> When an order is placed on your
-                  side, POST the change to <Code>/api/v1/inventory</Code> using{' '}
-                  <Code>delta</Code>. Use <Code>delta</Code> rather than{' '}
-                  <Code>available</Code> here: both systems are moving the same
-                  numbers concurrently, and deltas compose where absolute writes
-                  overwrite.
-                </li>
-                <li>
-                  <strong>Reconcile nightly.</strong> Once a day, when nothing
-                  is selling, push absolute <Code>available</Code> counts from
-                  whichever system does the physical counting. Deltas drift over
-                  months; a periodic absolute write is what pulls them back.
-                </li>
-              </Ol>
-
-              <CodeBlock
-                title="Your side: an order was placed, tell us"
-                language="javascript"
-                code={`// Called from your own checkout, after the sale is committed.
-async function reportSale(lines) {
-  await fetch('${baseUrl}/api/v1/inventory', {
-    method: 'POST',
-    headers: {
-      Authorization: \`Bearer \${process.env.NCOM_API_KEY}\`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      updates: lines.map((line) => ({
-        sku: line.sku,
-        delta: -line.quantity,
-        reason: 'MANUAL',
-        note: \`Sold on main site — order \${line.orderNumber}\`,
-      })),
-    }),
-  })
-}`}
-              />
-
-              <Callout title="Guard against loops">
-                A stock write from you produces an{' '}
-                <Code>inventory.updated</Code> webhook back to you. Ignore
-                events whose numbers already match what you hold, or briefly
-                mark SKUs you have just pushed — otherwise the two systems will
-                talk to each other forever.
-              </Callout>
             </Section>
 
             <Section id="errors" title="Errors and limits">

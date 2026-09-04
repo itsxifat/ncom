@@ -16,8 +16,11 @@ import { z } from 'zod'
  */
 
 const selectionSchema = z.object({
-  productId: z.string().min(1).max(40),
-  variantId: z.string().min(1).max(40),
+  // The merchant's own ids, not ours — the connector contract caps them at 200
+  // characters, and a cuid-length limit here would refuse a shop whose product
+  // ids are slugs or UUID-with-suffix.
+  productId: z.string().min(1).max(200),
+  variantId: z.string().min(1).max(200),
   quantity: z.coerce.number().int().min(1).max(100),
 })
 

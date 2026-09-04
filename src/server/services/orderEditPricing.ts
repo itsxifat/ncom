@@ -1,5 +1,5 @@
 import 'server-only'
-import { prisma } from '@/server/db/client'
+import { getProductsByIds, isCatalogError } from '@/server/catalog'
 import { getPublicOffers } from './offerService'
 import { loadDiscount } from './pricingService'
 import {
@@ -363,7 +363,7 @@ async function resolveCoupon(
     }
   }
 
-  const collectionIds = await collectionsByProduct(sold)
+  const collectionIds = await collectionsByProduct(input.organizationId, sold)
 
   // The offer's price spread across the lines in proportion to what each is
   // worth, so a product-scoped code sees the discounted basket. Integer
@@ -428,7 +428,22 @@ async function resolveCoupon(
   }
 }
 
+/**
+ * Which groups each product belongs to, for a collection-scoped code.
+ *
+ * "Collection" is now whatever the merchant's own site files a product under —
+ * its categories, its collections, whatever their platform calls them — read
+ * back with the products themselves. A scoped code therefore matches against
+ * their taxonomy rather than against a copy of it maintained here, which is the
+ * whole reason the copy is gone.
+ *
+ * A catalogue that cannot be read leaves the map empty, which narrows a
+ * collection-scoped code to nothing rather than widening it to everything. An
+ * edit that quietly discounts the whole basket because a lookup failed is the
+ * expensive direction to be wrong in.
+ */
 async function collectionsByProduct(
+  organizationId: string,
   lines: OrderEditQuoteLine[]
 ): Promise<Map<string, string[]>> {
   const productIds = [
@@ -438,15 +453,12 @@ async function collectionsByProduct(
   const out = new Map<string, string[]>()
   if (productIds.length === 0) return out
 
-  const links = await prisma.collectionProduct.findMany({
-    where: { productId: { in: productIds } },
-    select: { productId: true, collectionId: true },
-  })
-
-  for (const link of links) {
-    const existing = out.get(link.productId)
-    if (existing) existing.push(link.collectionId)
-    else out.set(link.productId, [link.collectionId])
+  try {
+    const products = await getProductsByIds(organizationId, productIds)
+    for (const [id, product] of products) out.set(id, product.groupIds)
+  } catch (error) {
+    if (!isCatalogError(error)) throw error
   }
+
   return out
 }

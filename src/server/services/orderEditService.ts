@@ -1,10 +1,8 @@
 import 'server-only'
 import { prisma } from '@/server/db/client'
 import { requireHumanOrgAccess } from '@/server/auth/rbac'
-import {
-  commitInventoryForOrder,
-  releaseInventoryForOrder,
-} from './inventoryService'
+import { holdForOrder, returnToStock } from './inventoryService'
+import { resolveVariants, type ResolvedVariant } from '@/server/catalog'
 import { emitOrderWebhook } from './orderService'
 import { loadTaxRates, parseAddress } from './pricingService'
 import { quoteOrderEdit, type OrderEditQuoteLine } from './orderEditPricing'
@@ -69,6 +67,14 @@ export interface OrderEditLine {
   orderLineId?: string | null
   /** Set for a line being added. Ignored when `orderLineId` is present. */
   variantId?: string | null
+  /**
+   * The product that variant belongs to, on the merchant's own site.
+   *
+   * Sent by the picker alongside the variant id so the line can be resolved
+   * with one products call. Optional for older callers, which fall back to the
+   * connector's `/variants` endpoint if it has one.
+   */
+  productId?: string | null
   quantity: number
   /**
    * Given away rather than sold.
@@ -243,6 +249,7 @@ export async function editOrder(
   }[] = []
   const additions: {
     variantId: string
+    productId: string | null
     quantity: number
     isGift: boolean
     /** Null falls back to the catalogue price. */
@@ -312,6 +319,7 @@ export async function editOrder(
     if (quantity < 1) continue
     additions.push({
       variantId: requested.variantId,
+      productId: requested.productId ?? null,
       quantity,
       isGift,
       unitPriceCents: requestedPrice,
@@ -331,25 +339,12 @@ export async function editOrder(
 
   // ── Load what the added lines need, outside the transaction ────────────
 
-  const addedVariants = additions.length
-    ? await prisma.productVariant.findMany({
-        where: {
-          id: { in: additions.map((addition) => addition.variantId) },
-          // Scoped through the product, so a variant id guessed from another
-          // workspace cannot be attached to this order.
-          product: { organizationId },
-        },
-        include: {
-          product: {
-            select: { id: true, title: true, vendor: true },
-          },
-        },
-      })
-    : []
-
-  const variantById = new Map(
-    addedVariants.map((variant) => [variant.id, variant])
-  )
+  // Read from the merchant's own website, scoped to this workspace's
+  // connection — which is what stops a variant id guessed from another
+  // workspace being attached to this order: it simply does not resolve here.
+  const variantById = additions.length
+    ? await resolveVariants(organizationId, additions)
+    : new Map<string, ResolvedVariant>()
 
   for (const addition of additions) {
     if (!variantById.has(addition.variantId)) {
@@ -395,10 +390,10 @@ export async function editOrder(
         }
       }),
     ...additions.map((addition, index) => {
-      const variant = variantById.get(addition.variantId)!
+      const { variant, product } = variantById.get(addition.variantId)!
       return {
         key: additionKey(index),
-        productId: variant.product.id,
+        productId: product.id,
         variantId: variant.id,
         quantity: addition.quantity,
         unitPriceCents: addition.unitPriceCents ?? variant.priceCents,
@@ -443,64 +438,51 @@ export async function editOrder(
 
   const summary: string[] = []
 
+  // ── What this edit does to the merchant's stock ────────────────────────
+  //
+  // Netted per variant across removals, quantity changes and additions, so an
+  // edit that swaps a medium for a large is one ask and one give rather than a
+  // sequence that could briefly refuse itself. Units the customer already has
+  // are not touched: once a parcel is with a courier the order is a record of
+  // what shipped, and asking the merchant's site to un-ship it is not a thing
+  // this edit is entitled to do.
+  const movements = new Map<string, number>()
+  if (!order.stockConsumedAt) {
+    const move = (variantId: string | null, delta: number) => {
+      if (!variantId || delta === 0) return
+      movements.set(variantId, (movements.get(variantId) ?? 0) + delta)
+    }
+
+    for (const line of removals) move(line.variantId, -line.quantity)
+    for (const { line, quantity } of updates) {
+      move(line.variantId, quantity - line.quantity)
+    }
+    for (const addition of additions) {
+      move(addition.variantId, addition.quantity)
+    }
+  }
+
+  const takes = [...movements]
+    .filter(([, delta]) => delta > 0)
+    .map(([variantId, delta]) => ({ variantId, quantity: delta }))
+  const gives = [...movements]
+    .filter(([, delta]) => delta < 0)
+    .map(([variantId, delta]) => ({ variantId, quantity: -delta }))
+
+  // Asked for before anything is written, so an edit the merchant's stock
+  // cannot cover fails having changed nothing. Their site's refusal message is
+  // passed through: it knows why, and this does not.
+  if (takes.length > 0) await holdForOrder(organizationId, orderId, takes)
+
   const updated = await prisma.$transaction(async (tx) => {
     // ── Removals ────────────────────────────────────────────────────────
     for (const line of removals) {
       summary.push(`removed ${line.quantity} × ${line.title}`)
-
-      if (line.variantId) {
-        await releaseInventoryForOrder(tx, orderId, [
-          {
-            variantId: line.variantId,
-            quantity: line.quantity,
-            inventoryTracked: true,
-          },
-        ])
-      }
-
       await tx.orderLine.delete({ where: { id: line.id } })
     }
 
     // ── Quantity and gift changes ───────────────────────────────────────
     for (const { line, quantity, isGift, unitPriceCents } of updates) {
-      const delta = quantity - line.quantity
-
-      if (line.variantId && delta !== 0) {
-        if (delta > 0) {
-          const variant = await tx.productVariant.findUnique({
-            where: { id: line.variantId },
-            select: { inventoryTracked: true, inventoryPolicy: true },
-          })
-
-          // A variant deleted since the order was placed has no stock to
-          // reserve; the line still edits, because the order is the record and
-          // the catalogue is not.
-          if (variant) {
-            const result = await commitInventoryForOrder(tx, orderId, [
-              {
-                variantId: line.variantId,
-                quantity: delta,
-                inventoryTracked: variant.inventoryTracked,
-                inventoryPolicy: variant.inventoryPolicy,
-              },
-            ])
-            if (!result.ok) {
-              throw new Error(
-                `Not enough stock to raise "${line.title}" to ${quantity}`
-              )
-            }
-          }
-        } else {
-          await releaseInventoryForOrder(tx, orderId, [
-            {
-              variantId: line.variantId,
-              quantity: -delta,
-              inventoryTracked: true,
-            },
-          ])
-        }
-      }
-
       await writeLineMoney(tx, {
         id: line.id,
         quantity,
@@ -569,21 +551,7 @@ export async function editOrder(
 
     // ── Additions ───────────────────────────────────────────────────────
     for (const [index, addition] of additions.entries()) {
-      const variant = variantById.get(addition.variantId)!
-
-      const result = await commitInventoryForOrder(tx, orderId, [
-        {
-          variantId: variant.id,
-          quantity: addition.quantity,
-          inventoryTracked: variant.inventoryTracked,
-          inventoryPolicy: variant.inventoryPolicy,
-        },
-      ])
-      if (!result.ok) {
-        throw new Error(
-          `Not enough stock to add ${addition.quantity} × ${variant.product.title}`
-        )
-      }
+      const { variant, product } = variantById.get(addition.variantId)!
 
       // Read once. `gross` and the stored `unitPriceCents` used to be two
       // separate reads of the catalogue price; with a price that can be set by
@@ -612,15 +580,16 @@ export async function editOrder(
       await tx.orderLine.create({
         data: {
           orderId,
-          productId: variant.product.id,
+          productId: product.id,
           variantId: variant.id,
           // Snapshotted exactly as checkout does — see the note on OrderLine in
           // schema.prisma. The order must still read correctly after the
-          // product is renamed or deleted.
-          title: variant.product.title,
+          // product is renamed or deleted from the merchant's own site.
+          title: product.title,
           variantTitle: variant.title,
           sku: variant.sku,
-          vendor: variant.product.vendor,
+          vendor: product.vendor,
+          imageUrl: variant.imageUrl ?? product.images[0]?.url ?? null,
           quantity: addition.quantity,
           unitPriceCents,
           totalDiscountCents: discountCents,
@@ -633,7 +602,7 @@ export async function editOrder(
         },
       })
 
-      const name = `${variant.product.title}${
+      const name = `${product.title}${
         variant.title && variant.title !== 'Default Title'
           ? ` (${variant.title})`
           : ''
@@ -759,6 +728,10 @@ export async function editOrder(
     return saved
   })
 
+  // Given back only once the edit is safely written. The reverse order would
+  // hand units back for a change that then failed to save.
+  await returnToStock(organizationId, orderId, gives)
+
   await emitOrderWebhook(organizationId, orderId, 'ORDER_UPDATED')
 
   return { orderId, changed: true as const, order: updated, quote }
@@ -792,20 +765,18 @@ export async function previewOrderEdit(
 
   const existingById = new Map(order.lines.map((line) => [line.id, line]))
 
-  const requestedVariantIds = input.lines
+  const requestedRefs = input.lines
     .filter((line) => !line.orderLineId && line.variantId)
-    .map((line) => line.variantId!)
+    .map((line) => ({
+      variantId: line.variantId!,
+      productId: line.productId ?? null,
+    }))
 
-  const variants = requestedVariantIds.length
-    ? await prisma.productVariant.findMany({
-        where: {
-          id: { in: requestedVariantIds },
-          product: { organizationId },
-        },
-        select: { id: true, priceCents: true, productId: true },
-      })
-    : []
-  const variantById = new Map(variants.map((variant) => [variant.id, variant]))
+  // The same read the save performs, so the preview cannot quote a price the
+  // save then declines to honour.
+  const variantById = requestedRefs.length
+    ? await resolveVariants(organizationId, requestedRefs)
+    : new Map<string, ResolvedVariant>()
 
   const lines: OrderEditQuoteLine[] = []
   for (const [index, requested] of input.lines.entries()) {
@@ -830,18 +801,19 @@ export async function previewOrderEdit(
       continue
     }
 
-    const variant = requested.variantId
+    const entry = requested.variantId
       ? variantById.get(requested.variantId)
       : undefined
-    if (!variant) continue
+    if (!entry) continue
 
     lines.push({
       key: additionKey(index),
-      productId: variant.productId,
-      variantId: variant.id,
+      productId: entry.product.id,
+      variantId: entry.variant.id,
       quantity,
       unitPriceCents:
-        requestedUnitPrice(requested.unitPriceCents) ?? variant.priceCents,
+        requestedUnitPrice(requested.unitPriceCents) ??
+        entry.variant.priceCents,
       isGift: requested.isGift ?? false,
     })
   }

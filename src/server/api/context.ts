@@ -76,6 +76,37 @@ export function apiOk(data: unknown, status = 200) {
   return NextResponse.json(data, { status })
 }
 
+/**
+ * A handler for an endpoint that used to exist.
+ *
+ * The catalogue endpoints — products, categories, inventory — were how a
+ * merchant pushed their goods into this database. There is no longer a database
+ * to push them into, so those paths answer 410 and say where the model went.
+ *
+ * 410 rather than 404 because the caller is not mistaken: the path was real,
+ * their integration was correct when it was written, and the difference between
+ * "gone, here is what replaced it" and "no such endpoint" is whether they read
+ * the migration note or open a support ticket about our routing.
+ *
+ * Deliberately unauthenticated. Checking a key first would answer a different
+ * question than the one being asked, and a 401 on a retired path sends an
+ * integrator to rotate credentials that were never the problem.
+ */
+export function retiredEndpoint(message: string) {
+  return function gone() {
+    return NextResponse.json(
+      {
+        error: {
+          code: 'gone',
+          message,
+          docs: '/docs#product-source',
+        },
+      },
+      { status: 410 }
+    )
+  }
+}
+
 function tooManyRequests(retryAfterSeconds?: number) {
   return NextResponse.json(
     {

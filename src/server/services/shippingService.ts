@@ -3,7 +3,6 @@ import { prisma } from '@/server/db/client'
 import { requireOrgAccess } from '@/server/auth/rbac'
 import { encryptCredentials, maskSecret, decryptSecret } from '@/lib/crypto'
 import type {
-  LocationInput,
   PaymentProviderInput,
   ShippingRateInput,
   ShippingZoneInput,
@@ -220,60 +219,6 @@ export async function deleteTaxRate(organizationId: string, taxRateId: string) {
   if (!rate) throw new Error('Tax rate not found')
 
   await prisma.taxRate.delete({ where: { id: taxRateId } })
-}
-
-// ── Locations ────────────────────────────────────────────────────────────
-
-export async function listLocations(organizationId: string) {
-  await requireOrgAccess(organizationId, 'VIEWER')
-
-  return prisma.location.findMany({
-    where: { organizationId },
-    orderBy: { createdAt: 'asc' },
-  })
-}
-
-export async function createLocation(
-  organizationId: string,
-  input: LocationInput
-) {
-  return prisma.location.create({
-    data: {
-      organizationId,
-      name: input.name,
-      isActive: input.isActive,
-      fulfillsOnlineOrders: input.fulfillsOnlineOrders,
-    },
-  })
-}
-
-export async function deleteLocation(
-  organizationId: string,
-  locationId: string
-) {
-  const location = await prisma.location.findFirst({
-    where: { id: locationId, organizationId },
-    select: { id: true },
-  })
-  if (!location) throw new Error('Location not found')
-
-  const remaining = await prisma.location.count({ where: { organizationId } })
-  if (remaining <= 1) {
-    // Deleting the last location would cascade away every InventoryLevel row,
-    // silently zeroing the whole catalogue's stock.
-    throw new Error('A store needs at least one location')
-  }
-
-  const stocked = await prisma.inventoryLevel.count({
-    where: { locationId, available: { not: 0 } },
-  })
-  if (stocked > 0) {
-    throw new Error(
-      'This location still holds stock — move or zero it before deleting'
-    )
-  }
-
-  await prisma.location.delete({ where: { id: locationId } })
 }
 
 // ── Payment providers ────────────────────────────────────────────────────

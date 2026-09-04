@@ -1,7 +1,7 @@
 import 'server-only'
 import { prisma } from '@/server/db/client'
 import { requireOrgAccess, requireHumanOrgAccess } from '@/server/auth/rbac'
-import { releaseInventoryForOrder, restockInventory } from './inventoryService'
+import { returnToStock } from './inventoryService'
 import { legacyFulfillmentStatus } from '@/server/courier/statusMap'
 import { emitWebhook } from './webhookService'
 import { clampNonNegative, formatMoney } from '@/lib/money'
@@ -21,51 +21,28 @@ import type { OrderWorkflowState } from '@/generated/prisma/enums'
  */
 
 /**
- * The relations a line needs to show a picture.
+ * What a line needs to show a picture: one column, no join.
  *
- * Not snapshotted onto the line the way the title and price are, and that is a
- * deliberate difference: those are what was sold and what was charged, and an
- * order has to keep reporting them after the product is edited or deleted. A
- * photo is how a human recognises the goods, so the current one is the useful
- * one — and if the product is gone, so is the picture, which costs the order
- * nothing because everything that identifies it is already on the line.
+ * Kept as an exported fragment so the call sites that used to spread it — the
+ * order screen, the courier payload, the packing label — read the same as they
+ * did, and so the next person to add one does not reinvent a join to a
+ * catalogue that is no longer here.
+ *
+ * The picture is the variant's own if it had one, else the product's first,
+ * decided at the moment of sale. Variant first because that is the whole point
+ * of a variant image: an order for the red one must not show a photo of the
+ * blue one, which is how a packer picks the wrong thing off the shelf.
  */
-export const ORDER_LINE_IMAGE_SELECT = {
-  variant: {
-    select: {
-      image: { select: { media: { select: { url: true } } } },
-    },
-  },
-  product: {
-    select: {
-      images: {
-        orderBy: { position: 'asc' as const },
-        take: 1,
-        select: { media: { select: { url: true } } },
-      },
-    },
-  },
-} as const
+export const ORDER_LINE_IMAGE_SELECT = { imageUrl: true } as const
 
-/**
- * The picture for one line: the variant's own if it has one, else the
- * product's first.
- *
- * Variant first because that is the whole point of a variant image — an order
- * for the red one should not show a photo of the blue one, which is how a
- * packer picks the wrong thing off the shelf.
- */
 export function orderLineImageUrl(line: {
-  variant?: { image?: { media: { url: string } } | null } | null
-  product?: { images: { media: { url: string } }[] } | null
+  imageUrl?: string | null
 }): string | null {
-  return (
-    line.variant?.image?.media.url ?? line.product?.images[0]?.media.url ?? null
-  )
+  return line.imageUrl ?? null
 }
 
 const ORDER_INCLUDE = {
-  lines: { include: ORDER_LINE_IMAGE_SELECT },
+  lines: true,
   transactions: { orderBy: { createdAt: 'asc' as const } },
   returns: { include: { lines: true } },
   refunds: { include: { lines: true } },
@@ -298,24 +275,27 @@ export async function cancelOrder(
 
   const now = new Date()
 
-  const cancelled = await prisma.$transaction(async (tx) => {
-    if (input.restock !== false) {
-      await releaseInventoryForOrder(
-        tx,
-        orderId,
-        order.lines
-          .filter((line) => line.variantId !== null)
-          .map((line) => ({
-            variantId: line.variantId!,
-            // Only units that never shipped come back here. Goods a courier
-            // already collected are gone until physically returned, which is
-            // handled by the return flow instead.
-            quantity: order.stockConsumedAt ? 0 : line.quantity,
-            inventoryTracked: true,
-          }))
-      )
-    }
+  // Outside the transaction, and before it: this is a call to the merchant's
+  // own website, and a Postgres transaction must never be held open across one.
+  // A cancellation that saves after the stock went back is the safe order of
+  // the two — the alternative leaves units held for an order nobody can see.
+  if (input.restock !== false && !order.stockConsumedAt) {
+    // Only units that never shipped come back here. Goods a courier already
+    // collected are gone until physically returned, which is handled by the
+    // return flow instead.
+    await returnToStock(
+      organizationId,
+      orderId,
+      order.lines
+        .filter((line) => line.variantId !== null)
+        .map((line) => ({
+          variantId: line.variantId!,
+          quantity: line.quantity,
+        }))
+    )
+  }
 
+  const cancelled = await prisma.$transaction(async (tx) => {
     await tx.orderEvent.create({
       data: {
         orderId,
@@ -467,19 +447,6 @@ export async function refundOrder(
       },
     })
 
-    if (input.restock ?? true) {
-      await restockInventory(
-        tx,
-        refund.id,
-        input.lines
-          .map((requested) => ({
-            variantId: lineById.get(requested.orderLineId)?.variantId ?? '',
-            quantity: requested.quantity,
-          }))
-          .filter((line) => line.variantId !== '')
-      )
-    }
-
     const refundedTotal = order.refundedTotalCents + amountCents
 
     await tx.order.update({
@@ -509,8 +476,22 @@ export async function refundOrder(
     return refund
   })
 
-  // A refund with restock moves stock too, but that already emitted its own
-  // inventory.updated — this one says the *order* changed.
+  // After the refund is recorded, and outside its transaction, for the same
+  // reason the cancellation path is: putting the goods back is a request to
+  // someone else's server, and the refund must not depend on it answering.
+  if (input.restock ?? true) {
+    await returnToStock(
+      organizationId,
+      refunded.id,
+      input.lines
+        .map((requested) => ({
+          variantId: lineById.get(requested.orderLineId)?.variantId ?? '',
+          quantity: requested.quantity,
+        }))
+        .filter((line) => line.variantId !== '')
+    )
+  }
+
   await emitOrderWebhook(organizationId, orderId, 'ORDER_UPDATED')
 
   return refunded

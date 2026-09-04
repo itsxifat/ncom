@@ -3,7 +3,6 @@ import { Gift, Printer, Receipt } from 'lucide-react'
 import { getActiveOrganization } from '@/server/services/organizationService'
 import { getOrder, orderLineImageUrl } from '@/server/services/orderService'
 import { orderEditability } from '@/server/services/orderEditService'
-import { listLocations } from '@/server/services/shippingService'
 import {
   getShipmentForOrder,
   trackingUrlFor,
@@ -83,8 +82,7 @@ export default async function OrderDetailPage({
     notFound()
   }
 
-  const [locations, shipment, courierConfigs] = await Promise.all([
-    listLocations(organization.id),
+  const [shipment, courierConfigs] = await Promise.all([
     getShipmentForOrder(organization.id, order.id),
     listCourierConfigs(organization.id),
   ])

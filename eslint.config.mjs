@@ -12,6 +12,11 @@ const eslintConfig = defineConfig([
     'out/**',
     'build/**',
     'next-env.d.ts',
+    // Reference connectors for merchants' own stacks — PHP, WordPress and an
+    // Express router that imports packages this app does not depend on. They
+    // are documentation that happens to run, and linting them against this
+    // project's rules only produces noise about a codebase that is not here.
+    'connectors/**',
   ]),
 ])
 

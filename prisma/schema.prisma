@@ -142,8 +142,10 @@ model Organization {
   customDomains     CustomDomain[]
 
   // Integration surface: how other systems talk to this organisation's data.
-  apiKeys          ApiKey[]
-  webhookEndpoints WebhookEndpoint[]
+  apiKeys           ApiKey[]
+  webhookEndpoints  WebhookEndpoint[]
+  // Where the products and stock are actually read from. See CatalogConnection.
+  catalogConnection CatalogConnection?
 
   // Courier automation: who ships the parcels, on what terms, and what the
   // fraud history of the phone numbers ordering them looks like.
@@ -500,6 +502,9 @@ model Offer {
   /// A variant thrown in free with the offer, and how many. Priced at zero and
   /// labelled as a gift on the order rather than discounted, because "free
   /// tote with every combo" is a different promise from "1000 off".
+  ///
+  /// The merchant's own variant id — resolved against their site at render
+  /// time, like every other reference to a product here.
   giftVariantId String?
   giftQuantity  Int     @default(1)
 
@@ -512,7 +517,6 @@ model Offer {
   store        Store?             @relation(fields: [storeId], references: [id], onDelete: Cascade)
   page         Page?              @relation(fields: [pageId], references: [id], onDelete: Cascade)
   image        MediaAsset?        @relation(fields: [imageMediaId], references: [id], onDelete: SetNull)
-  giftVariant  ProductVariant?    @relation("OfferGift", fields: [giftVariantId], references: [id], onDelete: SetNull)
   items        OfferItem[]
   tiers        OfferTier[]
   variantRules OfferVariantRule[]
@@ -546,6 +550,8 @@ model OfferVariantRule {
   id      String @id @default(cuid())
   offerId String
 
+  /// The merchant's own variant id, read live from their site. Not a foreign
+  /// key: there is no variant table here to point at.
   variantId String
 
   excluded Boolean @default(false)
@@ -555,8 +561,7 @@ model OfferVariantRule {
   priceCents  Int               @default(0)
   discountBps Int               @default(0)
 
-  offer   Offer          @relation(fields: [offerId], references: [id], onDelete: Cascade)
-  variant ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  offer Offer @relation(fields: [offerId], references: [id], onDelete: Cascade)
 
   @@unique([offerId, variantId])
   @@index([offerId])
@@ -587,9 +592,7 @@ model OfferItem {
   quantity Int @default(1)
   position Int @default(0)
 
-  offer   Offer           @relation(fields: [offerId], references: [id], onDelete: Cascade)
-  product Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
-  variant ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+  offer Offer @relation(fields: [offerId], references: [id], onDelete: Cascade)
 
   @@index([offerId, position])
   @@index([productId])
@@ -1607,6 +1610,72 @@ enum WeightUnit {
 }
 
 // ── Catalog ──────────────────────────────────────────────────────────────
+//
+// NCOM does not keep a catalogue. Products, variants, prices, images and stock
+// are read from the merchant's own website on every request that needs them —
+// see server/catalog and docs/product-source.md. What lives here is the
+// *connection*: where to call, how to sign the call, and what that site said it
+// could do the last time we asked.
+//
+// The Product/ProductVariant/InventoryLevel tables below are the previous
+// design, in which merchants pushed their catalogue into this database. Nothing
+// reads or writes them any more; they are kept for one release so a workspace
+// that has not finished moving still has its old rows to look at, and are
+// dropped in a follow-up migration.
+
+/// One merchant website NCOM reads products and stock from.
+///
+/// Exactly one per organisation: the catalogue belongs to the business, the
+/// same way it did when it was a table here, and a workspace running three
+/// landing pages sells one website's stock across all of them.
+model CatalogConnection {
+  id             String @id @default(cuid())
+  organizationId String @unique
+
+  /// Base URL of the connector, e.g. https://shop.example.com/ncom/v1 — every
+  /// endpoint in the contract hangs off it.
+  baseUrl String
+
+  /// Sent as `X-NCOM-Key`. Identifies which secret the site should verify with,
+  /// so a merchant can rotate without a flag day.
+  keyId String
+
+  /// HMAC secret, encrypted at rest (lib/crypto) for the same reason payment
+  /// keys are: it authenticates requests that can read a merchant's whole
+  /// catalogue and move their stock.
+  secret String
+
+  /// How long a single call may take before the storefront gives up on it.
+  /// Deliberately low — this sits inside a shopper's page render.
+  timeoutMs Int @default(4000)
+
+  /// Off means every catalogue read fails closed. Used while a merchant is
+  /// migrating, and by support when a site is melting under our reads.
+  isActive Boolean @default(true)
+
+  /// What the site last said it implements, from GET {baseUrl}/ping. Advisory:
+  /// a call to a missing endpoint still fails honestly, this is what lets the
+  /// dashboard say so before anyone tries.
+  capabilities Json?
+
+  /// Contract revision and platform string reported by the connector.
+  contractVersion String?
+  platform        String?
+
+  /// The currency the site quotes prices in, when it says. Compared against the
+  /// organisation's own currency on every health check, because a site quoting
+  /// USD into a BDT storefront is a 100x pricing error waiting to happen.
+  currencyCode String?
+
+  lastCheckedAt DateTime?
+  lastOkAt      DateTime?
+  lastError     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
 
 model Product {
   id             String @id @default(cuid())
@@ -1644,8 +1713,6 @@ model Product {
   variants     ProductVariant[]
   images       ProductImage[]
   collections  CollectionProduct[]
-  orderLines   OrderLine[]
-  offerItems   OfferItem[]
 
   @@unique([organizationId, handle])
   // An upstream id is unique per organisation, which is what lets an importer
@@ -1774,14 +1841,9 @@ model ProductVariant {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  product         Product            @relation(fields: [productId], references: [id], onDelete: Cascade)
-  image           ProductImage?      @relation(fields: [imageId], references: [id], onDelete: SetNull)
+  product         Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
+  image           ProductImage?    @relation(fields: [imageId], references: [id], onDelete: SetNull)
   inventoryLevels InventoryLevel[]
-  cartLines       CartLine[]
-  orderLines      OrderLine[]
-  offerItems      OfferItem[]
-  offerRules      OfferVariantRule[]
-  offerGifts      Offer[]            @relation("OfferGift")
 
   @@unique([productId, option1, option2, option3])
   @@index([productId, position])
@@ -2075,8 +2137,27 @@ model CartLine {
   id     String @id @default(cuid())
   cartId String
 
+  /// The merchant's own ids. No foreign key: the variant lives on their site
+  /// and is re-read on every render of this cart.
   variantId String
+  productId String?
   quantity  Int
+
+  // ── Display snapshot ───────────────────────────────────────────────────
+  //
+  // Written when the line is added and never trusted for money. Its only job
+  // is to let a cart still render its own contents when the merchant's site is
+  // unreachable for a moment: the shopper sees the shirt they picked, marked
+  // unavailable, instead of an empty page. Every figure that decides what
+  // anyone is charged — price, stock, tax, shipping — is read live at checkout
+  // and never taken from here.
+  title            String?
+  variantTitle     String?
+  handle           String?
+  sku              String?
+  imageUrl         String?
+  requiresShipping Boolean @default(true)
+  weightGrams      Int     @default(0)
 
   // Price is re-read from the variant on every cart render rather than trusted
   // from here — this column only records what the shopper was last shown, so
@@ -2088,8 +2169,7 @@ model CartLine {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  cart    Cart           @relation(fields: [cartId], references: [id], onDelete: Cascade)
-  variant ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  cart Cart @relation(fields: [cartId], references: [id], onDelete: Cascade)
 
   @@unique([cartId, variantId])
   @@index([cartId])
@@ -2356,6 +2436,9 @@ model OrderLine {
   id      String @id @default(cuid())
   orderId String
 
+  /// The merchant's own product and variant ids, copied at the moment of sale.
+  /// References rather than foreign keys — the catalogue lives on their site,
+  /// and an order must still read correctly after they delete the product.
   productId String?
   variantId String?
 
@@ -2363,6 +2446,18 @@ model OrderLine {
   variantTitle String?
   sku          String?
   vendor       String?
+
+  /// The photo the goods were sold with, on the merchant's own site.
+  ///
+  /// Snapshotted like the title and the price, which is a reversal: while the
+  /// catalogue lived in this database a line could cheaply join to the current
+  /// image, and showing the current one was the better answer. Reading it now
+  /// means a call to the merchant's website per line, on screens that list
+  /// hundreds of them — order lists, packing labels, courier payloads — and an
+  /// order from last March would fire those calls to display a product that may
+  /// not exist. So the URL is copied at the moment of sale. It points at their
+  /// own CDN and keeps working for as long as they keep the file.
+  imageUrl String?
 
   quantity           Int
   unitPriceCents     Int
@@ -2391,9 +2486,7 @@ model OrderLine {
   refundedQuantity Int @default(0)
   returnedQuantity Int @default(0)
 
-  order   Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product Product?        @relation(fields: [productId], references: [id], onDelete: SetNull)
-  variant ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   refundLines RefundLine[]
   returnLines OrderReturnLine[]

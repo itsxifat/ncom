@@ -1,7 +1,7 @@
 import 'server-only'
 import { prisma } from '@/server/db/client'
 import { requireHumanOrgAccess } from '@/server/auth/rbac'
-import { resolveStoreLocationId } from './inventoryService'
+import { returnToStock } from './inventoryService'
 import { emitOrderWebhook } from './orderService'
 
 /**
@@ -125,9 +125,18 @@ export async function recordOrderReturn(
   // increase what is owed.
   const reductionCents = Math.max(0, order.totalCents - newTotalCents)
 
-  const locationId = restock
-    ? await resolveStoreLocationId(prisma, organizationId, order.storeId)
-    : null
+  // Only goods that actually left can come back. A return recorded before the
+  // courier ever collected would otherwise ask the merchant's site to invent
+  // stock that never moved.
+  const returnable =
+    restock && order.stockConsumedAt
+      ? returning
+          .filter((entry) => entry.line.variantId)
+          .map((entry) => ({
+            variantId: entry.line.variantId!,
+            quantity: entry.quantity,
+          }))
+      : []
 
   const recorded = await prisma.$transaction(async (tx) => {
     const orderReturn = await tx.orderReturn.create({
@@ -154,61 +163,6 @@ export async function recordOrderReturn(
         where: { id: entry.line.id },
         data: { returnedQuantity: { increment: entry.quantity } },
       })
-    }
-
-    // Only goods that actually left can come back. A return recorded before
-    // the courier ever collected would otherwise invent stock.
-    if (restock && order.stockConsumedAt) {
-      const trackedIds = new Set(
-        (
-          await tx.productVariant.findMany({
-            where: {
-              id: {
-                in: returning
-                  .map((entry) => entry.line.variantId)
-                  .filter((id): id is string => id !== null),
-              },
-              inventoryTracked: true,
-            },
-            select: { id: true },
-          })
-        ).map((variant) => variant.id)
-      )
-
-      for (const entry of returning) {
-        const variantId = entry.line.variantId
-        if (!variantId || !trackedIds.has(variantId)) continue
-
-        const level = locationId
-          ? await tx.inventoryLevel.findFirst({
-              where: { variantId, locationId },
-              select: { id: true, locationId: true },
-            })
-          : await tx.inventoryLevel.findFirst({
-              where: { variantId },
-              orderBy: { available: 'desc' },
-              select: { id: true, locationId: true },
-            })
-        if (!level) continue
-
-        await tx.inventoryLevel.update({
-          where: { id: level.id },
-          data: { available: { increment: entry.quantity } },
-        })
-
-        // RESTOCK, not REFUND. The inventory ledger exists to answer "how did
-        // this variant get to -3", and stamping a refused parcel as a refund
-        // tells a story about money that never happened.
-        await tx.inventoryAdjustment.create({
-          data: {
-            locationId: level.locationId,
-            variantId,
-            delta: entry.quantity,
-            reason: 'RESTOCK',
-            referenceId: orderReturn.id,
-          },
-        })
-      }
     }
 
     const updatedLines = await tx.orderLine.findMany({
@@ -262,6 +216,12 @@ export async function recordOrderReturn(
 
     return orderReturn
   })
+
+  // After the return is recorded, and outside its transaction: telling the
+  // merchant's site the units are sellable again is a call across the internet,
+  // and a return that a warehouse has already accepted must not fail because
+  // their server was slow.
+  await returnToStock(organizationId, recorded.id, returnable)
 
   await emitOrderWebhook(organizationId, orderId, 'ORDER_UPDATED')
 

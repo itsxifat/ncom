@@ -1,5 +1,7 @@
 import 'server-only'
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
+import { randomBytes } from 'node:crypto'
+import { signPayload, verifySignature } from '@/lib/signature'
+import { assertPublicHttpsUrl } from '@/lib/outbound-url'
 import { after } from 'next/server'
 import { prisma } from '@/server/db/client'
 import { requireOrgAccess } from '@/server/auth/rbac'
@@ -39,48 +41,21 @@ export const WEBHOOK_TOPICS: {
   wire: string
   description: string
 }[] = [
-  {
-    topic: 'PRODUCT_CREATED',
-    wire: 'product.created',
-    description: 'A product was added to the catalogue.',
-  },
-  {
-    topic: 'PRODUCT_UPDATED',
-    wire: 'product.updated',
-    description:
-      'A product changed — title, description, price, options, images, status or category.',
-  },
-  {
-    topic: 'PRODUCT_DELETED',
-    wire: 'product.deleted',
-    description: 'A product was deleted. Archiving sends product.updated.',
-  },
-  {
-    topic: 'INVENTORY_UPDATED',
-    wire: 'inventory.updated',
-    description:
-      "A variant's sellable stock changed, from a sale, a return or a manual adjustment.",
-  },
-  {
-    topic: 'CATEGORY_CREATED',
-    wire: 'category.created',
-    description: 'A category, subcategory or child category was created.',
-  },
-  {
-    topic: 'CATEGORY_UPDATED',
-    wire: 'category.updated',
-    description: 'A category was renamed, moved, reordered or deactivated.',
-  },
-  {
-    topic: 'CATEGORY_DELETED',
-    wire: 'category.deleted',
-    description: 'A category was deleted.',
-  },
+  // No product.*, inventory.* or category.* topics.
+  //
+  // They existed to tell a merchant's system that *our* copy of their catalogue
+  // had changed. There is no copy: products, stock and categories are read from
+  // their site when they are needed, so the only system that could announce a
+  // change to them is theirs, and it does not need us to relay it back.
+  //
+  // The enum values are still in the database for the rows that referenced
+  // them, and any endpoint still subscribed simply never fires. They are
+  // dropped with the catalogue tables in the follow-up migration.
   {
     topic: 'ORDER_CREATED',
     wire: 'order.created',
     description:
-      'An order was placed. Sent after stock is reserved, so the quantities in it are already committed.',
+      'An order was placed. Sent after the reservation call to your own site, so any stock it holds is already held.',
   },
   {
     topic: 'ORDER_UPDATED',
@@ -90,7 +65,8 @@ export const WEBHOOK_TOPICS: {
   {
     topic: 'ORDER_CANCELLED',
     wire: 'order.cancelled',
-    description: 'An order was cancelled and its reserved stock released.',
+    description:
+      'An order was cancelled. Its units were released back to your own stock first.',
   },
   {
     topic: 'ORDER_FULFILLED',
@@ -123,7 +99,8 @@ export const WEBHOOK_TOPICS: {
   {
     topic: 'SHIPMENT_RETURNED',
     wire: 'shipment.returned',
-    description: 'A parcel came back and its stock was returned to inventory.',
+    description:
+      'A parcel came back. Its units were released back to your own stock first.',
   },
 ]
 
@@ -427,49 +404,14 @@ async function readSnippet(response: Response): Promise<string | null> {
 }
 
 /**
- * The signature a receiver must reproduce.
+ * The signature a receiver must reproduce, and the verification they perform.
  *
- * Signed over `${timestamp}.${body}` rather than the body alone, so a captured
- * request cannot be replayed hours later against an endpoint that checks the
- * age of the timestamp. Receivers are told to reject anything older than five
- * minutes — see the docs page.
+ * Both live in lib/signature now — the catalogue connector signs its requests
+ * with the identical scheme, and a merchant who wrote a webhook verifier can
+ * reuse it there unchanged. Re-exported here so existing callers and the docs
+ * page keep one import.
  */
-export function signPayload(
-  secret: string,
-  timestamp: number,
-  body: string
-): string {
-  return createHmac('sha256', secret)
-    .update(`${timestamp}.${body}`)
-    .digest('hex')
-}
-
-/** The verification a receiver performs, exposed so our own tests use it too. */
-export function verifySignature(
-  secret: string,
-  header: string,
-  body: string,
-  toleranceSeconds = 300
-): boolean {
-  const parts = Object.fromEntries(
-    header.split(',').map((piece) => {
-      const [key, ...rest] = piece.trim().split('=')
-      return [key, rest.join('=')]
-    })
-  )
-
-  const timestamp = Number(parts.t)
-  const provided = parts.v1
-  if (!Number.isFinite(timestamp) || !provided) return false
-  if (Math.abs(Date.now() / 1000 - timestamp) > toleranceSeconds) return false
-
-  const expected = signPayload(secret, timestamp, body)
-  const a = Buffer.from(expected, 'hex')
-  const b = Buffer.from(provided, 'hex')
-  // Length check first: timingSafeEqual throws on a mismatch rather than
-  // returning false, and a wrong-length signature is wrong regardless.
-  return a.length === b.length && timingSafeEqual(a, b)
-}
+export { signPayload, verifySignature }
 
 /**
  * Retries deliveries whose backoff has elapsed. Driven by the cron route.
@@ -778,41 +720,7 @@ export async function redeliverWebhook(
  * never sent in the clear.
  */
 export function assertDeliverableUrl(raw: string): string {
-  let url: URL
-  try {
-    url = new URL(raw.trim())
-  } catch {
-    throw new Error('Enter a valid URL, including https://')
-  }
-
-  const isProduction = process.env.NODE_ENV === 'production'
-
-  if (
-    url.protocol !== 'https:' &&
-    !(url.protocol === 'http:' && !isProduction)
-  ) {
-    throw new Error('Webhook URLs must use https://')
-  }
-
-  const host = url.hostname.toLowerCase()
-
-  if (
-    host === 'localhost' ||
-    host.endsWith('.localhost') ||
-    host === '::1' ||
-    host === '[::1]' ||
-    /^127\./.test(host) ||
-    /^10\./.test(host) ||
-    /^192\.168\./.test(host) ||
-    /^169\.254\./.test(host) ||
-    /^172\.(1[6-9]|2\d|3[01])\./.test(host)
-  ) {
-    if (isProduction) {
-      throw new Error('That address is not reachable from the internet')
-    }
-  }
-
-  return url.toString()
+  return assertPublicHttpsUrl(raw, 'Webhook URLs')
 }
 
 /** Prisma's Json column rejects `undefined`; a round-trip normalises it away. */

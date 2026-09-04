@@ -8,7 +8,7 @@ import {
   type InventorySort,
   type InventoryStockFilter,
 } from '@/server/services/inventoryService'
-import { listLocations } from '@/server/services/shippingService'
+import { describeFailure } from '@/server/catalog'
 import { EmptyState } from '@/components/app/empty-state'
 import { StatCard } from '@/components/app/stat-card'
 import { InventoryFilters } from '@/components/store/inventory-filters'
@@ -19,12 +19,7 @@ import { Button } from '@/components/ui/button'
 const PAGE_SIZE = 50
 
 const STOCK_FILTERS: InventoryStockFilter[] = ['all', 'low', 'out', 'in']
-const SORTS: InventorySort[] = [
-  'product',
-  'available-asc',
-  'available-desc',
-  'updated',
-]
+const SORTS: InventorySort[] = ['product', 'available-asc', 'available-desc']
 
 export default async function InventoryPage({
   searchParams,
@@ -34,31 +29,56 @@ export default async function InventoryPage({
   const search = typeof query.q === 'string' ? query.q : undefined
   const stock = pick(query.stock, STOCK_FILTERS, 'all')
   const sort = pick(query.sort, SORTS, 'product')
-  const locationId = typeof query.location === 'string' ? query.location : ''
   const page = Math.max(1, Number(query.page) || 1)
 
   const { organization } = await getActiveOrganization()
-  const [{ items, total }, locations, summary] = await Promise.all([
-    listInventory(organization.id, {
-      search,
-      stock,
-      sort,
-      locationId: locationId || undefined,
-      take: PAGE_SIZE,
-      skip: (page - 1) * PAGE_SIZE,
-    }),
-    listLocations(organization.id),
-    getInventorySummary(organization.id),
-  ])
 
-  const filtered = Boolean(search) || stock !== 'all' || Boolean(locationId)
+  // Read from the merchant's own website. A workspace with no product source
+  // connected has no stock to show and is told what to do about it, rather than
+  // being shown an empty table that looks like a shop with nothing in it.
+  let items: Awaited<ReturnType<typeof listInventory>>['items'] = []
+  let total = 0
+  let truncated = false
+  let summary = { tracked: 0, low: 0, out: 0, truncated: false }
+  let failure: string | null = null
+
+  try {
+    const [listed, counted] = await Promise.all([
+      listInventory(organization.id, {
+        search,
+        stock,
+        sort,
+        take: PAGE_SIZE,
+        skip: (page - 1) * PAGE_SIZE,
+      }),
+      getInventorySummary(organization.id),
+    ])
+    items = listed.items
+    total = listed.total
+    truncated = listed.truncated
+    summary = counted
+  } catch (error) {
+    failure = describeFailure(error)
+  }
+
+  const filtered = Boolean(search) || stock !== 'all'
+
+  if (failure) {
+    return (
+      <EmptyState
+        icon={Boxes}
+        title="Stock could not be read"
+        description={`${failure} Stock lives on your own website — check Settings → Product source.`}
+      />
+    )
+  }
 
   if (summary.tracked === 0 && !filtered) {
     return (
       <EmptyState
         icon={Boxes}
-        title="Nothing tracked yet"
-        description="Variants with inventory tracking switched on appear here so you can receive, count and adjust stock."
+        title="Nothing counted yet"
+        description="Your website reports no stock counts. Products whose stock it does count appear here, read live — set the numbers on your own site and this follows."
       />
     )
   }
@@ -67,26 +87,20 @@ export default async function InventoryPage({
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard label="Tracked variants" value={summary.tracked} />
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+        <StatCard label="Counted variants" value={summary.tracked} />
         <StatCard
           label={`Low stock (≤ ${DEFAULT_LOW_STOCK_THRESHOLD})`}
           value={summary.low}
         />
         <StatCard label="Out of stock" value={summary.out} />
-        <StatCard label="Committed to orders" value={summary.committed} />
       </div>
 
-      <InventoryFilters
-        search={search ?? ''}
-        stock={stock}
-        sort={sort}
-        locationId={locationId}
-        locations={locations.map((location) => ({
-          id: location.id,
-          name: location.name,
-        }))}
-      />
+      <p className="text-muted-foreground text-sm">
+        Read live from your website. Counts change there, not here.
+      </p>
+
+      <InventoryFilters search={search ?? ''} stock={stock} sort={sort} />
 
       {items.length === 0 ? (
         <EmptyState
@@ -98,12 +112,16 @@ export default async function InventoryPage({
         <>
           <InventoryTable
             rows={items}
-            locations={locations.map((location) => ({
-              id: location.id,
-              name: location.name,
-            }))}
             lowStockThreshold={DEFAULT_LOW_STOCK_THRESHOLD}
           />
+
+          {truncated && (
+            <p className="text-muted-foreground text-sm">
+              Showing the first {total} variants your website returned. Search
+              to narrow this down — the whole catalogue is not read on every
+              page view, because it is your server answering.
+            </p>
+          )}
 
           {/* The count reflects everything the filters match, not just what is
               on screen — the old page reported the page size as the total, so a

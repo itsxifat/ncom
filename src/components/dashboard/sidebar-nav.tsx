@@ -11,7 +11,6 @@ import {
   Users,
   Package,
   ShoppingCart,
-  Layers,
   Warehouse,
   UserRound,
   Tag,
@@ -24,6 +23,7 @@ import {
   BarChart3,
   ScanLine,
   Printer,
+  PlugZap,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -53,7 +53,6 @@ const NAV_GROUPS: Array<{ label: string | null; items: NavItem[] }> = [
       { href: '/tracking', label: 'Tracking', icon: Activity },
       { href: '/products', label: 'Products', icon: Package },
       { href: '/categories', label: 'Categories', icon: FolderTree },
-      { href: '/collections', label: 'Collections', icon: Layers },
       { href: '/inventory', label: 'Inventory', icon: Warehouse },
       { href: '/customers', label: 'Customers', icon: UserRound },
       { href: '/discounts', label: 'Discounts & offers', icon: Tag },
@@ -76,6 +75,13 @@ const NAV_GROUPS: Array<{ label: string | null; items: NavItem[] }> = [
   {
     label: 'Setup',
     items: [
+      // First in Setup because nothing else in the Sell group works without it:
+      // no catalogue, no stock, no offer that resolves.
+      {
+        href: '/settings/product-source',
+        label: 'Product source',
+        icon: PlugZap,
+      },
       { href: '/settings/payments', label: 'Payments', icon: Settings },
       { href: '/settings/courier', label: 'Courier & fraud', icon: Truck },
       { href: '/settings/shipping', label: 'Shipping', icon: Settings },

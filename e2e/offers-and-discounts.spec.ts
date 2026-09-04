@@ -3,6 +3,7 @@ import path from 'node:path'
 import fs from 'node:fs'
 import { Client } from 'pg'
 import Redis from 'ioredis'
+import { FakeShop } from './support/product-source'
 
 /**
  * Offers and discounts, driven through the screens a merchant actually uses.
@@ -20,15 +21,19 @@ import Redis from 'ioredis'
  * Registration goes through the UI once, in `beforeAll`, and is reused through
  * a saved storage state: registering is rate limited to five attempts per
  * quarter hour per IP, so a file that registers per test starts failing on its
- * second run and looks like a product bug. The catalogue is written straight to
- * the database — reaching it through the product editor would be testing the
- * product editor.
+ * second run and looks like a product bug.
+ *
+ * The catalogue is not written anywhere: NCOM does not store one. It is served
+ * by a fake merchant website (support/product-source.ts) that the workspace is
+ * pointed at through the real settings screen, so an offer built here resolves
+ * its products over HTTP exactly as a live landing page does.
  *
  * Raw SQL rather than the Prisma client, for the reason order-editing.spec.ts
  * gives: Playwright's loader is CommonJS and the generated client is ESM.
  */
 
 let db: Client
+let shop: FakeShop
 
 async function one<T = Record<string, unknown>>(
   sql: string,
@@ -66,6 +71,9 @@ test.beforeAll(async ({ browser }) => {
   db = new Client({ connectionString: process.env.DATABASE_URL })
   await db.connect()
 
+  shop = new FakeShop()
+  const shopPort = await shop.listen()
+
   // Registering is rate limited to five attempts per quarter hour per IP, and
   // this file is run over and over while it is being written. A workspace whose
   // saved session still works is reused rather than replaced.
@@ -78,11 +86,17 @@ test.beforeAll(async ({ browser }) => {
     const page = await context.newPage()
     await page.goto('/discounts/offers')
     const stillSignedIn = !/\/login/.test(page.url())
-    await context.close()
+
     if (stillSignedIn) {
+      // The shop is a fresh process on a fresh port every run, so the reused
+      // workspace has to be re-pointed at it before anything can be sold.
+      await shop.connect(page, shopPort)
+      await context.close()
       organizationId = saved.organizationId
       return
     }
+
+    await context.close()
   }
 
   const context = await browser.newContext({ storageState: undefined })
@@ -116,12 +130,15 @@ test.beforeAll(async ({ browser }) => {
     )
   ).organizationId
 
+  await shop.connect(page, shopPort)
+
   await context.storageState({ path: STORAGE_STATE })
   fs.writeFileSync(FIXTURE, JSON.stringify({ organizationId, email }))
   await context.close()
 })
 
 test.afterAll(async () => {
+  await shop?.close()
   await db?.end()
 })
 
@@ -165,65 +182,29 @@ async function seedStorefront(organizationId: string) {
   return { storeId, pageId }
 }
 
-/** A product with several sizes, so per-size behaviour is reachable. */
-async function seedProduct(
-  organizationId: string,
-  title: string,
-  prices: number[],
-  available = 50
-) {
-  const existing = await all<{ id: string }>(
-    `SELECT id FROM "Location" WHERE "organizationId" = $1 LIMIT 1`,
-    [organizationId]
-  )
-  const locationId =
-    existing[0]?.id ??
-    (
-      await one<{ id: string }>(
-        `INSERT INTO "Location" (id, "organizationId", name)
-         VALUES ($1, $2, 'Main') RETURNING id`,
-        [id('loc'), organizationId]
-      )
-    ).id
-
+/**
+ * A product with several sizes, on the fake shop, so per-size behaviour is
+ * reachable.
+ *
+ * Synchronous and SQL-free: the catalogue lives on the merchant's website, and
+ * the ids returned here are that shop's own — which is exactly what an offer
+ * stores and what the storefront asks for by on every render.
+ */
+function seedProduct(title: string, prices: number[], available = 50) {
   const productId = id('prod')
-  await db.query(
-    `INSERT INTO "Product" (id, "organizationId", title, handle, status, "updatedAt")
-     VALUES ($1, $2, $3, $4, 'ACTIVE', now())`,
-    [
-      productId,
-      organizationId,
-      title,
-      `${title.toLowerCase().replace(/\s+/g, '-')}-${Date.now().toString(36)}`,
-    ]
-  )
 
-  const variants: { id: string; priceCents: number }[] = []
-  for (const [index, priceCents] of prices.entries()) {
-    const variantId = id('var')
-    await db.query(
-      `INSERT INTO "ProductVariant"
-         (id, "productId", title, sku, "priceCents", position,
-          "inventoryTracked", "inventoryPolicy", "updatedAt")
-       VALUES ($1, $2, $3, $4, $5, $6, true, 'DENY', now())`,
-      [
-        variantId,
-        productId,
-        prices.length === 1
-          ? 'Default Title'
-          : (['S', 'M', 'L'][index] ?? `V${index}`),
-        `${title.replace(/\s+/g, '')}-${index}-${Date.now().toString(36)}`,
-        priceCents,
-        index,
-      ]
-    )
-    await db.query(
-      `INSERT INTO "InventoryLevel" (id, "variantId", "locationId", available, committed, "updatedAt")
-       VALUES ($1, $2, $3, $4, 0, now())`,
-      [id('lvl'), variantId, locationId, available]
-    )
-    variants.push({ id: variantId, priceCents })
-  }
+  const variants = prices.map((priceCents, index) => ({
+    id: id('var'),
+    priceCents,
+    title:
+      prices.length === 1
+        ? 'Default Title'
+        : (['S', 'M', 'L'][index] ?? `V${index}`),
+    sku: `${title.replace(/\s+/g, '')}-${index}-${Date.now().toString(36)}`,
+    available,
+  }))
+
+  shop.add({ id: productId, title, variants })
 
   return { id: productId, title, variants }
 }
@@ -265,11 +246,7 @@ test('a mix & match rung takes an item count — on a phone as well as a desktop
   page,
 }) => {
   await seedStorefront(organizationId)
-  const shirt = await seedProduct(
-    organizationId,
-    `Shirt ${Date.now()}`,
-    [50_000]
-  )
+  const shirt = seedProduct(`Shirt ${Date.now()}`, [50_000])
   const label = `Ladder ${Date.now()}`
 
   // The reported regression is a mobile one, so the whole flow runs at a phone
@@ -334,11 +311,7 @@ test('a fixed set keeps the per-product item count it was given', async ({
   page,
 }) => {
   await seedStorefront(organizationId)
-  const combo = await seedProduct(
-    organizationId,
-    `Combo ${Date.now()}`,
-    [30_000]
-  )
+  const combo = seedProduct(`Combo ${Date.now()}`, [30_000])
   const label = `Fixed ${Date.now()}`
 
   await page.setViewportSize({ width: 390, height: 844 })
@@ -388,11 +361,7 @@ test('a fixed set keeps the per-product item count it was given', async ({
 
 test('an à la carte pool saves its own item bounds', async ({ page }) => {
   await seedStorefront(organizationId)
-  const pick = await seedProduct(
-    organizationId,
-    `Pick ${Date.now()}`,
-    [20_000, 25_000]
-  )
+  const pick = seedProduct(`Pick ${Date.now()}`, [20_000, 25_000])
   const label = `Alacarte ${Date.now()}`
 
   await page.goto('/discounts/offers/new')
@@ -434,7 +403,7 @@ test('an à la carte pool saves its own item bounds', async ({ page }) => {
 
 test('reopening a ladder shows the rungs that were saved', async ({ page }) => {
   await seedStorefront(organizationId)
-  const tee = await seedProduct(organizationId, `Tee ${Date.now()}`, [40_000])
+  const tee = seedProduct(`Tee ${Date.now()}`, [40_000])
   const label = `Roundtrip ${Date.now()}`
 
   await page.goto('/discounts/offers/new')
@@ -595,11 +564,7 @@ test('a mix & match ladder charges the rung, and refuses a count it never priced
     `SELECT subdomain FROM "Store" WHERE id = $1`,
     [storeId]
   )
-  const shirt = await seedProduct(
-    organizationId,
-    `Ladder shirt ${Date.now()}`,
-    [50_000]
-  )
+  const shirt = seedProduct(`Ladder shirt ${Date.now()}`, [50_000])
   const label = `Sold ladder ${Date.now()}`
 
   // Built through the editor, so what the buyer is charged is charged from a
@@ -696,11 +661,7 @@ test('a code discount comes off a real order, and a wrong code does not', async 
     `SELECT subdomain FROM "Store" WHERE id = $1`,
     [storeId]
   )
-  const item = await seedProduct(
-    organizationId,
-    `Coded ${Date.now()}`,
-    [40_000]
-  )
+  const item = seedProduct(`Coded ${Date.now()}`, [40_000])
   const label = `Coded offer ${Date.now()}`
   const code = `TEN${Date.now().toString().slice(-6)}`
 

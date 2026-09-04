@@ -13,7 +13,16 @@ import { addressSchema } from './address'
  */
 
 export const addToCartSchema = z.object({
-  variantId: z.string().min(1, 'Variant is required').max(40),
+  // Ids come from the merchant's own system now, so the ceiling is the
+  // connector contract's (200 characters) rather than the length of a cuid.
+  variantId: z.string().min(1, 'Variant is required').max(200),
+  /**
+   * The product the variant belongs to. Optional because an older form may not
+   * post it, but always sent by anything rendered since the catalogue moved —
+   * it is what lets a saved reference be resolved with one products call
+   * instead of depending on the connector's optional /variants endpoint.
+   */
+  productId: z.string().min(1).max(200).optional(),
   quantity: z
     .number()
     .int()

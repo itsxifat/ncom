@@ -9,7 +9,6 @@ import {
   deleteShippingZoneAction,
   createTaxRateAction,
   deleteTaxRateAction,
-  createLocationAction,
   type StoreActionState,
 } from '@/app/(dashboard)/commerce-actions'
 import { Card, CardContent } from '@/components/ui/card'
@@ -442,62 +441,3 @@ export function TaxSettings({
 }
 
 // ── Locations ────────────────────────────────────────────────────────────
-
-export function LocationSettings({
-  locations,
-}: {
-  locations: { id: string; name: string; isActive: boolean }[]
-}) {
-  const bound = createLocationAction.bind(null)
-  const [state, action, pending] = useActionState<StoreActionState, FormData>(
-    bound,
-    undefined
-  )
-
-  return (
-    <div className="flex flex-col gap-6">
-      <Card>
-        <CardContent className="flex flex-col gap-3">
-          <h3 className="font-display text-lg font-semibold tracking-tight">
-            Stock locations
-          </h3>
-          {locations.map((location) => (
-            <div
-              key={location.id}
-              className="flex items-center justify-between"
-            >
-              <p className="text-sm font-medium">{location.name}</p>
-              <Badge variant={location.isActive ? 'lime' : 'outline'}>
-                {location.isActive ? 'Active' : 'Inactive'}
-              </Badge>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardContent>
-          <form action={action}>
-            <FieldGroup>
-              <Field>
-                <FieldLabel htmlFor="location-name">New location</FieldLabel>
-                <Input
-                  id="location-name"
-                  name="name"
-                  placeholder="Warehouse 2"
-                  required
-                />
-              </Field>
-              {state?.error && <FieldError>{state.error}</FieldError>}
-              <Field>
-                <Button type="submit" variant="outline" disabled={pending}>
-                  {pending ? 'Adding…' : 'Add location'}
-                </Button>
-              </Field>
-            </FieldGroup>
-          </form>
-        </CardContent>
-      </Card>
-    </div>
-  )
-}

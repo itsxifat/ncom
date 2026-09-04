@@ -1,6 +1,7 @@
 import 'server-only'
 import { prisma } from '@/server/db/client'
 import { requireOrgAccess } from '@/server/auth/rbac'
+import { getProductsByIds } from '@/server/catalog'
 import type {
   OfferKind,
   OfferPricingMode,
@@ -351,7 +352,11 @@ export async function createOffer(organizationId: string, input: OfferInput) {
     input.pageId ?? null
   )
   await assertProductsInOrg(organizationId, input.items)
-  await assertVariantsInOrg(organizationId, collectVariantIds(input))
+  await assertVariantsInOrg(
+    organizationId,
+    input.items.map((item) => item.productId),
+    collectVariantIds(input)
+  )
 
   const position = await prisma.offer.count({
     where: { organizationId, scope: input.scope, pageId: placement.pageId },
@@ -398,7 +403,11 @@ export async function updateOffer(
     input.pageId ?? null
   )
   await assertProductsInOrg(organizationId, input.items)
-  await assertVariantsInOrg(organizationId, collectVariantIds(input))
+  await assertVariantsInOrg(
+    organizationId,
+    input.items.map((item) => item.productId),
+    collectVariantIds(input)
+  )
 
   // Items, tiers and per-size rules are replaced wholesale rather than diffed.
   // They carry no identity a merchant would recognise and nothing references
@@ -493,10 +502,17 @@ async function clearOtherDefaults(keepId: string, pageId: string | null) {
 }
 
 /**
- * Every product in an offer must belong to this organisation.
+ * Every product in an offer must exist on this workspace's own website.
  *
- * Offers name products by id, so without this an editor could attach another
- * tenant's product id and sell their stock.
+ * Offers name products by the merchant's id, so without this an editor could
+ * attach an id from somewhere else. The check is what it always was; what
+ * changed is where it looks. A workspace reads one connected site, so
+ * "resolves against our connection" *is* "belongs to this organisation" — a
+ * product id from another tenant's shop does not come back.
+ *
+ * It is also the only moment an offer's references are verified. From here on
+ * they are resolved live on every render, and a product deleted next week makes
+ * the offer stop showing rather than making this throw.
  */
 async function assertProductsInOrg(
   organizationId: string,
@@ -504,20 +520,44 @@ async function assertProductsInOrg(
 ) {
   if (items.length === 0) return
   const ids = [...new Set(items.map((item) => item.productId))]
-  const count = await prisma.product.count({
-    where: { id: { in: ids }, organizationId },
-  })
-  if (count !== ids.length) throw new Error('Unknown product in this offer')
+
+  const products = await getProductsByIds(organizationId, ids)
+  const missing = ids.filter((id) => !products.has(id))
+  if (missing.length > 0) {
+    throw new Error(
+      `Your website does not have product ${missing[0]} — it may have been deleted or unpublished.`
+    )
+  }
 }
 
-/** The same check for every variant named by a pin, a shortlist or a rule. */
-async function assertVariantsInOrg(organizationId: string, ids: string[]) {
+/**
+ * The same check for every variant named by a pin, a shortlist or a rule.
+ *
+ * Verified against the products the offer already names, so this costs no extra
+ * request: a variant that belongs to none of them is either a typo or an id
+ * from another shop, and both are worth refusing at save time rather than
+ * discovering as a silently missing size on a live page.
+ */
+async function assertVariantsInOrg(
+  organizationId: string,
+  productIds: string[],
+  ids: string[]
+) {
   if (ids.length === 0) return
-  const count = await prisma.productVariant.count({
-    where: { id: { in: ids }, product: { organizationId } },
-  })
-  if (count !== ids.length)
-    throw new Error('Unknown product option in this offer')
+
+  const products = await getProductsByIds(organizationId, productIds)
+  const known = new Set(
+    [...products.values()].flatMap((product) =>
+      product.variants.map((variant) => variant.id)
+    )
+  )
+
+  const missing = ids.filter((id) => !known.has(id))
+  if (missing.length > 0) {
+    throw new Error(
+      'One of the chosen options is not on any of these products any more.'
+    )
+  }
 }
 
 function collectVariantIds(input: OfferInput): string[] {

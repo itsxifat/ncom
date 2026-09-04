@@ -1,6 +1,13 @@
 import 'server-only'
 import { prisma } from '@/server/db/client'
 import {
+  getProductsByIds,
+  isCatalogError,
+  isSellable,
+  type RemoteProduct,
+  type RemoteVariant,
+} from '@/server/catalog'
+import {
   applyOfferPricing,
   headlinePrice,
   quoteOffer,
@@ -21,11 +28,18 @@ import type {
  * buyer's selection against them.
  *
  * The split of responsibility here matters. `lib/offers/pricing` knows the
- * arithmetic and runs anywhere; this module knows the *database* — which
+ * arithmetic and runs anywhere; this module knows where the *goods* are — which
  * products still exist, which variants are in stock, what they cost right now —
  * and is the only thing allowed to answer "what do we charge". A price that
  * reaches the order route without passing through `priceOfferSubmission` has
  * not been checked against anything.
+ *
+ * An offer stores the merchant's own product and variant ids and nothing else
+ * about the goods: no title, no price, no photograph. All of that is read from
+ * their website while the page renders. So a merchant who raises a price at
+ * 3pm has raised it on every landing page by 3pm, and one who deletes a product
+ * has taken it off sale rather than leaving a bundle quoting a price nobody
+ * honours — which is precisely what a copied catalogue could not promise.
  *
  * Everything is read-only apart from the pricing result. Nothing here creates
  * an order; see offerOrderService for that.
@@ -42,86 +56,39 @@ import type {
 const OFFER_PRODUCT_LIMIT = 200
 
 const offerInclude = {
-  items: {
-    orderBy: { position: 'asc' },
-    include: {
-      product: {
-        select: {
-          id: true,
-          title: true,
-          status: true,
-          images: {
-            orderBy: { position: 'asc' },
-            take: 1,
-            select: { media: { select: { url: true } } },
-          },
-          variants: {
-            orderBy: { position: 'asc' },
-            select: {
-              id: true,
-              title: true,
-              priceCents: true,
-              inventoryTracked: true,
-              inventoryPolicy: true,
-              inventoryLevels: { select: { available: true } },
-            },
-          },
-        },
-      },
-    },
-  },
+  items: { orderBy: { position: 'asc' } },
   tiers: { orderBy: { quantity: 'asc' } },
   variantRules: true,
   image: { select: { url: true } },
-  giftVariant: {
-    select: {
-      id: true,
-      title: true,
-      priceCents: true,
-      product: {
-        select: {
-          title: true,
-          images: {
-            orderBy: { position: 'asc' },
-            take: 1,
-            select: { media: { select: { url: true } } },
-          },
-        },
-      },
-    },
-  },
 } as const
 
 type OfferRow = Awaited<
   ReturnType<typeof prisma.offer.findMany<{ include: typeof offerInclude }>>
 >[number]
 
-type ProductRow = OfferRow['items'][number]['product']
-type VariantRow = ProductRow['variants'][number]
-
 /**
- * Whether a variant can be sold right now.
+ * The goods behind a set of offers, read from the merchant's website.
  *
- * Mirrors buildVariantDrop exactly — an untracked variant never runs out, a
- * tracked one is available while it has stock or while its policy permits a
- * back-order. Two places deciding "in stock" differently is how a page offers
- * something the order route then refuses.
+ * One call for every product on the page, whatever the offers are: a lander
+ * with six bundles over the same four products is four ids and one request.
  */
-function isAvailable(variant: VariantRow): boolean {
-  if (!variant.inventoryTracked) return true
-  if (variant.inventoryPolicy === 'CONTINUE') return true
-  const onHand = variant.inventoryLevels.reduce(
-    (total, level) => total + level.available,
-    0
-  )
-  return onHand > 0
+type Catalogue = Map<string, RemoteProduct>
+
+async function loadCatalogue(
+  organizationId: string,
+  rows: OfferRow[]
+): Promise<Catalogue> {
+  const ids = [
+    ...new Set(rows.flatMap((row) => row.items.map((item) => item.productId))),
+  ]
+  return getProductsByIds(organizationId, ids)
 }
 
 /** The per-size rules of one offer, by variant. */
 type VariantRules = Map<string, OfferRow['variantRules'][number]>
 
 function toVariantChoice(
-  variant: VariantRow,
+  variant: RemoteVariant,
   rules: VariantRules
 ): OfferVariantChoice {
   const rule = rules.get(variant.id)
@@ -130,7 +97,14 @@ function toVariantChoice(
     id: variant.id,
     title: variant.title,
     priceCents: variant.priceCents,
-    available: isAvailable(variant),
+    // The merchant's own stock figure, as of this request. An untracked variant
+    // never runs out and a back-order policy sells past zero — the same rule
+    // the order route applies, because a page that offers what checkout refuses
+    // is worse than one that shows nothing.
+    available: isSellable({
+      available: variant.available,
+      policy: variant.policy,
+    }),
     // Only a rule that actually names a mode overrides anything. A row that
     // exists purely to exclude a size carries no pricing, and treating its
     // zeroed columns as "0% off" would quietly cancel the offer on that size
@@ -180,9 +154,23 @@ type LineResult =
 
 function toOfferLine(
   item: OfferRow['items'][number],
-  rules: VariantRules
+  rules: VariantRules,
+  catalogue: Catalogue
 ): LineResult {
-  const product = item.product
+  const product = catalogue.get(item.productId)
+
+  // The merchant's website no longer returns this product: deleted, renamed to
+  // a new id, or filtered out of their connector's own query. Named by id
+  // because there is nothing else left to name it by — the offer never stored
+  // a title, and inventing one from a stale copy is how an admin ends up
+  // debugging a product that has not existed for a week.
+  if (!product) {
+    return {
+      ok: false,
+      reason: `product ${item.productId} is not in the connected catalogue`,
+    }
+  }
+
   if (product.status !== 'ACTIVE') {
     return {
       ok: false,
@@ -226,7 +214,7 @@ function toOfferLine(
     line: {
       productId: product.id,
       title: product.title,
-      imageUrl: product.images[0]?.media.url ?? null,
+      imageUrl: product.images[0]?.url ?? null,
       quantity: Math.max(1, item.quantity),
       pinnedVariantId: pinned?.id ?? null,
       variants: choices,
@@ -249,12 +237,12 @@ type OfferResult =
   | { ok: true; offer: PublicOffer; soldOut: string[] }
   | { ok: false; reason: string }
 
-function resolveOffer(row: OfferRow): OfferResult {
+function resolveOffer(row: OfferRow, catalogue: Catalogue): OfferResult {
   const rules: VariantRules = new Map(
     row.variantRules.map((rule) => [rule.variantId, rule])
   )
 
-  const results = row.items.map((item) => toOfferLine(item, rules))
+  const results = row.items.map((item) => toOfferLine(item, rules, catalogue))
   const kept = results.filter(
     (result): result is { ok: true; line: OfferLine; soldOut: boolean } =>
       result.ok
@@ -309,16 +297,7 @@ function resolveOffer(row: OfferRow): OfferResult {
     pool: isPool ? lines : [],
     tiers,
     tierMode: row.tierMode,
-    gift: row.giftVariant
-      ? {
-          variantId: row.giftVariant.id,
-          title: row.giftVariant.product.title,
-          variantTitle: row.giftVariant.title,
-          imageUrl: row.giftVariant.product.images[0]?.media.url ?? null,
-          quantity: Math.max(1, row.giftQuantity),
-          priceCents: row.giftVariant.priceCents,
-        }
-      : null,
+    gift: findGift(row, catalogue),
     minQuantity: row.minQuantity,
     maxQuantity: row.maxQuantity,
     pricing: {
@@ -339,6 +318,40 @@ function resolveOffer(row: OfferRow): OfferResult {
   }
 
   return { ok: true, offer, soldOut }
+}
+
+/**
+ * The gift, found among the offer's own products.
+ *
+ * The merchant picks a gift from the products already in the offer — the form
+ * says so and offers nothing else — so it resolves out of the catalogue that
+ * was loaded for the lines, with no extra call and no separate product id to
+ * store. A gift whose variant has since been deleted simply is not one: the
+ * bundle still sells, without it, which is what offerOrderService already does
+ * when a gift runs out mid-checkout.
+ */
+function findGift(row: OfferRow, catalogue: Catalogue): PublicOffer['gift'] {
+  if (!row.giftVariantId) return null
+
+  for (const item of row.items) {
+    const product = catalogue.get(item.productId)
+    const variant = product?.variants.find(
+      (candidate) => candidate.id === row.giftVariantId
+    )
+    if (!product || !variant) continue
+
+    return {
+      variantId: variant.id,
+      productId: product.id,
+      title: product.title,
+      variantTitle: variant.title,
+      imageUrl: variant.imageUrl ?? product.images[0]?.url ?? null,
+      quantity: Math.max(1, row.giftQuantity),
+      priceCents: variant.priceCents,
+    }
+  }
+
+  return null
 }
 
 /** What an offer's goods list for at their own prices, before any discount. */
@@ -397,8 +410,10 @@ export async function getPublicOffers(pageId: string): Promise<PublicOffer[]> {
     include: offerInclude,
   })
 
+  const catalogue = await loadCatalogue(page.store.organizationId, rows)
+
   const offers = rows
-    .map(resolveOffer)
+    .map((row) => resolveOffer(row, catalogue))
     .filter(
       (result): result is { ok: true; offer: PublicOffer; soldOut: string[] } =>
         result.ok
@@ -447,9 +462,28 @@ export async function checkOfferHealth(
     where: { id: { in: offerIds } },
     include: offerInclude,
   })
+  if (rows.length === 0) return health
+
+  // Every offer in one screen belongs to one workspace, so one catalogue read
+  // answers for all of them.
+  let catalogue: Catalogue
+  try {
+    catalogue = await loadCatalogue(rows[0].organizationId, rows)
+  } catch (error) {
+    // The merchant's site is down or misconfigured. Every offer on the screen
+    // is hidden from buyers right now and saying so once, accurately, beats
+    // thirty rows each guessing at a different reason.
+    const reason = isCatalogError(error)
+      ? `the connected website could not be read (${error.merchantMessage})`
+      : 'the connected website could not be read'
+    for (const row of rows) {
+      health.set(row.id, { hidden: reason, soldOut: [] })
+    }
+    return health
+  }
 
   for (const row of rows) {
-    const result = resolveOffer(row)
+    const result = resolveOffer(row, catalogue)
     if (!result.ok) {
       health.set(row.id, { hidden: result.reason, soldOut: [] })
     } else if (result.soldOut.length > 0) {
@@ -580,6 +614,15 @@ export interface StorefrontCommerceContext {
   offers: PublicOffer[]
   shipping: PublicShipping
   promotions: PublicPromotions
+  /**
+   * The merchant's website did not answer, so there is nothing to sell on this
+   * render — as distinct from a page whose merchant has not built an offer yet.
+   *
+   * Two different sentences for the shopper and two different actions for the
+   * merchant, which is why the page is told which one happened rather than
+   * being handed an empty list and left to guess.
+   */
+  catalogUnavailable: boolean
 }
 
 /**
@@ -600,7 +643,14 @@ export async function getStorefrontCommerce(
       where: { organizationId },
       select: { currencyCode: true },
     }),
-    getPublicOffers(pageId),
+    // The only read here that leaves the building. A landing page is more than
+    // its order form — the copy, the photos, the testimonials are all NCOM's
+    // own — so a merchant's website having a bad minute must cost them the
+    // bundle cards, not the whole page.
+    getPublicOffers(pageId).catch((error: unknown) => {
+      console.error('[storefront] catalogue unavailable', pageId, error)
+      return null
+    }),
     getPublicShipping(pageId, organizationId),
     getPublicPromotions(pageId),
   ])
@@ -609,9 +659,10 @@ export async function getStorefrontCommerce(
     pageId,
     storeId,
     currencyCode: settings?.currencyCode ?? 'BDT',
-    offers,
+    offers: offers ?? [],
     shipping,
     promotions,
+    catalogUnavailable: offers === null,
   }
 }
 

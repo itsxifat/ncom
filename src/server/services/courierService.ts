@@ -13,10 +13,7 @@ import {
   orderLineImageUrl,
   ORDER_LINE_IMAGE_SELECT,
 } from './orderService'
-import {
-  consumeCommittedStock,
-  resolveStoreLocationId,
-} from './inventoryService'
+import { returnToStock } from './inventoryService'
 import {
   courierClientFor,
   defaultCourierProvider,
@@ -1341,24 +1338,12 @@ async function consumeStockForDispatch(
   const shipped = order.lines.filter((line) => line.requiresShipping)
   if (shipped.length === 0) return
 
-  const locationId = await resolveStoreLocationId(
-    prisma,
-    organizationId,
-    order.storeId
-  )
-
+  // Nothing moves here any more. The units left the merchant's own count when
+  // the order was placed and their site held them for it; a courier picking the
+  // parcel up does not change a number NCOM owns, because NCOM owns none. What
+  // is still recorded is the fact and the time of it — `stockConsumedAt` is
+  // what stops a cancellation putting back goods that are already on a van.
   await prisma.$transaction(async (tx) => {
-    await consumeCommittedStock(
-      tx,
-      reference,
-      locationId,
-      shipped.map((line) => ({
-        variantId: line.variantId ?? '',
-        quantity: line.quantity,
-        inventoryTracked: Boolean(line.variantId),
-      }))
-    )
-
     await tx.order.update({
       where: { id: orderId },
       data: { stockConsumedAt: new Date() },
@@ -1445,13 +1430,13 @@ async function settleCashOnDelivery(
 }
 
 /**
- * Puts a refused parcel's goods back on the shelf.
+ * Puts a refused parcel's goods back on the shelf — the merchant's shelf.
  *
- * Written out rather than routed through `restockInventory`, which stamps every
- * adjustment REFUND. A courier return is not a refund — no money moved, and in
- * a cash-on-delivery order none ever did. Logging it as one would make the
- * inventory ledger, which exists precisely to answer "how did this variant get
- * to -3", tell the merchant a story that never happened.
+ * A courier return is not a refund: no money moved, and in a cash-on-delivery
+ * order none ever did. What NCOM can do is tell the merchant's site that the
+ * units it was holding for this order are available again, and record that it
+ * did. Whether that is a stock increment, a ledger entry or nothing at all is
+ * their system's decision, which is the right place for it.
  */
 async function restockReturnedParcel(
   organizationId: string,
@@ -1482,45 +1467,9 @@ async function restockReturnedParcel(
       quantity: line.quantity,
     }))
 
+  await returnToStock(organizationId, `courier-return:${orderId}`, returnable)
+
   await prisma.$transaction(async (tx) => {
-    const tracked = new Set(
-      (
-        await tx.productVariant.findMany({
-          where: {
-            id: { in: returnable.map((line) => line.variantId) },
-            inventoryTracked: true,
-          },
-          select: { id: true },
-        })
-      ).map((variant) => variant.id)
-    )
-
-    for (const line of returnable) {
-      if (!tracked.has(line.variantId)) continue
-
-      const level = await tx.inventoryLevel.findFirst({
-        where: { variantId: line.variantId },
-        orderBy: { available: 'desc' },
-        select: { id: true, locationId: true },
-      })
-      if (!level) continue
-
-      await tx.inventoryLevel.update({
-        where: { id: level.id },
-        data: { available: { increment: line.quantity } },
-      })
-
-      await tx.inventoryAdjustment.create({
-        data: {
-          locationId: level.locationId,
-          variantId: line.variantId,
-          delta: line.quantity,
-          reason: 'RESTOCK',
-          referenceId: `courier-return:${orderId}`,
-        },
-      })
-    }
-
     await tx.order.update({
       where: { id: orderId },
       data: { stockRestoredAt: new Date() },

@@ -14,7 +14,8 @@
     "db:migrate": "prisma migrate dev",
     "db:studio": "prisma studio",
     "db:seed": "prisma db seed",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "check:connector": "tsx --conditions=react-server scripts/check-connector.mts"
   },
   "lint-staged": {
     "*.{ts,tsx,js,jsx}": [

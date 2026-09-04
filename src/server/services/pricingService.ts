@@ -1,5 +1,6 @@
 import 'server-only'
 import { prisma } from '@/server/db/client'
+import { resolveVariants } from '@/server/catalog'
 import {
   priceCart,
   selectShippingRate,
@@ -28,6 +29,16 @@ export interface PricedCart extends PricingResult {
   availableShippingRates: PricingShippingRate[]
   /** Set when the destination has no matching rate — checkout must block. */
   shippingUnavailable: boolean
+  /**
+   * Lines whose variant the merchant's site no longer returns — deleted,
+   * unpublished, or renamed to a new id.
+   *
+   * They are left out of every total rather than priced from the snapshot on
+   * the cart line: that column records what the shopper was last shown, and
+   * charging from it would mean selling at a price nobody currently quotes.
+   * The cart marks them, and checkout refuses to convert a cart holding one.
+   */
+  unpricedLineIds: string[]
 }
 
 export async function priceCartById(
@@ -37,20 +48,7 @@ export async function priceCartById(
   const cart = await prisma.cart.findUnique({
     where: { id: cartId },
     include: {
-      lines: {
-        include: {
-          variant: {
-            include: {
-              product: {
-                select: {
-                  id: true,
-                  collections: { select: { collectionId: true } },
-                },
-              },
-            },
-          },
-        },
-      },
+      lines: { orderBy: { createdAt: 'asc' } },
       organization: {
         select: {
           id: true,
@@ -71,23 +69,45 @@ export async function priceCartById(
   const settings = cart.organization.settings
   const currencyCode = settings?.currencyCode ?? cart.currencyCode
 
-  // Prices come off the variant, never off CartLine.unitPriceCents — that
-  // column records what the shopper was last shown, so that the storefront can
-  // tell them the price changed, but it is not authoritative for charging.
-  const lines: PricingLine[] = cart.lines.map((line) => ({
-    id: line.id,
-    variantId: line.variantId,
-    productId: line.variant.product.id,
-    quantity: line.quantity,
-    unitPriceCents: line.variant.priceCents,
-    isTaxable: line.variant.isTaxable,
-    taxCode: line.variant.taxCode,
-    requiresShipping: line.variant.requiresShipping,
-    weightGrams: line.variant.weightGrams,
-    collectionIds: line.variant.product.collections.map(
-      (link) => link.collectionId
-    ),
-  }))
+  // Prices come off the merchant's own site, read in this request — never off
+  // CartLine.unitPriceCents. That column records what the shopper was last
+  // shown, so the storefront can tell them the price changed, but it is not
+  // authoritative for charging and never has been. What changed with the move
+  // to a live catalogue is only where the authoritative number is read from.
+  const resolved = await resolveVariants(
+    cart.organizationId,
+    cart.lines.map((line) => ({
+      variantId: line.variantId,
+      productId: line.productId,
+    }))
+  )
+
+  const unpricedLineIds: string[] = []
+  const lines: PricingLine[] = []
+
+  for (const line of cart.lines) {
+    const entry = resolved.get(line.variantId)
+    if (!entry) {
+      unpricedLineIds.push(line.id)
+      continue
+    }
+
+    lines.push({
+      id: line.id,
+      variantId: line.variantId,
+      productId: entry.product.id,
+      quantity: line.quantity,
+      unitPriceCents: entry.variant.priceCents,
+      isTaxable: entry.variant.isTaxable,
+      taxCode: entry.variant.taxCode,
+      requiresShipping: entry.variant.requiresShipping,
+      weightGrams: entry.variant.weightGrams,
+      // Whatever the merchant's site files this product under: a category id, a
+      // collection id, whichever it sends. Scoped discounts match against these
+      // exactly as they matched against local collection ids before.
+      collectionIds: entry.product.groupIds,
+    })
+  }
 
   const shippingAddress = parseAddress(cart.shippingAddress)
   const countryCode = shippingAddress?.countryCode ?? null
@@ -155,6 +175,7 @@ export async function priceCartById(
   return {
     ...result,
     currencyCode,
+    unpricedLineIds,
     availableShippingRates: eligibleRates.map((rate) => ({
       id: rate.id,
       name: rate.name,

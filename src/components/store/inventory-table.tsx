@@ -1,363 +1,133 @@
-'use client'
-
-import { useState, useTransition } from 'react'
 import Link from 'next/link'
-import { Check, History, Loader2, Minus, Plus } from 'lucide-react'
-import {
-  adjustInventoryDeltaAction,
-  inventoryHistoryAction,
-  setVariantStockAction,
-} from '@/app/(dashboard)/commerce-actions'
+import { ExternalLink, Infinity as InfinityIcon } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { FormSelect } from '@/components/store/form-controls'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
 
 export interface InventoryTableRow {
   id: string
   title: string
   sku: string | null
   barcode: string | null
-  inventoryPolicy: 'DENY' | 'CONTINUE'
+  policy: 'DENY' | 'CONTINUE'
   productId: string
   productTitle: string
   imageUrl: string | null
-  totalAvailable: number
-  totalCommitted: number
-  levels: {
-    locationId: string
-    locationName: string
-    available: number
-    committed: number
-  }[]
-}
-
-interface HistoryEntry {
-  id: string
-  delta: number
-  reason: string
-  note: string | null
-  referenceId: string | null
-  createdAt: string
-  locationName: string
+  /** Null when the merchant's site does not count this line. */
+  available: number | null
 }
 
 /**
- * The stock table.
+ * The stock table, which no longer edits anything.
  *
- * Two ways to change a count, because merchants mean two different things:
- * "+12 arrived" is a receipt and "there are 40" is a stock take. Both are
- * offered inline on the row, and both land in the same ledger — the delta path
- * records what you typed, the count path records the difference it implies, so
- * the history reads as a sequence of movements either way.
+ * It used to: two ways to change a count, inline on the row, because "+12
+ * arrived" and "there are 40" are different sentences a merchant says. Both are
+ * gone, and their absence is the point. The numbers on this screen live in the
+ * merchant's own system — the one their warehouse staff, their POS and their
+ * accountant already use — and a second place to type them would be a second
+ * answer to "how many are there", which is the exact problem this platform
+ * stopped having.
  *
- * Editing happens on the row rather than behind a drawer because the work this
- * page exists for is going down a list correcting numbers, and a dialog per
- * variant turns twenty corrections into sixty clicks.
+ * So the row links out to the product on their site instead. One number, one
+ * owner, and a page that is honest about which one it is.
+ *
+ * A server component: with nothing to click there is nothing to hydrate.
  */
 export function InventoryTable({
   rows,
-  locations,
   lowStockThreshold,
+  productUrl,
 }: {
   rows: InventoryTableRow[]
-  locations: { id: string; name: string }[]
   lowStockThreshold: number
+  productUrl?: (row: InventoryTableRow) => string | null
 }) {
-  const [historyFor, setHistoryFor] = useState<InventoryTableRow | null>(null)
-  const [history, setHistory] = useState<HistoryEntry[] | null>(null)
-  const [, startTransition] = useTransition()
-
-  function openHistory(row: InventoryTableRow) {
-    setHistoryFor(row)
-    setHistory(null)
-    startTransition(async () => {
-      setHistory(await inventoryHistoryAction(row.id))
-    })
-  }
-
   return (
-    <>
-      <div className="bg-card overflow-hidden rounded-xl border">
-        <div className="divide-y">
-          {rows.map((row) => (
-            <InventoryRow
+    <div className="bg-card overflow-hidden rounded-xl border">
+      <div className="divide-y">
+        {rows.map((row) => {
+          const href = productUrl?.(row) ?? null
+
+          return (
+            <div
               key={row.id}
-              row={row}
-              locations={locations}
-              lowStockThreshold={lowStockThreshold}
-              onHistory={() => openHistory(row)}
-            />
-          ))}
-        </div>
-      </div>
+              className="flex items-center gap-4 px-4 py-3 text-sm"
+            >
+              {row.imageUrl ? (
+                // Not next/image: these URLs are on the merchant's own domain,
+                // which is different for every tenant and unknowable at build
+                // time, so there is no remote pattern that could cover them.
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={row.imageUrl}
+                  alt=""
+                  className="bg-muted size-10 shrink-0 rounded object-cover"
+                  loading="lazy"
+                />
+              ) : (
+                <div className="bg-muted size-10 shrink-0 rounded" />
+              )}
 
-      <Dialog
-        open={historyFor !== null}
-        onOpenChange={(open) => !open && setHistoryFor(null)}
-      >
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>
-              {historyFor?.productTitle}
-              {historyFor && historyFor.title !== 'Default Title'
-                ? ` — ${historyFor.title}`
-                : ''}
-            </DialogTitle>
-          </DialogHeader>
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-medium">{row.productTitle}</p>
+                <p className="text-muted-foreground truncate text-xs">
+                  {row.title !== 'Default Title' ? `${row.title} · ` : ''}
+                  {row.sku ?? 'No SKU'}
+                </p>
+              </div>
 
-          {history === null ? (
-            <p className="text-muted-foreground py-6 text-center text-sm">
-              <Loader2 className="mr-2 inline size-4 animate-spin" />
-              Loading movements…
-            </p>
-          ) : history.length === 0 ? (
-            <p className="text-muted-foreground py-6 text-center text-sm">
-              No recorded movements yet.
-            </p>
-          ) : (
-            <ul className="max-h-96 divide-y overflow-y-auto text-sm">
-              {history.map((entry) => (
-                <li
-                  key={entry.id}
-                  className="flex items-start justify-between gap-4 py-2.5"
+              <StockBadge row={row} lowStockThreshold={lowStockThreshold} />
+
+              {href && (
+                <Link
+                  href={href}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-muted-foreground hover:text-foreground shrink-0"
+                  aria-label={`Open ${row.productTitle} on your website`}
                 >
-                  <div>
-                    <p className="font-medium">
-                      {REASON_LABELS[entry.reason] ?? entry.reason}
-                    </p>
-                    <p className="text-muted-foreground text-xs">
-                      {new Date(entry.createdAt).toLocaleString()} ·{' '}
-                      {entry.locationName}
-                      {entry.note ? ` · ${entry.note}` : ''}
-                    </p>
-                  </div>
-                  <span
-                    className={
-                      entry.delta > 0
-                        ? 'font-mono text-sm text-emerald-600 tabular-nums'
-                        : entry.delta < 0
-                          ? 'text-destructive font-mono text-sm tabular-nums'
-                          : 'text-muted-foreground font-mono text-sm tabular-nums'
-                    }
-                  >
-                    {entry.delta > 0 ? `+${entry.delta}` : entry.delta}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </DialogContent>
-      </Dialog>
-    </>
+                  <ExternalLink className="size-4" />
+                </Link>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
   )
 }
 
-const REASON_LABELS: Record<string, string> = {
-  MANUAL: 'Manual change',
-  ORDER_PLACED: 'Order placed',
-  ORDER_CANCELLED: 'Order cancelled',
-  FULFILLED: 'Fulfilled',
-  RESTOCK: 'Restocked',
-  REFUND: 'Refund returned',
-  RECEIVED: 'Stock received',
-  DAMAGED: 'Damaged / written off',
-  CORRECTION: 'Stock take',
-}
-
-function InventoryRow({
+function StockBadge({
   row,
-  locations,
   lowStockThreshold,
-  onHistory,
 }: {
   row: InventoryTableRow
-  locations: { id: string; name: string }[]
   lowStockThreshold: number
-  onHistory: () => void
 }) {
-  const [count, setCount] = useState(String(row.totalAvailable))
-  const [locationId, setLocationId] = useState(
-    row.levels[0]?.locationId ?? locations[0]?.id ?? ''
-  )
-  const [error, setError] = useState<string | null>(null)
-  const [saved, setSaved] = useState(false)
-  const [pending, startTransition] = useTransition()
-
-  // A count only means something at one place. With several locations the row
-  // shows each one and the box edits the selected one, so "set to 40" is never
-  // ambiguous about which shelf holds the forty.
-  const multiLocation = locations.length > 1
-  const shownTotal = row.totalAvailable
-  const dirty = count.trim() !== String(shownTotal)
-
-  function run(action: () => Promise<{ error?: string } | undefined>) {
-    setError(null)
-    startTransition(async () => {
-      const result = await action()
-      if (result?.error) {
-        setError(result.error)
-        return
-      }
-      setSaved(true)
-      window.setTimeout(() => setSaved(false), 1500)
-    })
-  }
-
-  function commitCount() {
-    const parsed = Number(count)
-    if (!Number.isFinite(parsed) || parsed < 0) {
-      setError('Enter a count of zero or more')
-      return
-    }
-    run(() =>
-      setVariantStockAction(
-        row.id,
-        Math.round(parsed),
-        multiLocation ? locationId : undefined
-      )
+  // Untracked is not zero and must never render as one. A site that does not
+  // count a line is saying it always has it, and showing "0" beside real counts
+  // would send a merchant hunting for stock that was never missing.
+  if (row.available === null) {
+    return (
+      <Badge variant="outline" className="shrink-0 gap-1">
+        <InfinityIcon className="size-3" />
+        Not counted
+      </Badge>
     )
   }
 
-  function step(delta: number) {
-    run(() => adjustInventoryDeltaAction(row.id, locationId, delta))
+  if (row.available <= 0) {
+    return (
+      <Badge variant="destructive" className="shrink-0">
+        {row.policy === 'CONTINUE' ? 'Out — backorder' : 'Out of stock'}
+      </Badge>
+    )
   }
 
   return (
-    <div className="flex flex-col gap-4 p-4 lg:flex-row lg:items-center lg:justify-between">
-      <div className="flex min-w-0 flex-1 items-center gap-3">
-        <div className="bg-muted size-11 shrink-0 overflow-hidden rounded-lg">
-          {row.imageUrl && (
-            // eslint-disable-next-line @next/next/no-img-element -- CDN URLs aren't in next/image's remote allowlist
-            <img
-              src={row.imageUrl}
-              alt=""
-              className="size-full object-cover"
-              loading="lazy"
-            />
-          )}
-        </div>
-
-        <div className="min-w-0">
-          <Link
-            href={`/products/${row.productId}`}
-            className="font-medium hover:underline"
-          >
-            {row.productTitle}
-          </Link>
-          <p className="text-muted-foreground truncate text-xs">
-            {row.title !== 'Default Title' && `${row.title} · `}
-            {row.sku ? `SKU ${row.sku}` : 'No SKU'}
-            {row.totalCommitted > 0 &&
-              ` · ${row.totalCommitted} committed to orders`}
-          </p>
-          {/* Per-location counts, so a total of 12 is never a mystery about
-              where the twelve are. */}
-          {row.levels.length > 1 && (
-            <p className="text-muted-foreground mt-0.5 truncate text-xs">
-              {row.levels
-                .map((level) => `${level.locationName}: ${level.available}`)
-                .join(' · ')}
-            </p>
-          )}
-        </div>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2">
-        {shownTotal <= 0 ? (
-          <Badge variant="destructive">
-            {row.inventoryPolicy === 'CONTINUE' ? 'Backorder' : 'Out of stock'}
-          </Badge>
-        ) : shownTotal <= lowStockThreshold ? (
-          <Badge variant="secondary">Low</Badge>
-        ) : null}
-
-        {multiLocation && (
-          <FormSelect
-            value={locationId}
-            aria-label="Location to adjust"
-            className="h-9 w-36 text-xs"
-            onChange={(event) => setLocationId(event.target.value)}
-          >
-            {locations.map((location) => (
-              <option key={location.id} value={location.id}>
-                {location.name}
-              </option>
-            ))}
-          </FormSelect>
-        )}
-
-        <div className="flex items-center gap-1">
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            aria-label="Remove one"
-            disabled={pending}
-            onClick={() => step(-1)}
-          >
-            <Minus />
-          </Button>
-
-          <Input
-            value={count}
-            onChange={(event) => setCount(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                event.preventDefault()
-                commitCount()
-              }
-            }}
-            inputMode="numeric"
-            aria-label={`Stock for ${row.productTitle}`}
-            className="h-9 w-20 text-center"
-          />
-
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            aria-label="Add one"
-            disabled={pending}
-            onClick={() => step(1)}
-          >
-            <Plus />
-          </Button>
-        </div>
-
-        {dirty ? (
-          <Button
-            type="button"
-            size="sm"
-            disabled={pending}
-            onClick={commitCount}
-          >
-            {pending ? <Loader2 className="animate-spin" /> : 'Set'}
-          </Button>
-        ) : (
-          saved && <Check className="size-4 text-emerald-600" />
-        )}
-
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          aria-label="Stock history"
-          onClick={onHistory}
-        >
-          <History />
-        </Button>
-      </div>
-
-      {error && (
-        <p className="text-destructive w-full text-xs lg:w-auto">{error}</p>
-      )}
-    </div>
+    <Badge
+      variant={row.available <= lowStockThreshold ? 'secondary' : 'outline'}
+      className="shrink-0 font-mono tabular-nums"
+    >
+      {row.available}
+    </Badge>
   )
 }

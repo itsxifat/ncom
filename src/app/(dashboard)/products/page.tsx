@@ -1,27 +1,31 @@
 import Link from 'next/link'
-import { Package, Plus } from 'lucide-react'
+import { ExternalLink, Package, PlugZap } from 'lucide-react'
 import { getActiveOrganization } from '@/server/services/organizationService'
 import { listProducts } from '@/server/services/productService'
 import { getOrganizationSettings } from '@/server/services/organizationSettingsService'
-import {
-  descendantIds,
-  listCategoryOptions,
-} from '@/server/services/categoryService'
+import { describeFailure, getConnectionStatus } from '@/server/catalog'
 import { EmptyState } from '@/components/app/empty-state'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import {
-  ProductBulkList,
-  type ProductListRow,
-} from '@/components/store/product-bulk-list'
-import {
-  PRODUCT_SORTS,
-  type ProductSort,
-} from '@/server/services/productService'
 import { FormSelect } from '@/components/ui/form-select'
+import { formatMoneyAmount } from '@/lib/money'
 
 const PAGE_SIZE = 50
 
+/**
+ * The catalogue, read from the merchant's own website.
+ *
+ * Read-only, and that is the design rather than a stage of it. There is no
+ * "add product" button because adding one here would mean storing it here, and
+ * the entire point of this version is that the merchant's site is the only
+ * place a product exists. Every row links out to their admin, which is where
+ * the edit belongs.
+ *
+ * Paging is by cursor, not by page number: a remote catalogue has no stable
+ * offset to jump to, and pretending otherwise produces a "page 7" that shows
+ * different products depending on what sold in the meantime.
+ */
 export default async function ProductsPage({
   searchParams,
 }: PageProps<'/products'>) {
@@ -34,63 +38,65 @@ export default async function ProductsPage({
     query.status === 'ARCHIVED'
       ? query.status
       : undefined
-  const page = Math.max(1, Number(query.page) || 1)
-  const sort: ProductSort =
-    typeof query.sort === 'string' && query.sort in PRODUCT_SORTS
-      ? (query.sort as ProductSort)
-      : 'newest'
-
-  const categoryParam = typeof query.category === 'string' ? query.category : ''
+  const cursor = typeof query.cursor === 'string' ? query.cursor : null
 
   const { organization } = await getActiveOrganization()
 
-  // "Womenswear" on this filter means everything beneath it too, which is what
-  // a merchant means by it — the products filed directly against a department
-  // are usually the minority.
-  const categoryIds =
-    categoryParam && categoryParam !== 'none'
-      ? await descendantIds(organization.id, categoryParam)
-      : undefined
-
-  const [settings, { items, total }, categoryOptions] = await Promise.all([
+  const [settings, connection] = await Promise.all([
     getOrganizationSettings(organization.id),
-    listProducts(organization.id, {
-      search,
-      status,
-      sort,
-      categoryIds,
-      uncategorized: categoryParam === 'none',
-      take: PAGE_SIZE,
-      skip: (page - 1) * PAGE_SIZE,
-    }),
-    listCategoryOptions(organization.id),
+    getConnectionStatus(organization.id),
   ])
 
-  const currency = settings?.currencyCode ?? 'USD'
-  const base = `/products`
-
-  // Paging used to drop the search and the filters, so page 2 of a filtered
-  // catalogue was page 2 of the whole catalogue.
-  const pageQuery = (next: number) => {
-    const params = new URLSearchParams()
-    if (search) params.set('q', search)
-    if (status) params.set('status', status)
-    if (categoryParam) params.set('category', categoryParam)
-    if (sort !== 'newest') params.set('sort', sort)
-    params.set('page', String(next))
-    return params.toString()
+  if (!connection) {
+    return (
+      <EmptyState
+        icon={PlugZap}
+        title="No product source connected"
+        description="NCOM reads your products, prices and stock from your own website — nothing is copied here. Connect your site and your catalogue appears on this screen and in every offer."
+        action={
+          <Button
+            render={<Link href="/settings/product-source" />}
+            nativeButton={false}
+          >
+            Connect your website
+          </Button>
+        }
+      />
+    )
   }
 
-  if (total === 0 && !search && !status && !categoryParam) {
+  let items: Awaited<ReturnType<typeof listProducts>>['items'] = []
+  let nextCursor: string | null = null
+  let failure: string | null = null
+
+  try {
+    const page = await listProducts(organization.id, {
+      search,
+      status,
+      take: PAGE_SIZE,
+      cursor,
+    })
+    items = page.items
+    nextCursor = page.nextCursor
+  } catch (error) {
+    failure = describeFailure(error)
+  }
+
+  const currency = settings?.currencyCode ?? 'BDT'
+
+  if (failure) {
     return (
       <EmptyState
         icon={Package}
-        title="No products yet"
-        description="A product needs a title and at least one price. You can add variants, images and inventory afterwards."
+        title="Your catalogue could not be read"
+        description={failure}
         action={
-          <Button render={<Link href={`${base}/new`} />} nativeButton={false}>
-            <Plus />
-            Add product
+          <Button
+            variant="outline"
+            render={<Link href="/settings/product-source" />}
+            nativeButton={false}
+          >
+            Check the connection
           </Button>
         }
       />
@@ -99,6 +105,22 @@ export default async function ProductsPage({
 
   return (
     <div className="flex flex-col gap-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-muted-foreground text-sm">
+          Read live from{' '}
+          <span className="font-medium">{hostOf(connection.baseUrl)}</span>.
+          Products are edited there, not here.
+        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          render={<Link href="/settings/product-source" />}
+          nativeButton={false}
+        >
+          Product source
+        </Button>
+      </div>
+
       <form className="flex flex-wrap items-center gap-3">
         <Input
           name="q"
@@ -112,126 +134,117 @@ export default async function ProductsPage({
           <option value="DRAFT">Draft</option>
           <option value="ARCHIVED">Archived</option>
         </FormSelect>
-        {categoryOptions.length > 0 && (
-          <FormSelect name="category" defaultValue={categoryParam}>
-            <option value="">All categories</option>
-            {/* Finding the unfiled products is how a taxonomy actually gets
-                finished, so it is a filter rather than something to notice. */}
-            <option value="none">Not in a category</option>
-            {categoryOptions.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.label}
-              </option>
-            ))}
-          </FormSelect>
-        )}
-        <FormSelect name="sort" defaultValue={sort}>
-          <option value="newest">Newest first</option>
-          <option value="oldest">Oldest first</option>
-          <option value="updated">Recently updated</option>
-          <option value="title">Title A–Z</option>
-          <option value="title-desc">Title Z–A</option>
-        </FormSelect>
         <Button type="submit" variant="outline">
           Filter
-        </Button>
-        <Button
-          className="ml-auto"
-          render={<Link href={`${base}/new`} />}
-          nativeButton={false}
-        >
-          <Plus />
-          Add product
         </Button>
       </form>
 
       {items.length === 0 ? (
         <EmptyState
           icon={Package}
-          title="No products match"
-          description="Try a different search term or status filter."
+          title="Nothing to show"
+          description={
+            search || status
+              ? 'No product on your website matches these filters.'
+              : 'Your website returned no products. Check that the connector lists them and that they are published.'
+          }
         />
       ) : (
-        <ProductBulkList
-          rows={items.map(toListRow)}
-          total={total}
-          currencyCode={currency}
-          basePath={base}
-          categories={categoryOptions}
-        />
+        <div className="bg-card divide-y overflow-hidden rounded-xl border">
+          {items.map((product) => {
+            const prices = product.variants.map((variant) => variant.priceCents)
+            const min = prices.length > 0 ? Math.min(...prices) : 0
+            const max = prices.length > 0 ? Math.max(...prices) : 0
+
+            return (
+              <div
+                key={product.id}
+                className="flex items-center gap-4 px-4 py-3 text-sm"
+              >
+                {product.images[0] ? (
+                  // Not next/image: the host is the merchant's own domain,
+                  // different for every tenant and unknowable at build time.
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={product.images[0].url}
+                    alt=""
+                    className="bg-muted size-10 shrink-0 rounded object-cover"
+                    loading="lazy"
+                  />
+                ) : (
+                  <div className="bg-muted size-10 shrink-0 rounded" />
+                )}
+
+                <div className="min-w-0 flex-1">
+                  <Link
+                    href={`/products/${encodeURIComponent(product.id)}`}
+                    className="truncate font-medium hover:underline"
+                  >
+                    {product.title}
+                  </Link>
+                  <p className="text-muted-foreground truncate text-xs">
+                    {product.variants.length} option
+                    {product.variants.length === 1 ? '' : 's'} ·{' '}
+                    {min === max
+                      ? formatMoneyAmount(min, currency)
+                      : `${formatMoneyAmount(min, currency)} – ${formatMoneyAmount(max, currency)}`}
+                  </p>
+                </div>
+
+                {product.status !== 'ACTIVE' && (
+                  <Badge variant="outline" className="shrink-0">
+                    {product.status === 'DRAFT' ? 'Draft' : 'Archived'}
+                  </Badge>
+                )}
+
+                {product.url && (
+                  <Link
+                    href={product.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-muted-foreground hover:text-foreground shrink-0"
+                    aria-label={`Open ${product.title} on your website`}
+                  >
+                    <ExternalLink className="size-4" />
+                  </Link>
+                )}
+              </div>
+            )
+          })}
+        </div>
       )}
 
-      {total > PAGE_SIZE && (
-        <nav className="flex justify-between">
-          {page > 1 ? (
-            <Button
-              variant="outline"
-              render={<Link href={`${base}?${pageQuery(page - 1)}`} />}
-              nativeButton={false}
-            >
-              Previous
-            </Button>
-          ) : (
-            <span />
-          )}
-          {page * PAGE_SIZE < total && (
-            <Button
-              variant="outline"
-              render={<Link href={`${base}?${pageQuery(page + 1)}`} />}
-              nativeButton={false}
-            >
-              Next
-            </Button>
-          )}
+      {nextCursor && (
+        <nav className="flex justify-end">
+          <Button
+            variant="outline"
+            render={<Link href={nextHref(search, status, nextCursor)} />}
+            nativeButton={false}
+          >
+            Next
+          </Button>
         </nav>
       )}
     </div>
   )
 }
 
-/**
- * Flattens a product into what the list actually displays.
- *
- * Stock is summed across every tracked variant and every location, because the
- * list answers "can I sell this at all", not "where is it". A product with
- * nothing tracked reports null rather than 0 — it is infinitely available, and
- * showing "0 in stock" next to real counts reads as sold out.
- */
-function toListRow(product: {
-  id: string
-  title: string
-  status: 'DRAFT' | 'ACTIVE' | 'ARCHIVED'
-  images: { media: { url: string } }[]
-  category: { name: string } | null
-  variants: {
-    priceCents: number
-    inventoryTracked: boolean
-    inventoryLevels: { available: number }[]
-  }[]
-}): ProductListRow {
-  const prices = product.variants.map((variant) => variant.priceCents)
-  const tracked = product.variants.some((variant) => variant.inventoryTracked)
+function nextHref(
+  search: string | undefined,
+  status: string | undefined,
+  cursor: string
+): string {
+  const params = new URLSearchParams()
+  if (search) params.set('q', search)
+  if (status) params.set('status', status)
+  params.set('cursor', cursor)
+  return `/products?${params.toString()}`
+}
 
-  return {
-    id: product.id,
-    title: product.title,
-    status: product.status,
-    imageUrl: product.images[0]?.media.url ?? null,
-    categoryName: product.category?.name ?? null,
-    variantCount: product.variants.length,
-    stock: tracked
-      ? product.variants.reduce((sum, variant) => {
-          if (!variant.inventoryTracked) return sum
-          return (
-            sum +
-            variant.inventoryLevels.reduce(
-              (levelSum, level) => levelSum + level.available,
-              0
-            )
-          )
-        }, 0)
-      : null,
-    minPriceCents: prices.length > 0 ? Math.min(...prices) : 0,
-    maxPriceCents: prices.length > 0 ? Math.max(...prices) : 0,
+function hostOf(baseUrl: string): string {
+  try {
+    return new URL(baseUrl).host
+  } catch {
+    return baseUrl
   }
 }

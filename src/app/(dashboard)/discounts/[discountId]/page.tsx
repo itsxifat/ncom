@@ -1,7 +1,6 @@
 import { notFound } from 'next/navigation'
 import { getActiveOrganization } from '@/server/services/organizationService'
 import { getDiscount } from '@/server/services/discountService'
-import { listCollections } from '@/server/services/collectionService'
 import { getOrganizationSettings } from '@/server/services/organizationSettingsService'
 import { centsToMajorString, bpsToPercent } from '@/lib/money'
 import { PageHeader } from '@/components/app/page-header'
@@ -27,9 +26,8 @@ export default async function EditDiscountPage({
     notFound()
   }
 
-  const [targets, collections, settings] = await Promise.all([
+  const [targets, settings] = await Promise.all([
     loadDiscountTargets(organization.id),
-    listCollections(organization.id),
     getOrganizationSettings(organization.id),
   ])
 
@@ -46,7 +44,7 @@ export default async function EditDiscountPage({
       <DiscountForm
         currencyCode={currency}
         products={targets.products}
-        collections={collections.map((c) => ({ id: c.id, title: c.title }))}
+        collections={targets.collections}
         stores={targets.stores}
         variants={targets.variants}
         initial={{

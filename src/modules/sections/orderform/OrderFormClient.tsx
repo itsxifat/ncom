@@ -285,12 +285,19 @@ export function OrderFormClient({
   // A page with nothing to sell cannot take an order. Saying so plainly beats
   // rendering a form whose button can only ever fail — and the merchant sees
   // this in the builder preview, which is where it needs to be noticed.
+  //
+  // Two reasons, two messages. An unreachable catalogue is a shopper's problem
+  // ("try again shortly") and a missing offer is the merchant's ("add one"),
+  // and showing either sentence in the other's situation sends the wrong person
+  // to fix the wrong thing.
   if (!commerce || !offer || offers.length === 0) {
     return (
       <SectionWrapper config={config} defaultPadding={false}>
         <section id="order" className="px-4 py-16 sm:px-6">
           <p className="text-center text-[14px] text-[color:var(--lp-text)]/50">
-            Add an offer in the Offers tab to see the order form.
+            {commerce?.catalogUnavailable
+              ? 'Ordering is unavailable for a moment. Please try again shortly.'
+              : 'Add an offer in the Offers tab to see the order form.'}
           </p>
         </section>
       </SectionWrapper>

@@ -1,6 +1,7 @@
 import 'server-only'
 import { prisma } from '@/server/db/client'
 import { addToCart } from './cartService'
+import { getProductsByIds, isCatalogError } from '@/server/catalog'
 import {
   placeOrder,
   type CampaignContext,
@@ -29,10 +30,11 @@ import type { OfferOrderInput } from '@/lib/validation/offerOrder'
  * and hands it to the ordinary checkout.
  *
  * Going through a real cart rather than writing an Order directly is deliberate.
- * It is what keeps a landing-page sale identical to every other sale: stock is
- * decremented atomically inside the checkout transaction, conversion is
- * idempotent via `Cart.completedAt` so a double-tapped button makes one order,
- * and the merchant sees the same record with the same fields as any other.
+ * It is what keeps a landing-page sale identical to every other sale: the goods
+ * are re-read from the merchant's website and their stock asked for in the same
+ * way, conversion is idempotent via `Cart.completedAt` so a double-tapped
+ * button makes one order, and the merchant sees the same record with the same
+ * fields as any other.
  *
  * The order of operations matters for money:
  *
@@ -136,6 +138,10 @@ export async function placeOfferOrder(
   for (const selection of priced.selections) {
     await addToCart(organizationId, cart.token, {
       variantId: selection.variantId,
+      // Carried through so every later read of this line — pricing, the cart
+      // page, checkout — resolves it with one products call rather than
+      // depending on the connector's optional /variants endpoint.
+      productId: selection.productId,
       quantity: selection.quantity,
     })
   }
@@ -152,6 +158,7 @@ export async function placeOfferOrder(
     try {
       await addToCart(organizationId, cart.token, {
         variantId: priced.gift.variantId,
+        productId: priced.gift.productId,
         quantity: priced.gift.quantity,
       })
       giftCents = priced.gift.priceCents * priced.gift.quantity
@@ -243,17 +250,20 @@ async function resolveCoupon(
   const discount = await loadDiscount(organizationId, code, storeId)
   if (!discount) return NO_COUPON
 
+  // Which groups each product is filed under on the merchant's own site, for a
+  // collection-scoped code. Read with the products rather than from a table
+  // here — see collectionsByProduct in orderEditPricing for the same reasoning.
   const productIds = [...new Set(priced.selections.map((s) => s.productId))]
-  const links = await prisma.collectionProduct.findMany({
-    where: { productId: { in: productIds } },
-    select: { productId: true, collectionId: true },
-  })
-
   const collectionsByProduct = new Map<string, string[]>()
-  for (const link of links) {
-    const existing = collectionsByProduct.get(link.productId)
-    if (existing) existing.push(link.collectionId)
-    else collectionsByProduct.set(link.productId, [link.collectionId])
+  try {
+    const products = await getProductsByIds(organizationId, productIds)
+    for (const [id, product] of products) {
+      collectionsByProduct.set(id, product.groupIds)
+    }
+  } catch (error) {
+    // A code the buyer typed is not worth failing a sale over. An unreadable
+    // catalogue narrows a scoped code to nothing, which is the safe direction.
+    if (!isCatalogError(error)) throw error
   }
 
   // Look the unit prices back up so each line is weighed by what it is

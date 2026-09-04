@@ -1,7 +1,16 @@
 import 'server-only'
 import { prisma } from '@/server/db/client'
 import { priceCartById } from './pricingService'
-import { commitInventoryForOrder } from './inventoryService'
+import {
+  canReserve,
+  getStock,
+  isSellable,
+  releaseStock,
+  reserveStock,
+  resolveVariants,
+  shopperMessage,
+  type ResolvedVariant,
+} from '@/server/catalog'
 import { emitOrderWebhook } from './orderService'
 import { verifyPayment } from './paymentService'
 import { scheduleCourierEvaluation } from './courierService'
@@ -32,9 +41,16 @@ import type { PaymentProvider } from '@/generated/prisma/enums'
  *                  is trusted, including values this same server sent it a
  *                  moment ago.
  *
- *   Atomic stock.  Inventory is decremented with a conditional update inside
- *                  this transaction, so two concurrent checkouts for the last
- *                  unit cannot both succeed.
+ *   Honest stock.  The goods are re-read from the merchant's website, and
+ *                  where their connector implements a reservation, the units
+ *                  are held there before the order is written and handed back
+ *                  if writing it fails. Where it does not, the check moments
+ *                  earlier is the whole guarantee and two shoppers can still
+ *                  race for the last unit — see reserveOrRefuse below, and the
+ *                  reservation section of docs/product-source.md.
+ *
+ * What is *not* here any more: an inventory decrement. NCOM does not own the
+ * stock figure, so it cannot move it. It asks, and it records what it was told.
  */
 
 export interface PlaceOrderResult {
@@ -97,15 +113,7 @@ export async function placeOrder(
   const cart = await prisma.cart.findFirst({
     where: { token: input.cartToken, organizationId },
     include: {
-      lines: {
-        include: {
-          variant: {
-            include: {
-              product: { select: { id: true, title: true, vendor: true } },
-            },
-          },
-        },
-      },
+      lines: { orderBy: { createdAt: 'asc' } },
       order: {
         select: {
           id: true,
@@ -149,7 +157,37 @@ export async function placeOrder(
     throw new Error('An email address or phone number is required')
   }
 
-  const pricing = await priceCartById(cart.id)
+  // The goods, as the merchant's website describes them in this request. This
+  // is the last read before money is recorded, and everything written onto the
+  // order lines comes from it — a title, a price or a weight taken from the
+  // cart snapshot would be recording what the shopper was shown rather than
+  // what they bought.
+  const refs = cart.lines.map((line) => ({
+    variantId: line.variantId,
+    productId: line.productId,
+  }))
+
+  const [pricing, resolved] = await Promise.all([
+    priceCartById(cart.id),
+    resolveVariants(organizationId, refs).catch((error: unknown) => {
+      // A catalogue that cannot be read is not a cart that can be sold. The
+      // shopper gets a sentence they can act on; the reason is in the logs.
+      console.error('[checkout] catalogue unreachable', error)
+      throw new Error(shopperMessage(error))
+    }),
+  ])
+
+  // Every line has to still exist. A cart that sat open while the merchant
+  // deleted a product cannot be converted — there is no price to charge and no
+  // stock to take.
+  const missing = cart.lines.filter((line) => !resolved.has(line.variantId))
+  if (missing.length > 0) {
+    throw new Error(
+      `${missing[0].title ?? 'An item'} is no longer available. Remove it to continue.`
+    )
+  }
+
+  await assertInStock(organizationId, cart.lines, resolved)
 
   // A campaign page carries its own delivery rules, so the organisation having
   // no zone covering this address is not a reason to refuse the order.
@@ -187,7 +225,7 @@ export async function placeOrder(
 
   const shippingAddress = cart.shippingAddress
   const requiresShipping = cart.lines.some(
-    (line) => line.variant.requiresShipping
+    (line) => resolved.get(line.variantId)?.variant.requiresShipping ?? true
   )
   if (requiresShipping && !shippingAddress) {
     throw new Error('A shipping address is required')
@@ -206,16 +244,122 @@ export async function placeOrder(
     )
   }
 
-  const placed = await prisma.$transaction(async (tx) => {
-    // Re-check inside the transaction: between the read above and here another
-    // request could have completed this same cart.
-    const fresh = await tx.cart.findUnique({
-      where: { id: cart.id },
-      select: { completedAt: true },
-    })
-    if (fresh?.completedAt) {
-      const existing = await tx.order.findUnique({
-        where: { cartId: cart.id },
+  // Ask the merchant's system to hold the units, before anything is written.
+  //
+  // Outside the transaction on purpose: this is a call across the internet to
+  // someone else's server, and holding a Postgres transaction open for the
+  // length of it would put every checkout in the platform behind one merchant's
+  // slow host. The cost is that a reservation can outlive a failed order, which
+  // is what the release below is for.
+  const reservation = await reserveOrRefuse(organizationId, cart.id, cart.lines)
+
+  // Set when the transaction found this cart already converted — a second
+  // submit that raced past the check at the top of this function. The units
+  // just reserved belong to nobody in that case, so they go back.
+  let replayed = false
+
+  let placed: PlaceOrderResult
+  try {
+    placed = await prisma.$transaction(async (tx) => {
+      // Re-check inside the transaction: between the read above and here another
+      // request could have completed this same cart.
+      const fresh = await tx.cart.findUnique({
+        where: { id: cart.id },
+        select: { completedAt: true },
+      })
+      if (fresh?.completedAt) {
+        const existing = await tx.order.findUnique({
+          where: { cartId: cart.id },
+          select: {
+            id: true,
+            orderNumber: true,
+            totalCents: true,
+            currencyCode: true,
+          },
+        })
+        if (existing) {
+          replayed = true
+          return {
+            orderId: existing.id,
+            orderNumber: existing.orderNumber,
+            totalCents: existing.totalCents,
+            currencyCode: existing.currencyCode,
+          }
+        }
+      }
+
+      const orderNumber = await nextOrderNumber(tx, organizationId)
+
+      const customerId = await resolveCustomer(
+        tx,
+        organizationId,
+        cart.customerId,
+        {
+          email: cart.email,
+          phone: contactPhone,
+        }
+      )
+
+      const pricedById = new Map(pricing.lines.map((line) => [line.id, line]))
+
+      const order = await tx.order.create({
+        data: {
+          organizationId,
+          // Copied from the cart so the order records which storefront sold it.
+          // Every order answers "which landing page made this".
+          storeId: cart.storeId,
+          pageId: campaign?.pageId ?? null,
+          offerKey: campaign?.offerKey ?? null,
+          offerLabel: campaign?.offerLabel ?? null,
+          offerPriceCents: campaign?.offerPriceCents ?? null,
+          offerRegularCents: campaign?.offerRegularCents ?? null,
+          orderNumber,
+          cartId: cart.id,
+          customerId,
+          email: cart.email,
+          phone: contactPhone,
+          currencyCode: pricing.currencyCode,
+          subtotalCents: pricing.subtotalCents,
+          discountTotalCents,
+          shippingTotalCents,
+          taxTotalCents: pricing.taxTotalCents,
+          totalCents,
+          financialStatus: 'PENDING',
+          shippingAddress: shippingAddress ?? undefined,
+          billingAddress: cart.billingAddress ?? shippingAddress ?? undefined,
+          shippingCountryCode: readCountryCode(shippingAddress),
+          shippingMethodTitle: campaign?.shippingTitle ?? undefined,
+          discountCode:
+            cart.discountCode ??
+            campaign?.discountCode ??
+            campaign?.discountLabel ??
+            undefined,
+          // What the code alone was worth, kept apart from the sum of everything
+          // in `discountTotalCents` — see the note on the column in schema.prisma.
+          //
+          // A campaign page evaluates its own coupon and hands the figure over.
+          // An ordinary cart has no other discount, so the pricing engine's total
+          // *is* the code's worth. This used to write zero on that second path,
+          // which meant an edit made after the campaign behind the code had
+          // expired found nothing to carry forward and silently withdrew a
+          // discount the customer had already been given.
+          couponDiscountCents: campaign
+            ? Math.max(0, Math.round(campaign.couponDiscountCents ?? 0))
+            : cart.discountCode
+              ? Math.max(0, pricing.discountTotalCents)
+              : 0,
+          note: cart.note,
+          lines: {
+            create: cart.lines.flatMap((line) =>
+              toOrderLines(
+                line,
+                resolved.get(line.variantId),
+                pricedById.get(line.id),
+                campaign
+              )
+            ),
+          },
+        },
         select: {
           id: true,
           orderNumber: true,
@@ -223,181 +367,91 @@ export async function placeOrder(
           currencyCode: true,
         },
       })
-      if (existing) {
-        return {
-          orderId: existing.id,
-          orderNumber: existing.orderNumber,
-          totalCents: existing.totalCents,
-          currencyCode: existing.currencyCode,
-        }
+
+      if (cart.discountCode) {
+        await redeemDiscountCode(tx, organizationId, cart.discountCode)
       }
-    }
 
-    const orderNumber = await nextOrderNumber(tx, organizationId)
-
-    const customerId = await resolveCustomer(
-      tx,
-      organizationId,
-      cart.customerId,
-      {
-        email: cart.email,
-        phone: contactPhone,
-      }
-    )
-
-    const pricedById = new Map(pricing.lines.map((line) => [line.id, line]))
-
-    const order = await tx.order.create({
-      data: {
-        organizationId,
-        // Copied from the cart so the order records which storefront sold it.
-        // Every order answers "which landing page made this".
-        storeId: cart.storeId,
-        pageId: campaign?.pageId ?? null,
-        offerKey: campaign?.offerKey ?? null,
-        offerLabel: campaign?.offerLabel ?? null,
-        offerPriceCents: campaign?.offerPriceCents ?? null,
-        offerRegularCents: campaign?.offerRegularCents ?? null,
-        orderNumber,
-        cartId: cart.id,
-        customerId,
-        email: cart.email,
-        phone: contactPhone,
-        currencyCode: pricing.currencyCode,
-        subtotalCents: pricing.subtotalCents,
-        discountTotalCents,
-        shippingTotalCents,
-        taxTotalCents: pricing.taxTotalCents,
-        totalCents,
-        financialStatus: 'PENDING',
-        shippingAddress: shippingAddress ?? undefined,
-        billingAddress: cart.billingAddress ?? shippingAddress ?? undefined,
-        shippingCountryCode: readCountryCode(shippingAddress),
-        shippingMethodTitle: campaign?.shippingTitle ?? undefined,
-        discountCode:
-          cart.discountCode ??
-          campaign?.discountCode ??
-          campaign?.discountLabel ??
-          undefined,
-        // What the code alone was worth, kept apart from the sum of everything
-        // in `discountTotalCents` — see the note on the column in schema.prisma.
-        //
-        // A campaign page evaluates its own coupon and hands the figure over.
-        // An ordinary cart has no other discount, so the pricing engine's total
-        // *is* the code's worth. This used to write zero on that second path,
-        // which meant an edit made after the campaign behind the code had
-        // expired found nothing to carry forward and silently withdrew a
-        // discount the customer had already been given.
-        couponDiscountCents: campaign
-          ? Math.max(0, Math.round(campaign.couponDiscountCents ?? 0))
-          : cart.discountCode
-            ? Math.max(0, pricing.discountTotalCents)
-            : 0,
-        note: cart.note,
-        lines: {
-          create: cart.lines.flatMap((line) =>
-            toOrderLines(line, pricedById.get(line.id), campaign)
-          ),
-        },
-      },
-      select: {
-        id: true,
-        orderNumber: true,
-        totalCents: true,
-        currencyCode: true,
-      },
-    })
-
-    const committed = await commitInventoryForOrder(
-      tx,
-      order.id,
-      cart.lines.map((line) => ({
-        variantId: line.variantId,
-        quantity: line.quantity,
-        inventoryTracked: line.variant.inventoryTracked,
-        inventoryPolicy: line.variant.inventoryPolicy,
-      }))
-    )
-
-    if (!committed.ok) {
-      const sold = cart.lines.find(
-        (line) => line.variantId === committed.variantId
-      )
-      // Throwing rolls back the order and the number we just consumed. A gap
-      // in order numbers is acceptable; overselling is not.
-      throw new Error(
-        `${sold?.variant.product.title ?? 'An item'} sold out while you were checking out`
-      )
-    }
-
-    if (cart.discountCode) {
-      await redeemDiscountCode(tx, organizationId, cart.discountCode)
-    }
-
-    await tx.cart.update({
-      where: { id: cart.id },
-      data: { completedAt: new Date() },
-    })
-
-    await tx.orderEvent.create({
-      data: {
-        orderId: order.id,
-        type: 'order_placed',
-        message: `Order ${order.orderNumber} placed`,
-      },
-    })
-
-    // A manual or cash-on-delivery order is a promise to pay later, so it
-    // stays PENDING. An order carrying a verified gateway reference is money
-    // already taken and is recorded as such.
-    if (input.paymentReference) {
-      await tx.transaction.create({
-        data: {
-          orderId: order.id,
-          kind: 'SALE',
-          status: 'SUCCESS',
-          provider: input.paymentProvider,
-          amountCents: totalCents,
-          currencyCode: pricing.currencyCode,
-          gatewayReference: input.paymentReference,
-        },
-      })
-
-      await tx.order.update({
-        where: { id: order.id },
-        data: {
-          financialStatus: 'PAID',
-          paidTotalCents: totalCents,
-        },
+      await tx.cart.update({
+        where: { id: cart.id },
+        data: { completedAt: new Date() },
       })
 
       await tx.orderEvent.create({
         data: {
           orderId: order.id,
-          type: 'payment_captured',
-          message: `Payment captured via ${input.paymentProvider}`,
+          type: 'order_placed',
+          message: `Order ${order.orderNumber} placed`,
         },
       })
-    }
 
-    if (customerId) {
-      await tx.customer.update({
-        where: { id: customerId },
-        data: {
-          ordersCount: { increment: 1 },
-          totalSpentCents: { increment: totalCents },
-          lastOrderAt: new Date(),
-        },
-      })
-    }
+      // A manual or cash-on-delivery order is a promise to pay later, so it
+      // stays PENDING. An order carrying a verified gateway reference is money
+      // already taken and is recorded as such.
+      if (input.paymentReference) {
+        await tx.transaction.create({
+          data: {
+            orderId: order.id,
+            kind: 'SALE',
+            status: 'SUCCESS',
+            provider: input.paymentProvider,
+            amountCents: totalCents,
+            currencyCode: pricing.currencyCode,
+            gatewayReference: input.paymentReference,
+          },
+        })
 
-    return {
-      orderId: order.id,
-      orderNumber: order.orderNumber,
-      totalCents: order.totalCents,
-      currencyCode: order.currencyCode,
+        await tx.order.update({
+          where: { id: order.id },
+          data: {
+            financialStatus: 'PAID',
+            paidTotalCents: totalCents,
+          },
+        })
+
+        await tx.orderEvent.create({
+          data: {
+            orderId: order.id,
+            type: 'payment_captured',
+            message: `Payment captured via ${input.paymentProvider}`,
+          },
+        })
+      }
+
+      if (customerId) {
+        await tx.customer.update({
+          where: { id: customerId },
+          data: {
+            ordersCount: { increment: 1 },
+            totalSpentCents: { increment: totalCents },
+            lastOrderAt: new Date(),
+          },
+        })
+      }
+
+      return {
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        totalCents: order.totalCents,
+        currencyCode: order.currencyCode,
+      }
+    })
+  } catch (error) {
+    // The order did not save, so the units the merchant is holding for it are
+    // not owed to anyone. Handing them back is best effort — see releaseStock.
+    if (reservation) {
+      await handBack(organizationId, cart.id, cart.lines)
     }
-  })
+    throw error
+  }
+
+  // A replay reserved a second time for an order that already took its stock
+  // when it was first placed. Without this, double-tapping the button on a slow
+  // connection quietly takes twice the units off the merchant's shelf while
+  // showing the buyer one perfectly ordinary order.
+  if (replayed && reservation) {
+    await handBack(organizationId, cart.id, cart.lines)
+  }
 
   // After the commit, so a receiver that immediately reads stock sees the
   // quantities this order already reserved rather than the pre-order numbers.
@@ -420,6 +474,117 @@ export async function placeOrder(
 }
 
 type Tx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0]
+
+type CartLineRow = {
+  id: string
+  variantId: string
+  productId: string | null
+  quantity: number
+  title: string | null
+}
+
+/**
+ * Refuses a checkout the merchant's own stock figures cannot cover.
+ *
+ * Read one more time here rather than trusting the resolution a few lines
+ * above: `/stock` is the cheap endpoint most connectors implement, and the gap
+ * between rendering a cart and pressing the button is where a last unit goes.
+ * On a site with no reservation endpoint this check is the only thing standing
+ * between two shoppers and one shirt, which is why it is made as late as it can
+ * be made.
+ */
+async function assertInStock(
+  organizationId: string,
+  lines: CartLineRow[],
+  resolved: Map<string, ResolvedVariant>
+): Promise<void> {
+  const stock = await getStock(
+    organizationId,
+    lines.map((line) => ({
+      variantId: line.variantId,
+      productId: line.productId,
+    }))
+  )
+
+  for (const line of lines) {
+    const entry = resolved.get(line.variantId)
+    const state = stock.get(line.variantId) ?? {
+      available: entry?.variant.available ?? null,
+      policy: entry?.variant.policy ?? 'DENY',
+    }
+    if (isSellable(state, line.quantity)) continue
+
+    const name = entry?.product.title ?? line.title ?? 'An item'
+    const available = state.available ?? 0
+    throw new Error(
+      available > 0
+        ? `Only ${available} of ${name} are left. Lower the quantity to continue.`
+        : `${name} sold out while you were checking out`
+    )
+  }
+}
+
+/**
+ * Holds the units on the merchant's side, where their site can do that.
+ *
+ * Returns whether a reservation is actually outstanding, which is what tells
+ * the failure path whether there is anything to hand back.
+ *
+ * A site without `/reserve` is not an error: plenty of merchants run a shop
+ * where the stock figure is a number in a spreadsheet-shaped database and there
+ * is nothing to reserve against. They get the check above and the merchant
+ * resolves a rare double-sale by hand, exactly as they did before NCOM. What
+ * they must not get is a silent pretence that stock was held — hence the
+ * capability flag, the badge in the dashboard, and this comment.
+ */
+async function reserveOrRefuse(
+  organizationId: string,
+  orderRef: string,
+  lines: CartLineRow[]
+): Promise<boolean> {
+  if (!(await canReserve(organizationId))) return false
+
+  const result = await reserveStock(
+    organizationId,
+    orderRef,
+    lines.map((line) => ({
+      variantId: line.variantId,
+      quantity: line.quantity,
+    }))
+  )
+
+  if (result.ok) return true
+
+  const rejected = result.rejected[0]
+  const line = lines.find((row) => row.variantId === rejected?.variantId)
+  throw new Error(
+    rejected?.reason ??
+      `${line?.title ?? 'An item'} sold out while you were checking out`
+  )
+}
+
+/** Gives a reservation back after a failed write. Never throws. */
+async function handBack(
+  organizationId: string,
+  orderRef: string,
+  lines: CartLineRow[]
+): Promise<void> {
+  try {
+    await releaseStock(
+      organizationId,
+      orderRef,
+      lines.map((line) => ({
+        variantId: line.variantId,
+        quantity: line.quantity,
+      }))
+    )
+  } catch (error) {
+    // The order failed and the merchant is holding stock for it. Loud in the
+    // logs, silent to the shopper: they are already being told the checkout
+    // did not go through, and a second failure is not their problem.
+    console.error('[checkout] could not release reservation', orderRef, error)
+  }
+}
 
 /**
  * Allocates the next per-store order number.
@@ -452,15 +617,8 @@ function toOrderLines(
     variantId: string
     quantity: number
     properties: unknown
-    variant: {
-      priceCents: number
-      title: string
-      sku: string | null
-      requiresShipping: boolean
-      weightGrams: number
-      product: { id: string; title: string; vendor: string | null }
-    }
   },
+  entry: ResolvedVariant | undefined,
   priced:
     | {
         discountCents: number
@@ -478,18 +636,27 @@ function toOrderLines(
   const soldQuantity = line.quantity - giftQuantity
 
   // Every descriptive field is copied, not referenced — see the snapshot rule
-  // in schema.prisma. An order must still read correctly after the product is
-  // renamed or deleted.
+  // in schema.prisma. That rule mattered when the catalogue was a table here;
+  // now that it lives on someone else's server it is the only thing that makes
+  // an order readable at all. The merchant can delete the product tonight and
+  // this order still says what was sold, at what price, in what size.
+  //
+  // `entry` is present for every line: placeOrder refuses a cart holding one
+  // that no longer resolves, and the fallbacks below exist so a future caller
+  // cannot produce a nameless line by skipping that check.
+  const variant = entry?.variant
+  const product = entry?.product
+
   const base = {
-    productId: line.variant.product.id,
+    productId: product?.id ?? null,
     variantId: line.variantId,
-    title: line.variant.product.title,
-    variantTitle: line.variant.title,
-    sku: line.variant.sku,
-    vendor: line.variant.product.vendor,
-    unitPriceCents: line.variant.priceCents,
-    requiresShipping: line.variant.requiresShipping,
-    weightGrams: line.variant.weightGrams,
+    title: product?.title ?? 'Item',
+    variantTitle: variant?.title ?? null,
+    sku: variant?.sku ?? null,
+    vendor: product?.vendor ?? null,
+    unitPriceCents: variant?.priceCents ?? 0,
+    requiresShipping: variant?.requiresShipping ?? true,
+    weightGrams: variant?.weightGrams ?? 0,
     properties: (line.properties ?? undefined) as
       Prisma.InputJsonValue | undefined,
   }
@@ -517,7 +684,7 @@ function toOrderLines(
         giftQuantity > 0
           ? Math.max(
               0,
-              line.variant.priceCents * soldQuantity - discountCents + taxCents
+              base.unitPriceCents * soldQuantity - discountCents + taxCents
             )
           : (priced?.totalCents ?? 0),
       isGift: false,
@@ -525,7 +692,7 @@ function toOrderLines(
   }
 
   if (giftQuantity > 0) {
-    const value = line.variant.priceCents * giftQuantity
+    const value = base.unitPriceCents * giftQuantity
     rows.push({
       ...base,
       quantity: giftQuantity,

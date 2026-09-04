@@ -116,12 +116,4 @@ export const paymentProviderSchema = z.object({
 
 export type PaymentProviderInput = z.infer<typeof paymentProviderSchema>
 
-export const locationSchema = z.object({
-  name: z.string().trim().min(1, 'Name is required').max(120),
-  isActive: z.boolean().default(true),
-  fulfillsOnlineOrders: z.boolean().default(true),
-})
-
-export type LocationInput = z.infer<typeof locationSchema>
-
 export type StoreFormState = { error?: string; success?: string } | undefined

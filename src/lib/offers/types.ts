@@ -73,6 +73,15 @@ export type OfferTierModeValue = 'EXACT' | 'THRESHOLD'
 /** Something thrown in free with the offer. */
 export interface OfferGift {
   variantId: string
+  /**
+   * The product the gift variant belongs to, on the merchant's own site.
+   *
+   * Carried so the cart line can be resolved with one products call. Every
+   * reference to goods in this system is a (product, variant) pair for that
+   * reason — a bare variant id can only be resolved through the connector's
+   * optional /variants endpoint.
+   */
+  productId: string
   title: string
   variantTitle: string | null
   imageUrl: string | null

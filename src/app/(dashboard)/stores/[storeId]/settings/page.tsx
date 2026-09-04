@@ -105,7 +105,6 @@ export default async function StoreSettingsPage({
             { href: '/settings/payments', label: 'Payments' },
             { href: '/settings/shipping', label: 'Shipping' },
             { href: '/settings/taxes', label: 'Taxes' },
-            { href: '/settings/locations', label: 'Locations' },
           ].map((item) => (
             <Link
               key={item.href}
