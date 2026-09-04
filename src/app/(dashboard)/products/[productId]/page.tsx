@@ -16,7 +16,7 @@ import { PageShell } from '@/components/app/page-shell'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ProductForm } from '@/components/store/product-form'
-import { ProductDangerZone } from '@/components/store/product-danger-zone'
+import { ProductActionsMenu } from '@/components/store/product-actions-menu'
 import type { CatalogProduct } from '@/server/catalog'
 
 /**
@@ -64,6 +64,9 @@ export default async function ProductPage({
   // first is as good a guess as any; with none there is nothing to link to and
   // the button is hidden.
   const storefront = stores[0] ?? null
+  const storefrontUrl = storefront
+    ? `http://${storefront.subdomain}.${env.ROOT_DOMAIN}/products/${editable.handle}`
+    : null
 
   // Prices round-trip through the form as major-unit strings, which is what the
   // merchant typed and what the action converts back to minor units.
@@ -76,22 +79,12 @@ export default async function ProductPage({
         backLabel="Products"
         title={editable.title}
         actions={
-          editable.status === 'ACTIVE' && storefront ? (
-            <Button
-              variant="outline"
-              render={
-                <a
-                  href={`http://${storefront.subdomain}.${env.ROOT_DOMAIN}/products/${editable.handle}`}
-                  target="_blank"
-                  rel="noreferrer"
-                />
-              }
-              nativeButton={false}
-            >
-              <ExternalLink />
-              View on storefront
-            </Button>
-          ) : undefined
+          <ProductActionsMenu
+            productId={editable.id}
+            title={editable.title}
+            status={editable.status}
+            storefrontUrl={storefrontUrl}
+          />
         }
       />
 
@@ -150,8 +143,6 @@ export default async function ProductPage({
           })),
         }}
       />
-
-      <ProductDangerZone productId={editable.id} />
     </PageShell>
   )
 }

@@ -20,6 +20,7 @@ import {
   listLocalProducts,
 } from './local'
 import { isSellable } from './rules'
+import { outstandingHolds, recordStockHolds, withStockLock } from './queue'
 import { CatalogUnsupportedError, isCatalogError } from './errors'
 import type {
   ProductPage,
@@ -195,7 +196,15 @@ export async function listProducts(
   }
 }
 
-async function listRemoteProducts(
+/**
+ * A page of the merchant's website only — no local rows mixed in.
+ *
+ * Exported for the one caller that needs the two catalogues held apart rather
+ * than merged: the tool that matches a workspace's own products against their
+ * twins on the merchant's site before deleting them (scripts/adopt-remote-
+ * products.mts). Everything else wants `listProducts`.
+ */
+export async function listRemoteProducts(
   organizationId: string,
   query: ProductQuery
 ): Promise<ProductPage> {
@@ -241,6 +250,14 @@ async function listRemoteProducts(
  * over a smaller set, and much better than a dashboard that cannot find
  * anything on a site whose developer skipped one query parameter. Local
  * products are always searched properly, in SQL.
+ *
+ * The two halves are then given a fair share of a fixed-size list, which is the
+ * whole difficulty. This used to concatenate local first and cut at `limit`:
+ * fine while a workspace had a handful of its own products, and silently fatal
+ * once it had `limit` of them, because the merchant's entire website then fell
+ * off the end. Every product picker in the dashboard reads this function, so an
+ * Elysium workspace with 322 rows of its own could see its shop's catalogue on
+ * the products page and *nothing* from it when building an offer.
  */
 export async function searchProducts(
   organizationId: string,
@@ -263,10 +280,30 @@ export async function searchProducts(
     ),
   ])
 
-  return [...local.products, ...remote].slice(
-    0,
-    Math.max(limit, local.products.length)
-  )
+  const forLocal = share(local.products.length, remote.length, limit)
+
+  return [
+    ...local.products.slice(0, forLocal),
+    ...remote.slice(0, limit - forLocal),
+  ]
+}
+
+/**
+ * How many of a `limit`-sized list go to the local half.
+ *
+ * Whichever side has less than half takes what it has and the other side gets
+ * the rest, so a workspace with three of its own products still sees the
+ * merchant's whole first page, and one with none is unaffected. Only when both
+ * could fill the list do they split it, local first — because those are the
+ * ones this dashboard can edit, and a merchant looking for one of their own
+ * products expects to find it near the top.
+ */
+function share(localCount: number, remoteCount: number, limit: number): number {
+  if (remoteCount === 0) return Math.min(localCount, limit)
+  if (localCount === 0) return 0
+
+  const half = Math.ceil(limit / 2)
+  return Math.min(localCount, Math.max(half, limit - remoteCount))
 }
 
 async function searchRemote(
@@ -575,10 +612,18 @@ function syntheticProduct(variant: CatalogVariant): CatalogProduct {
  * `/stock` endpoint because it is the one call a merchant can make fast — it is
  * asked on every cart render and again inside every checkout — and fall back to
  * reading the products when a site does not implement it.
+ *
+ * Remote figures then have this workspace's own outstanding holds subtracted.
+ * A merchant's connector reports what *their* system believes it has, and their
+ * system does not learn about an NCOM sale until it processes the order webhook
+ * — so between those two moments their number still counts units that are
+ * already sold. Reporting it unadjusted is what let two shoppers be shown the
+ * same last shirt. See queue.ts.
  */
 export async function getStock(
   organizationId: string,
-  refs: VariantRef[]
+  refs: VariantRef[],
+  options: { excludeOrderRef?: string } = {}
 ): Promise<Map<string, StockState>> {
   const stock = new Map<string, StockState>()
   if (refs.length === 0) return stock
@@ -611,13 +656,31 @@ export async function getStock(
   }
 
   const missing = outstanding.filter((ref) => !stock.has(ref.variantId))
-  if (missing.length === 0) return stock
+  if (missing.length > 0) {
+    const resolved = await resolveVariants(organizationId, missing)
+    for (const [id, entry] of resolved) {
+      stock.set(id, {
+        available: entry.variant.available,
+        policy: entry.variant.policy,
+      })
+    }
+  }
 
-  const resolved = await resolveVariants(organizationId, missing)
-  for (const [id, entry] of resolved) {
-    stock.set(id, {
-      available: entry.variant.available,
-      policy: entry.variant.policy,
+  // Only the remote ids. Local variants cannot have a hold — their units were
+  // taken from our own ledger, which is already what `getLocalStock` read.
+  const holds = await outstandingHolds(
+    organizationId,
+    outstanding.map((ref) => ref.variantId),
+    options
+  )
+
+  for (const [variantId, quantity] of holds) {
+    const state = stock.get(variantId)
+    // Null stays null: a site that does not count cannot be counted down.
+    if (!state || state.available === null) continue
+    stock.set(variantId, {
+      ...state,
+      available: Math.max(0, state.available - quantity),
     })
   }
 
@@ -769,4 +832,87 @@ export async function releaseStock(
 export async function canReserve(organizationId: string): Promise<boolean> {
   const connection = await loadConnection(organizationId)
   return connection?.capabilities.reserve === true
+}
+
+/**
+ * Takes units from the merchant's website: checked, claimed, and written down.
+ *
+ * The three steps have to happen together or they mean nothing, so they happen
+ * under one lock per variant and every other checkout for the same variant
+ * queues behind them:
+ *
+ *   1. Read their live figure, with this workspace's own outstanding holds
+ *      already subtracted (`getStock` does that). Reading it outside the lock
+ *      is the original bug — two checkouts both see the same "1 available"
+ *      before either has taken anything.
+ *
+ *   2. Ask their site to hold the units, where it implements `/reserve`.
+ *      Inside the lock, so the next checkout's step 1 already reflects it.
+ *
+ *   3. Record the hold, which is what makes step 1 true for the next checkout
+ *      on a site with no `/reserve`, where nothing on the merchant's side moves
+ *      until they process the order webhook.
+ *
+ * Throws when the units are not there. The merchant site's own refusal is
+ * passed through verbatim where it gave one — "only 1 left" from the shop that
+ * knows beats anything this function could phrase.
+ */
+export async function takeRemoteStock(
+  organizationId: string,
+  orderRef: string,
+  lines: (StockMovementLine & { productId?: string | null })[]
+): Promise<boolean> {
+  if (lines.length === 0) return false
+
+  return withStockLock(
+    organizationId,
+    lines.map((line) => line.variantId),
+    async () => {
+      // Its own holds are excluded: a retried submit re-reads while its first
+      // attempt's hold is still outstanding, and counting that against itself
+      // would refuse a sale it has already claimed the units for.
+      const stock = await getStock(
+        organizationId,
+        lines.map((line) => ({
+          variantId: line.variantId,
+          productId: line.productId ?? null,
+        })),
+        { excludeOrderRef: orderRef }
+      )
+
+      for (const line of lines) {
+        const state = stock.get(line.variantId)
+        if (!state || isSellable(state, line.quantity)) continue
+
+        const available = state.available ?? 0
+        throw new Error(
+          available > 0
+            ? `Only ${available} left of one of these items. Lower the quantity to continue.`
+            : 'One of these items sold out while you were checking out'
+        )
+      }
+
+      const reserves = await canReserve(organizationId)
+
+      if (reserves) {
+        const result = await reserveStock(organizationId, orderRef, lines)
+        if (!result.ok) {
+          const first = result.rejected[0]
+          throw new Error(first?.reason ?? 'Some items are no longer in stock')
+        }
+      }
+
+      // CONFIRMED where their site moved its own count, so the next read of it
+      // already excludes these units and subtracting them again here would make
+      // the shop under-sell by exactly what it just sold.
+      await recordStockHolds(
+        organizationId,
+        orderRef,
+        lines,
+        reserves ? 'CONFIRMED' : 'PENDING'
+      )
+
+      return true
+    }
+  )
 }

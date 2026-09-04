@@ -273,14 +273,41 @@ on the release, so an implementation can be idempotent on it.
 connector.**
 
 - With `/reserve`: the units are taken on your side before NCOM writes the
-  order, and handed back if writing it fails. Two shoppers cannot buy the same
-  last unit, because your database decided which of them got it.
-- Without it: NCOM checks stock moments before writing the order and no more.
-  Two shoppers reaching the last unit in the same second both get an order, and
-  the merchant sorts it out — exactly as they did before they had NCOM.
+  order, and handed back if writing it fails. Your database decides who got the
+  last unit — including when the competing buyer came through your own
+  storefront rather than through NCOM.
+- Without it: NCOM still cannot sell the same unit twice, but it can only speak
+  for its own sales. See below.
 
 Either is a legitimate way to run a shop. The dashboard shows which mode a
 workspace is in, and this document exists so nobody discovers it during a sale.
+
+#### What NCOM does when you have no `/reserve`
+
+Nothing on your side moves when NCOM sells — your system finds out when it
+processes the order webhook, which may be minutes later. Until then your
+`/stock` endpoint is still counting units that are already sold, and a naive
+platform would keep selling them. NCOM does two things about that.
+
+**Checkouts queue, per variant.** Two orders for the same variant do not run at
+the same time: reading your figure, asking you to hold, and writing down what
+was taken happen as one indivisible step, and the second checkout waits for the
+first. Orders for different products never wait on each other, so this costs
+nothing except in the exact case it exists for.
+
+**NCOM subtracts what it has already sold.** Every read of your `/stock` figure
+has this workspace's own outstanding units taken off it. If you say 1 and NCOM
+sold 1 four seconds ago, the next shopper sees 0 and is refused.
+
+Those holds expire after **15 minutes**, on the assumption your own system has
+caught up by then. If it has not — a webhook you dropped, a sync that is down —
+NCOM goes back to trusting your number, and the unit can be sold again. That
+is the trade being made on purpose: bounded pessimism rather than an
+indefinitely understated shelf.
+
+What this does **not** cover is your own storefront selling the same unit at the
+same moment. NCOM cannot see that sale and cannot hold anything against it.
+Only `/reserve` closes that, which is why it is worth the afternoon it takes.
 
 A `reserve` implementation should decrement the same number the storefront sells
 from, inside a transaction, conditionally — the SQL shape is
@@ -470,6 +497,44 @@ any change to the connector.
 
 With no arguments it runs against a fake website built into the script, which is
 how NCOM checks that its own signing and parsing still match this document.
+
+### Retiring the copies you already imported
+
+A workspace that imported this catalogue before connecting it now holds every
+product twice: once as an NCOM row, once on the merchant's site. The NCOM copy
+is the stale one, and deleting it is refused — orders, offers, discounts and
+open carts all name it.
+
+`adopt:remote` fixes that by moving the references first:
+
+```bash
+pnpm adopt:remote -- --org <organizationId|slug>          # report only
+pnpm adopt:remote -- --org <organizationId|slug> --apply  # do it
+```
+
+It reads both catalogues, matches each NCOM product to its twin — by SKU, then
+the merchant's own id, then handle, then title, and only ever when the match is
+unambiguous on both sides — and then, in one transaction, repoints every order
+line, cart line, offer item, ladder rule, gift variant and discount array onto
+the merchant's ids before deleting the local rows.
+
+What it deliberately will not do:
+
+- **Guess.** A title claimed by two products on either side matches nothing. A
+  catalogue with 56 rows called "Men's Hawaiian Shirt" gets 56 unmatched rows,
+  not 56 coin flips.
+- **Half-adopt a product.** If one size has no twin, the whole product is left
+  alone — that size's orders would have nowhere to go.
+- **Touch a product that is only in NCOM.** Those are yours; that is the point
+  of having both catalogues.
+
+Order lines keep their own snapshot of what was sold, so history reads exactly
+the same afterwards — only the id it points at changes. The stock ledger for the
+retired variants is deleted with them, because their counts are now the
+merchant's to keep.
+
+Take a database backup first. Run it without `--apply` and read the unmatched
+list before you run it with.
 
 ### Testing by hand
 

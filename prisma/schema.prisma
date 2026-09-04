@@ -146,6 +146,10 @@ model Organization {
   webhookEndpoints  WebhookEndpoint[]
   // Where the products and stock are actually read from. See CatalogConnection.
   catalogConnection CatalogConnection?
+  // Serialising checkouts against someone else's stock, and remembering what we
+  // took from it. See StockLock and RemoteStockHold.
+  stockLocks        StockLock[]
+  remoteStockHolds  RemoteStockHold[]
 
   // Courier automation: who ships the parcels, on what terms, and what the
   // fraud history of the phone numbers ordering them looks like.
@@ -1687,6 +1691,117 @@ model CatalogConnection {
   updatedAt DateTime @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+/// A queue, one variant wide.
+///
+/// NCOM's own stock needs nothing like this: a conditional `UPDATE ... WHERE
+/// available >= n` inside the checkout transaction is atomic, and two shoppers
+/// racing for the last unit are resolved by Postgres. Stock on a merchant's own
+/// website cannot be taken that way. The best NCOM can do is read the number,
+/// decide, and record what it took — three steps with an HTTP call in the
+/// middle, and two checkouts interleaving across them is exactly how one shirt
+/// gets sold twice.
+///
+/// So checkouts that touch the same remote variant take this row first and go
+/// through that sequence one at a time. Everything else runs concurrently: the
+/// key is per variant, so two orders for different products never wait on each
+/// other, and a workspace with no connected website never touches this table.
+///
+/// It is a lease, not a held transaction. A held transaction would pin a
+/// connection from the pool for the length of someone else's HTTP call and put
+/// every checkout on the platform behind one slow merchant host. A lease is a
+/// row with an expiry, taken with a conditional upsert and released by delete —
+/// so a process that dies mid-checkout blocks the variant until `expiresAt` and
+/// not one second longer.
+model StockLock {
+  /// `<organizationId>:<variantId>`. The primary key *is* the mutual exclusion:
+  /// two inserts of the same key cannot both win.
+  key            String @id
+  organizationId String
+
+  /// Who holds it — a random token, checked on release so a process that
+  /// overran its lease cannot free the lock a later checkout now owns.
+  holder String
+
+  /// When the lease lapses and another checkout may take it. Short: this covers
+  /// one stock read plus one reserve call, not a whole order.
+  expiresAt DateTime
+
+  acquiredAt DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  /// Reclaiming expired leases scans by time.
+  @@index([expiresAt])
+}
+
+/// Units NCOM has taken from a merchant's website that their number may not
+/// show yet.
+///
+/// The live figure a connector returns is the merchant's own count. When their
+/// site implements `/reserve`, calling it moves that count and the next read is
+/// already correct — those holds are recorded here only so a cancellation can
+/// hand them back.
+///
+/// When it does not, nothing on their side changes at checkout: their system
+/// finds out when it processes the order webhook, minutes or hours later. Until
+/// then their number still includes units that are sold, and a second shopper
+/// reading it would be told the last shirt is available. So NCOM subtracts its
+/// own outstanding holds from every live read. That is the whole mechanism —
+/// the lock above makes the decision atomic, this row makes it *informed*.
+///
+/// Deliberately expiring. A hold that outlives the merchant's own bookkeeping
+/// would be subtracted twice and the shop would under-sell, so it stops
+/// counting at `expiresAt` and the merchant's number is trusted again. Erring
+/// toward under-selling for a bounded window, rather than over-selling forever,
+/// is the trade this model is making on purpose.
+model RemoteStockHold {
+  id             String @id @default(cuid())
+  organizationId String
+
+  /// The merchant's own variant id. No foreign key — this row exists precisely
+  /// because that variant is not in our tables.
+  variantId String
+  /// Their product id, when the line carried one. For support, not for joins.
+  productId String?
+
+  quantity Int
+
+  /// The cart at reservation time, then the order it became. What a release
+  /// hands back, and what stops a retried checkout from double-counting itself.
+  orderRef String
+
+  state RemoteHoldState @default(PENDING)
+
+  /// After this the merchant's live number is trusted as-is again.
+  expiresAt  DateTime
+  /// Set when the units went back — a failed write, a cancellation, a return.
+  releasedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  /// One row per variant per order, so a retry updates its own hold instead of
+  /// stacking a second one on top of it.
+  @@unique([organizationId, orderRef, variantId])
+  /// The subtraction query: outstanding holds for these variants. `releasedAt`
+  /// and `expiresAt` are left out of the index and applied as filters — they
+  /// exclude a minority of an already tiny set, and adding them pushes the
+  /// generated name past Postgres's 63-character identifier limit.
+  @@index([organizationId, variantId, state])
+}
+
+/// Whether the merchant's own stock figure already reflects a hold.
+///
+/// CONFIRMED means their site acknowledged it — their number came down, so
+/// subtracting it here as well would double-count. PENDING means it did not,
+/// and these units are still inside the figure their connector reports.
+enum RemoteHoldState {
+  PENDING
+  CONFIRMED
 }
 
 model Product {

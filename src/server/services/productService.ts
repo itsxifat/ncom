@@ -1441,7 +1441,9 @@ export async function bulkDeleteProducts(
   productIds: string[]
 ) {
   await requireOrgAccess(organizationId, 'ADMIN')
-  if (productIds.length === 0) return { deleted: 0, blocked: [] as string[] }
+  if (productIds.length === 0) {
+    return { deleted: 0, blocked: [] as { id: string; title: string }[] }
+  }
 
   const owned = await prisma.product.findMany({
     where: { id: { in: productIds }, organizationId },
@@ -1466,8 +1468,8 @@ export async function bulkDeleteProducts(
 
   return {
     deleted: deletable.length,
-    blocked: owned
-      .filter((product) => soldIds.has(product.id))
-      .map((product) => product.title),
+    // Ids as well as titles: the caller offers "archive those instead" as a
+    // button, and a list of names is not something it can act on.
+    blocked: owned.filter((product) => soldIds.has(product.id)),
   }
 }

@@ -1,29 +1,37 @@
 import Link from 'next/link'
-import { ExternalLink, Package, PlugZap, Plus } from 'lucide-react'
+import { Package, PlugZap, Plus } from 'lucide-react'
 import { getActiveOrganization } from '@/server/services/organizationService'
-import { listProducts } from '@/server/services/productService'
+import {
+  listProducts,
+  PRODUCT_SORTS,
+  type ProductSort,
+} from '@/server/services/productService'
 import { getOrganizationSettings } from '@/server/services/organizationSettingsService'
+import { listCategoryOptions } from '@/server/services/categoryService'
 import { describeFailure, getConnectionStatus } from '@/server/catalog'
 import { EmptyState } from '@/components/app/empty-state'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { FormSelect } from '@/components/ui/form-select'
-import { formatMoneyAmount } from '@/lib/money'
+import {
+  ProductBulkList,
+  type ProductListRow,
+} from '@/components/store/product-bulk-list'
 
 const PAGE_SIZE = 50
 
 /**
  * The catalogue: both of them, in one list.
  *
- * Products stored in NCOM come first and can be edited here. Products read from
- * the merchant's connected website follow, and link out to their own admin —
- * they are theirs, and the closest this screen gets to editing one is opening
- * the page where it can be edited.
+ * Products stored in NCOM come first and are fully editable from here —
+ * selected in batches, published, archived, filed, duplicated, deleted. Products
+ * read from the merchant's connected website follow, and link out to their own
+ * admin: they are theirs, and the closest this screen gets to editing one is
+ * opening the page where it can be edited.
  *
  * Every row says which it is, because a merchant looking at two similarly named
  * shirts needs to know which one is on their shop and which one they typed in
- * here, and because only one of the two has an edit link.
+ * here, and because only one of the two can be acted on.
  *
  * Paging is by cursor rather than page number: half of this list is a website
  * that can only be asked for "the next page", and pretending to a page 7 would
@@ -41,37 +49,48 @@ export default async function ProductsPage({
     query.status === 'ARCHIVED'
       ? query.status
       : undefined
+  const sort =
+    typeof query.sort === 'string' && query.sort in PRODUCT_SORTS
+      ? (query.sort as ProductSort)
+      : 'title'
+  const categoryId = typeof query.category === 'string' ? query.category : null
   const cursor = typeof query.cursor === 'string' ? query.cursor : null
 
   const { organization } = await getActiveOrganization()
 
-  const [settings, connection] = await Promise.all([
+  const [settings, connection, categories] = await Promise.all([
     getOrganizationSettings(organization.id),
     getConnectionStatus(organization.id),
+    listCategoryOptions(organization.id),
   ])
 
   let items: Awaited<ReturnType<typeof listProducts>>['items'] = []
   let nextCursor: string | null = null
+  let total: number | null = null
   let failure: string | null = null
 
   try {
     const page = await listProducts(organization.id, {
       search,
       status,
+      sort,
+      categoryId,
       take: PAGE_SIZE,
       cursor,
     })
     items = page.items
     nextCursor = page.nextCursor
+    total = page.total
   } catch (error) {
     failure = describeFailure(error)
   }
 
   const currency = settings?.currencyCode ?? 'BDT'
+  const filtered = Boolean(search || status || categoryId)
 
   // Nothing here at all, and no website connected: the merchant has not started.
   // Both routes out are offered, because either is a legitimate way to run this.
-  if (!connection && items.length === 0 && !search && !status && !failure) {
+  if (!connection && items.length === 0 && !filtered && !failure) {
     return (
       <EmptyState
         icon={Package}
@@ -116,6 +135,43 @@ export default async function ProductsPage({
     )
   }
 
+  const categoryNames = new Map(
+    // The labels carry an indent prefix for the tree control; a row's meta line
+    // wants the bare name.
+    categories.map((option) => [option.id, option.label.replace(/^(— )+/, '')])
+  )
+
+  const rows: ProductListRow[] = items.map((product) => {
+    const prices = product.variants.map((variant) => variant.priceCents)
+
+    // Summed across variants, and null only when *nothing* on the product is
+    // counted. A product with one tracked variant at 0 and one untracked is out
+    // of stock in the part that can run out, and saying "not counted" there
+    // would hide the number that matters.
+    const counted = product.variants.filter(
+      (variant) => variant.available !== null
+    )
+
+    return {
+      source: product.source,
+      id: product.id,
+      title: product.title,
+      status: product.status,
+      imageUrl: product.images[0]?.url ?? null,
+      categoryName: product.categoryId
+        ? (categoryNames.get(product.categoryId) ?? null)
+        : null,
+      variantCount: product.variants.length,
+      stock:
+        counted.length === 0
+          ? null
+          : counted.reduce((sum, variant) => sum + (variant.available ?? 0), 0),
+      minPriceCents: prices.length > 0 ? Math.min(...prices) : 0,
+      maxPriceCents: prices.length > 0 ? Math.max(...prices) : 0,
+      url: product.url,
+    }
+  })
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -158,98 +214,65 @@ export default async function ProductsPage({
           <option value="DRAFT">Draft</option>
           <option value="ARCHIVED">Archived</option>
         </FormSelect>
+        {categories.length > 0 && (
+          <FormSelect name="category" defaultValue={categoryId ?? ''}>
+            <option value="">All categories</option>
+            {categories.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
+          </FormSelect>
+        )}
+        <FormSelect name="sort" defaultValue={sort}>
+          <option value="title">A – Z</option>
+          <option value="title-desc">Z – A</option>
+        </FormSelect>
         <Button type="submit" variant="outline">
           Filter
         </Button>
+        {filtered && (
+          <Button
+            variant="ghost"
+            render={<Link href="/products" />}
+            nativeButton={false}
+          >
+            Clear
+          </Button>
+        )}
       </form>
 
-      {items.length === 0 ? (
+      {rows.length === 0 ? (
         <EmptyState
           icon={Package}
           title="Nothing to show"
           description={
-            search || status
-              ? 'No product on your website matches these filters.'
-              : 'Your website returned no products. Check that the connector lists them and that they are published.'
+            filtered
+              ? 'No product matches these filters — in NCOM or on your website.'
+              : 'Add your first product, or check that your connected website lists them and that they are published.'
+          }
+          action={
+            <Button render={<Link href="/products/new" />} nativeButton={false}>
+              <Plus />
+              Add product
+            </Button>
           }
         />
       ) : (
-        <div className="bg-card divide-y overflow-hidden rounded-xl border">
-          {items.map((product) => {
-            const prices = product.variants.map((variant) => variant.priceCents)
-            const min = prices.length > 0 ? Math.min(...prices) : 0
-            const max = prices.length > 0 ? Math.max(...prices) : 0
-
-            return (
-              <div
-                key={product.id}
-                className="flex items-center gap-4 px-4 py-3 text-sm"
-              >
-                {product.images[0] ? (
-                  // Not next/image: the host is the merchant's own domain,
-                  // different for every tenant and unknowable at build time.
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={product.images[0].url}
-                    alt=""
-                    className="bg-muted size-10 shrink-0 rounded object-cover"
-                    loading="lazy"
-                  />
-                ) : (
-                  <div className="bg-muted size-10 shrink-0 rounded" />
-                )}
-
-                <div className="min-w-0 flex-1">
-                  <Link
-                    href={`/products/${encodeURIComponent(product.id)}`}
-                    className="truncate font-medium hover:underline"
-                  >
-                    {product.title}
-                  </Link>
-                  <p className="text-muted-foreground truncate text-xs">
-                    {product.variants.length} option
-                    {product.variants.length === 1 ? '' : 's'} ·{' '}
-                    {min === max
-                      ? formatMoneyAmount(min, currency)
-                      : `${formatMoneyAmount(min, currency)} – ${formatMoneyAmount(max, currency)}`}
-                  </p>
-                </div>
-
-                {product.status !== 'ACTIVE' && (
-                  <Badge variant="outline" className="shrink-0">
-                    {product.status === 'DRAFT' ? 'Draft' : 'Archived'}
-                  </Badge>
-                )}
-
-                <Badge
-                  variant="outline"
-                  className="text-muted-foreground shrink-0"
-                >
-                  {product.source === 'LOCAL' ? 'In NCOM' : 'Your website'}
-                </Badge>
-
-                {product.url && (
-                  <Link
-                    href={product.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-muted-foreground hover:text-foreground shrink-0"
-                    aria-label={`Open ${product.title} on your website`}
-                  >
-                    <ExternalLink className="size-4" />
-                  </Link>
-                )}
-              </div>
-            )
-          })}
-        </div>
+        <ProductBulkList
+          rows={rows}
+          total={total}
+          currencyCode={currency}
+          basePath="/products"
+          categories={categories.filter((option) => option.source === 'LOCAL')}
+        />
       )}
 
       {nextCursor && (
         <nav className="flex justify-end">
           <Button
             variant="outline"
-            render={<Link href={nextHref(search, status, nextCursor)} />}
+            render={<Link href={nextHref(query, nextCursor)} />}
             nativeButton={false}
           >
             Next
@@ -261,13 +284,14 @@ export default async function ProductsPage({
 }
 
 function nextHref(
-  search: string | undefined,
-  status: string | undefined,
+  query: Record<string, string | string[] | undefined>,
   cursor: string
 ): string {
   const params = new URLSearchParams()
-  if (search) params.set('q', search)
-  if (status) params.set('status', status)
+  for (const key of ['q', 'status', 'category', 'sort']) {
+    const value = query[key]
+    if (typeof value === 'string' && value) params.set(key, value)
+  }
   params.set('cursor', cursor)
   return `/products?${params.toString()}`
 }

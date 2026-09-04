@@ -390,10 +390,20 @@ export async function bulkProductStatusAction(
   return { success: `${count} product${count === 1 ? '' : 's'} ${label}.` }
 }
 
+/**
+ * What {@link bulkDeleteProductsAction} answers with.
+ *
+ * `StoreActionState` plus the ids it would not delete, which the list uses to
+ * offer archiving them in the same click rather than sending the merchant back
+ * to hunt for rows by name.
+ */
+export type BulkDeleteProductsState =
+  { error?: string; success?: string; blockedIds?: string[] } | undefined
+
 export async function bulkDeleteProductsAction(
   productIds: string[]
-): Promise<StoreActionState> {
-  let result: { deleted: number; blocked: string[] }
+): Promise<BulkDeleteProductsState> {
+  let result: { deleted: number; blocked: { id: string; title: string }[] }
   try {
     result = await bulkDeleteProducts(await org(), productIds)
   } catch (cause) {
@@ -405,14 +415,23 @@ export async function bulkDeleteProductsAction(
   // A partial result is reported as a partial result. Saying "5 deleted" when
   // two were refused would leave the merchant believing their catalogue is in
   // a state it is not.
+  //
+  // The refused ids come back with it, because "archive those instead" is the
+  // action the merchant now wants and making them find those rows again by
+  // name — in a list they have just deleted half of — is how a correct refusal
+  // still ends up feeling like the tool fighting them.
   if (result.blocked.length > 0) {
-    const names = result.blocked.slice(0, 3).join(', ')
+    const names = result.blocked
+      .slice(0, 3)
+      .map((product) => product.title)
+      .join(', ')
     const more =
       result.blocked.length > 3 ? ` and ${result.blocked.length - 3} more` : ''
     return {
       error:
         `${result.deleted} deleted. ${names}${more} ` +
-        `appear on existing orders — archive those instead.`,
+        `appear on existing orders and were kept.`,
+      blockedIds: result.blocked.map((product) => product.id),
     }
   }
 

@@ -1495,7 +1495,9 @@ async function restockReturnedParcel(
       quantity: line.quantity,
     }))
 
-  await returnToStock(organizationId, `courier-return:${orderId}`, returnable)
+  await returnToStock(organizationId, `courier-return:${orderId}`, returnable, {
+    orderId,
+  })
 
   await prisma.$transaction(async (tx) => {
     await tx.order.update({

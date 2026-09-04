@@ -221,7 +221,7 @@ export async function recordOrderReturn(
   // merchant's site the units are sellable again is a call across the internet,
   // and a return that a warehouse has already accepted must not fail because
   // their server was slow.
-  await returnToStock(organizationId, recorded.id, returnable)
+  await returnToStock(organizationId, recorded.id, returnable, { orderId })
 
   await emitOrderWebhook(organizationId, orderId, 'ORDER_UPDATED')
 

@@ -730,7 +730,7 @@ export async function editOrder(
 
   // Given back only once the edit is safely written. The reverse order would
   // hand units back for a change that then failed to save.
-  await returnToStock(organizationId, orderId, gives)
+  await returnToStock(organizationId, orderId, gives, { orderId })
 
   await emitOrderWebhook(organizationId, orderId, 'ORDER_UPDATED')
 

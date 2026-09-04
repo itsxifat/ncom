@@ -5,13 +5,13 @@ import type { PrismaClient } from '@/generated/prisma/client'
 import type { AdjustInventoryInput } from '@/lib/validation/product'
 import { emitWebhook } from '@/server/services/webhookService'
 import {
-  canReserve,
   getStock,
   isSellable,
   listProducts,
   releaseStock,
-  reserveStock,
+  releaseStockHolds,
   splitBySource,
+  takeRemoteStock,
   isCatalogError,
   type CatalogProduct,
   type VariantRef,
@@ -39,12 +39,18 @@ import {
  * win, because the decrement and the check are one statement under a row lock.
  *
  * **Remote products.** NCOM owns nothing. It reads the merchant's count when
- * asked, and requests a hold when an order is placed — which their site may
- * refuse. Where a connector implements `/reserve`, that request is as strong as
- * the local decrement, because it is their database making the same call. Where
- * it does not, the check moments earlier is the whole guarantee and two
- * shoppers can both be sold the last unit, which the merchant resolves the way
- * they did before they had NCOM.
+ * asked, and takes units when an order is placed — which their site may refuse.
+ * Where a connector implements `/reserve`, that request is as strong as the
+ * local decrement, because it is their database making the same call.
+ *
+ * Where it does not, nothing on their side moves until they process the order
+ * webhook, so their figure keeps counting units NCOM has already sold. Two
+ * things close that: checkouts touching the same variant are serialised, and
+ * NCOM subtracts its own outstanding holds from every read of their number. So
+ * the last shirt cannot be sold twice *through NCOM* — see catalog/queue.ts.
+ * What no amount of care here can prevent is the merchant's own storefront
+ * selling that shirt at the same moment; only `/reserve` can, and the dashboard
+ * says which of the two a workspace has.
  *
  * Every movement function below therefore splits its lines by source and does
  * both jobs. Callers that already hold a resolution pass the source through
@@ -648,17 +654,17 @@ export async function ensureDefaultLocation(
 // ── Remote stock: the numbers the merchant owns ──────────────────────────
 
 /**
- * Asks the merchant's system to hold units for an order.
+ * Takes units from the merchant's website, queued behind anyone else buying
+ * the same thing.
  *
- * Remote lines only, and called *outside* the checkout transaction: this is a
- * request across the internet, and holding a Postgres transaction open for the
- * length of it would put every checkout in the platform behind one merchant's
- * slow host.
+ * A thin wrapper: the sequence that makes this safe — read their figure, claim
+ * against it, write the claim down, all three under one lock per variant — is
+ * `takeRemoteStock` in catalog/source.ts, next to the other movements that
+ * cross the wire. Called *outside* the checkout transaction, because a request
+ * across the internet must never be made with a Postgres transaction held open.
  *
- * Returns whether anything is actually being held, so a caller can tell the
- * difference between "reserved" and "there is nothing here that reserves".
- * Throws when the site refuses — the units are not there, and the order that
- * would have taken them must not be written.
+ * Returns true when a claim exists to be handed back. Throws when the units are
+ * not there, with the merchant site's own sentence where it gave one.
  */
 export async function holdRemoteStock(
   organizationId: string,
@@ -666,13 +672,7 @@ export async function holdRemoteStock(
   lines: StockLine[]
 ): Promise<boolean> {
   if (lines.length === 0) return false
-  if (!(await canReserve(organizationId))) return false
-
-  const result = await reserveStock(organizationId, orderRef, lines)
-  if (result.ok) return true
-
-  const first = result.rejected[0]
-  throw new Error(first?.reason ?? 'Some items are no longer in stock')
+  return takeRemoteStock(organizationId, orderRef, lines)
 }
 
 /**
@@ -688,8 +688,13 @@ export async function returnRemoteStock(
   organizationId: string,
   orderRef: string,
   lines: StockLine[]
-): Promise<void> {
-  if (lines.length === 0) return
+): Promise<Map<string, number>> {
+  if (lines.length === 0) return new Map()
+
+  // First, because it is the half that cannot fail and the half that matters
+  // most: while this hold stands, every stock read subtracts units nobody is
+  // buying any more, and the shop refuses sales it could make.
+  const released = await releaseStockHolds(organizationId, orderRef, lines)
 
   try {
     await releaseStock(organizationId, orderRef, lines)
@@ -698,13 +703,14 @@ export async function returnRemoteStock(
     // rather than failures, and logging them would fill a local-only
     // workspace's logs with errors about a connector it never had.
     if (
-      isCatalogError(error) &&
-      (error.failure === 'unsupported' || error.failure === 'not_configured')
+      !isCatalogError(error) ||
+      (error.failure !== 'unsupported' && error.failure !== 'not_configured')
     ) {
-      return
+      console.error('[inventory] could not return stock', orderRef, error)
     }
-    console.error('[inventory] could not return stock', orderRef, error)
   }
+
+  return released
 }
 
 // ── Both at once ─────────────────────────────────────────────────────────
@@ -721,7 +727,8 @@ export async function returnRemoteStock(
 export async function returnToStock(
   organizationId: string,
   orderRef: string,
-  lines: StockLine[]
+  lines: StockLine[],
+  options: { orderId?: string } = {}
 ): Promise<void> {
   if (lines.length === 0) return
 
@@ -741,7 +748,71 @@ export async function returnToStock(
     }
   }
 
-  await returnRemoteStock(organizationId, orderRef, remote)
+  // Under every reference the units were ever claimed under, not this call's
+  // own. A checkout reserves against the cart — it is what exists at that
+  // moment, and it is the ref the merchant's site was given — while a later
+  // edit that took more units reserved against the order. A refund arriving
+  // with a *refund* id would have matched neither, which is how a release ends
+  // up naming a reservation nobody has heard of.
+  //
+  // The quantities shrink as they go. Handing the full amount to every
+  // reference would release it once per reference: an order that bought two and
+  // was later edited up by two holds four units across two claims, and giving
+  // one back must give back one.
+  const remaining = new Map<string, number>()
+  for (const line of remote) {
+    remaining.set(
+      line.variantId,
+      (remaining.get(line.variantId) ?? 0) + line.quantity
+    )
+  }
+
+  for (const ref of await remoteRefs(
+    organizationId,
+    orderRef,
+    options.orderId
+  )) {
+    const outstanding = [...remaining]
+      .filter(([, quantity]) => quantity > 0)
+      .map(([variantId, quantity]) => ({ variantId, quantity }))
+    if (outstanding.length === 0) break
+
+    const released = await returnRemoteStock(organizationId, ref, outstanding)
+
+    for (const [variantId, quantity] of released) {
+      remaining.set(
+        variantId,
+        Math.max(0, (remaining.get(variantId) ?? 0) - quantity)
+      )
+    }
+  }
+}
+
+/**
+ * Every reference a merchant's site might know this order's units by.
+ *
+ * The cart id first, because that is what checkout reserved against, then the
+ * order id, which is what an edit that took more units used. Releasing a
+ * reference the site never saw costs one no-op call and is swallowed; missing
+ * the one it did see leaves units held forever.
+ */
+async function remoteRefs(
+  organizationId: string,
+  fallbackRef: string,
+  orderId?: string
+): Promise<string[]> {
+  if (!orderId) return [fallbackRef]
+
+  const order = await prisma.order.findFirst({
+    where: { id: orderId, organizationId },
+    select: { cartId: true },
+  })
+
+  return [
+    ...new Set(
+      [order?.cartId, orderId].filter((ref): ref is string => Boolean(ref))
+    ),
+  ]
 }
 
 /**

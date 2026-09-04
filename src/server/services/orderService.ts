@@ -291,7 +291,8 @@ export async function cancelOrder(
         .map((line) => ({
           variantId: line.variantId!,
           quantity: line.quantity,
-        }))
+        })),
+      { orderId }
     )
   }
 
@@ -488,7 +489,8 @@ export async function refundOrder(
           variantId: lineById.get(requested.orderLineId)?.variantId ?? '',
           quantity: requested.quantity,
         }))
-        .filter((line) => line.variantId !== '')
+        .filter((line) => line.variantId !== ''),
+      { orderId }
     )
   }
 

@@ -47,14 +47,15 @@ import type { PaymentProvider } from '@/generated/prisma/enums'
  *                  differently. Units of NCOM's own products are taken with a
  *                  conditional decrement inside this transaction, so two
  *                  checkouts cannot both take the last one. Units on the
- *                  merchant's website are asked for *before* the transaction
- *                  opens — a request across the internet must never be made
- *                  with a Postgres transaction held open — and handed back if
- *                  the write then fails. Where a connector implements no
- *                  reservation at all, the re-read moments earlier is the whole
- *                  guarantee; see the reservation section of
- *                  docs/product-source.md, and the badge on the Product source
- *                  screen that tells a merchant which of the two they have.
+ *                  merchant's website are taken *before* the transaction opens
+ *                  — a request across the internet must never be made with a
+ *                  Postgres transaction held open — under a lock held per
+ *                  variant, so checkouts competing for the same last unit are
+ *                  queued rather than raced, and each one decides on a figure
+ *                  that already excludes what the ones before it took. They are
+ *                  handed back if the write then fails. See server/catalog/
+ *                  queue.ts and the reservation section of
+ *                  docs/product-source.md.
  */
 
 export interface PlaceOrderResult {
@@ -533,20 +534,31 @@ type CartLineRow = {
 }
 
 /**
- * Refuses a checkout the merchant's own stock figures cannot cover.
+ * Refuses early a checkout that clearly cannot be filled.
  *
- * Read one more time here rather than trusting the resolution a few lines
- * above: `/stock` is the cheap endpoint most connectors implement, and the gap
- * between rendering a cart and pressing the button is where a last unit goes.
- * On a site with no reservation endpoint this check is the only thing standing
- * between two shoppers and one shirt, which is why it is made as late as it can
- * be made.
+ * NCOM's own products only. Not because remote lines do not need checking —
+ * they need it more — but because theirs is checked in the one place it can be
+ * made to mean something: inside the per-variant lock in `holdRemoteStock`,
+ * where reading the figure, claiming against it and writing the claim down
+ * happen without another checkout getting between them. Asking their site here
+ * as well would be a second call to someone else's server on every checkout,
+ * for an answer that is already stale by the time this function returns.
+ *
+ * So this is a courtesy: it fails a hopeless cart before the payment
+ * verification below, with a sentence naming the item. The guarantee for local
+ * lines is the conditional decrement inside the transaction, and the guarantee
+ * for remote ones is the lock — neither is this.
  */
 async function assertInStock(
   organizationId: string,
-  lines: CartLineRow[],
+  cartLines: CartLineRow[],
   resolved: Map<string, ResolvedVariant>
 ): Promise<void> {
+  const lines = cartLines.filter(
+    (line) => resolved.get(line.variantId)?.source === 'LOCAL'
+  )
+  if (lines.length === 0) return
+
   const stock = await getStock(
     organizationId,
     lines.map((line) => ({
@@ -574,17 +586,20 @@ async function assertInStock(
 }
 
 /**
- * Holds the units on the merchant's side, where their site can do that.
+ * Takes the units on the merchant's side, queued behind anyone else buying the
+ * same thing.
  *
- * Returns whether a reservation is actually outstanding, which is what tells
- * the failure path whether there is anything to hand back.
+ * Returns whether a claim is outstanding, which is what tells the failure path
+ * there is something to hand back.
  *
  * A site without `/reserve` is not an error: plenty of merchants run a shop
  * where the stock figure is a number in a spreadsheet-shaped database and there
- * is nothing to reserve against. They get the check above and the merchant
- * resolves a rare double-sale by hand, exactly as they did before NCOM. What
- * they must not get is a silent pretence that stock was held — hence the
- * capability flag, the badge in the dashboard, and this comment.
+ * is nothing to reserve against. Those workspaces still get the queue, and NCOM
+ * subtracts what it has sold from their figure until their own system catches
+ * up — so two shoppers cannot be sold one shirt *through NCOM*. What it cannot
+ * do is stop the merchant's own storefront selling the same unit at the same
+ * moment; only a `/reserve` endpoint can, which is what the capability badge on
+ * the Product source screen is telling a merchant.
  */
 async function reserveOrRefuse(
   organizationId: string,
