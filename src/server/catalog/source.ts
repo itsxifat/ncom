@@ -557,6 +557,8 @@ async function fetchRemoteVariants(
       method: 'POST',
       path: '/variants',
       body: { ids },
+      // Also a read — ids in, variants out. See the note on /stock above.
+      replayable: true,
     })
     return parseVariants(payload, currencyCode)
   } catch (error) {
@@ -646,6 +648,10 @@ export async function getStock(
         method: 'POST',
         path: '/stock',
         body: { ids: outstanding.map((ref) => ref.variantId) },
+        // A read, despite the verb — it takes a list of ids and returns counts.
+        // Worth replaying, and the call most likely to meet a cold server,
+        // because it is the first thing a storefront render asks for.
+        replayable: true,
       })
       for (const [id, row] of parseStock(payload)) {
         stock.set(id, row)

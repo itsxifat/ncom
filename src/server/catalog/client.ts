@@ -26,6 +26,19 @@ import type { CatalogCapabilities } from './types'
  * must not hold our render open; the connection's own timeout applies to every
  * call and expiry is reported as a catalogue failure like any other.
  *
+ * **A read that times out is tried once more.** Real connectors cold-start: the
+ * first call after an idle spell wakes a container or opens a database pool and
+ * blows the budget, and every call after it lands in under 200ms. Measured on a
+ * live shop, that was one request at 4.07s followed by four at 0.12s — and the
+ * one that lost was enough to replace a landing page's order form with
+ * "Ordering is unavailable". Raising the timeout only makes the failure slower;
+ * a second attempt succeeds, because the abandoned first one did the waking.
+ *
+ * Only requests that change nothing are replayed. `/reserve` and `/release`
+ * move a merchant's stock, and the contract asks implementations to be
+ * idempotent on `orderRef` without requiring it — so a retried reserve could
+ * take the last shirt twice. Those get one attempt and an honest failure.
+ *
  * **Failures are typed, not thrown strings.** Callers decide what a failure
  * means: a storefront section renders a placeholder, a checkout refuses to
  * take money, the dashboard prints the reason. None of them can do that with
@@ -68,9 +81,66 @@ export interface CatalogRequest {
   capability?: keyof CatalogCapabilities
   /** 404 is an answer rather than a failure, e.g. product-by-handle. */
   allowNotFound?: boolean
+  /**
+   * Whether sending this twice is harmless.
+   *
+   * GET is assumed replayable. A POST is not, unless it says so: `/stock` is a
+   * read that uses POST only because it takes a list of ids, while `/reserve`
+   * and `/release` are the two calls in the contract that change something on
+   * the merchant's side and must never be duplicated.
+   */
+  replayable?: boolean
+}
+
+/** How long to wait before the second attempt. */
+const RETRY_DELAY_MS = 150
+
+/**
+ * Failures worth a second attempt.
+ *
+ * A cold start looks like `timeout`; a container being replaced looks like
+ * `unreachable` or a 502/503/504. Everything else is deterministic — a wrong
+ * secret, a missing endpoint, malformed JSON — and repeating the call would
+ * only mean the merchant's site is asked twice to say no. A 429 is excluded on
+ * purpose: the answer to being rate limited is not more requests.
+ */
+function isWorthRetrying(error: unknown): boolean {
+  if (!(error instanceof CatalogError)) return false
+  if (error.failure === 'timeout' || error.failure === 'unreachable')
+    return true
+  return (
+    error.failure === 'upstream_error' &&
+    (error.status === 502 || error.status === 503 || error.status === 504)
+  )
 }
 
 export async function catalogFetch(
+  connection: CatalogTarget,
+  request: CatalogRequest
+): Promise<unknown> {
+  const replayable = request.replayable ?? request.method === 'GET'
+
+  try {
+    return await attempt(connection, request)
+  } catch (error) {
+    if (!replayable || !isWorthRetrying(error)) throw error
+
+    await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS))
+    return attempt(connection, request)
+  }
+}
+
+/**
+ * One signed call, start to finish.
+ *
+ * Split out so the retry above re-signs rather than replaying a stale
+ * signature: `X-NCOM-Timestamp` is inside the signed payload and connectors
+ * reject anything outside a five-minute window, so a second attempt built from
+ * the first one's headers would be refused by a correct implementation the
+ * moment the clocks drifted — or, far worse, accepted by a lax one and hide the
+ * bug until someone else's connector was strict.
+ */
+async function attempt(
   connection: CatalogTarget,
   request: CatalogRequest
 ): Promise<unknown> {

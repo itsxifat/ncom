@@ -447,6 +447,21 @@ What NCOM does instead, to keep the load sane:
 - **Bounded.** A page's offers may reference at most 200 products; the stock
   screen reads at most 1,000 products and says so when it stops.
 - **Timed out.** Default 4 seconds, configurable 1–10. A shopper is waiting.
+- **Retried once, reads only.** A call that times out, cannot connect, or gets a
+  502/503/504 is tried a second time after 150ms. This exists because connectors
+  cold-start: the first request after an idle spell wakes a container or opens a
+  database pool and misses the budget, and everything after it lands in
+  milliseconds. The abandoned first request is what does the waking, so the
+  second one succeeds — where simply raising the timeout would only have made
+  the failure slower.
+
+  `/reserve` and `/release` are **never** retried. They move your stock, and
+  this document asks you to be idempotent on `orderRef` without being able to
+  require it, so a repeated reserve could take the same unit twice. Those get
+  one attempt and an honest failure.
+
+  Each attempt is signed afresh, so the second carries its own
+  `X-NCOM-Timestamp` and passes a correct five-minute window check.
 
 What a merchant should do on their side:
 
@@ -454,7 +469,11 @@ What a merchant should do on their side:
 - Cache on _their_ side if they want to — they know when their own data changes
   and can invalidate correctly, which is exactly what NCOM cannot do from here.
 - Allow our egress IP through any rate limiter. A `429` shows as gaps in the
-  storefront.
+  storefront, and is the one failure we never retry — the answer to being rate
+  limited is not more requests.
+- Keep the _first_ request of an idle period fast, or accept that it will be
+  retried. If waking your app takes longer than twice the timeout, no amount of
+  retrying helps; keep a warm instance.
 - Keep `/stock` under ~200ms. It is called twice per sale.
 
 ---
