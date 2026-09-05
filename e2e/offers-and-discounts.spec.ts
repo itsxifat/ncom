@@ -193,6 +193,10 @@ async function seedStorefront(organizationId: string) {
 function seedProduct(title: string, prices: number[], available = 50) {
   const productId = id('prod')
 
+  // Every seeded product carries a picture, so that any order placed in this
+  // file can be asked whether it kept one. See the assertion below.
+  const imageUrl = `https://cdn.example.test/${productId}.jpg`
+
   const variants = prices.map((priceCents, index) => ({
     id: id('var'),
     priceCents,
@@ -204,9 +208,9 @@ function seedProduct(title: string, prices: number[], available = 50) {
     available,
   }))
 
-  shop.add({ id: productId, title, variants })
+  shop.add({ id: productId, title, imageUrl, variants })
 
-  return { id: productId, title, variants }
+  return { id: productId, title, imageUrl, variants }
 }
 
 /** The offer rows a save actually produced, which is the only real assertion. */
@@ -623,6 +627,23 @@ test('a mix & match ladder charges the rung, and refuses a count it never priced
     // The rung is 800; two shirts at list would have been 1000.
     expect(result.body.totalCents).toBe(80_000)
     expect(result.body.quantity).toBe(2)
+
+    // The picture is copied onto the line at the moment of sale, like the
+    // title and the price. Three screens identify the goods by it and nothing
+    // else — the order page, the packing label, the buyer's tracking page —
+    // and when checkout quietly stopped copying it every one of them rendered
+    // an empty box, on live orders, without a single error to find it by.
+    const sold = await all<{ imageUrl: string | null }>(
+      `SELECT l."imageUrl"
+         FROM "OrderLine" l
+         JOIN "Order" o ON o.id = l."orderId"
+        WHERE o."organizationId" = $1 AND o."orderNumber" = $2`,
+      [organizationId, result.body.orderNumber]
+    )
+    expect(sold.length).toBeGreaterThan(0)
+    expect(sold.map((line) => line.imageUrl)).toEqual(
+      sold.map(() => shirt.imageUrl)
+    )
   })
 
   await test.step('the top rung is charged too', async () => {

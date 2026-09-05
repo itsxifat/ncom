@@ -673,6 +673,8 @@ function toOrderLines(
     variantId: string
     quantity: number
     properties: unknown
+    /** The cart's own snapshot, taken when the line was added. */
+    imageUrl?: string | null
   },
   entry: ResolvedVariant | undefined,
   priced:
@@ -713,6 +715,20 @@ function toOrderLines(
     unitPriceCents: variant?.priceCents ?? 0,
     requiresShipping: variant?.requiresShipping ?? true,
     weightGrams: variant?.weightGrams ?? 0,
+    // The picture, which is the field a packer actually identifies the goods
+    // by — the order screen, the packing label and the buyer's tracking page
+    // all read it off the line. It was left out when this function stopped
+    // reading the local catalogue, so every order placed after that resolved
+    // to an empty box on all three, and the two colourways of a shirt became
+    // indistinguishable on the one screen where telling them apart matters.
+    //
+    // Variant first, then the product's own: an order for the red one must not
+    // show a photo of the blue one. The cart's snapshot is the last resort
+    // rather than the first, so a line still gets a picture from a merchant
+    // whose connector has since dropped the field, without ever preferring
+    // what the shopper was shown over what they bought.
+    imageUrl:
+      variant?.imageUrl ?? product?.images[0]?.url ?? line.imageUrl ?? null,
     properties: (line.properties ?? undefined) as
       Prisma.InputJsonValue | undefined,
   }
