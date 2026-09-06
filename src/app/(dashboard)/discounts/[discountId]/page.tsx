@@ -27,7 +27,19 @@ export default async function EditDiscountPage({
   }
 
   const [targets, settings] = await Promise.all([
-    loadDiscountTargets(organization.id),
+    // What this discount already points at, so the pickers can name it. The
+    // ids are stored as plain strings and may be anywhere in a catalogue the
+    // picker only holds a page of.
+    loadDiscountTargets(organization.id, {
+      productIds: [
+        ...discount.targetProductIds,
+        ...discount.excludedProductIds,
+      ],
+      variantIds: [
+        ...discount.targetVariantIds,
+        ...discount.excludedVariantIds,
+      ],
+    }),
     getOrganizationSettings(organization.id),
   ])
 
@@ -44,9 +56,10 @@ export default async function EditDiscountPage({
       <DiscountForm
         currencyCode={currency}
         products={targets.products}
+        productsCursor={targets.productsCursor}
+        productsTotal={targets.productsTotal}
         collections={targets.collections}
         stores={targets.stores}
-        variants={targets.variants}
         initial={{
           id: discount.id,
           title: discount.title,

@@ -109,13 +109,35 @@ export class FakeShop {
           let products = [...this.products.values()]
           if (ids.length > 0) {
             products = products.filter((product) => ids.includes(product.id))
-          } else if (search) {
+            return send({ products: products.map(shape), nextCursor: null })
+          }
+
+          if (search) {
             products = products.filter((product) =>
               product.title.toLowerCase().includes(search)
             )
           }
 
-          return send({ products: products.map(shape), nextCursor: null })
+          // Paged, like the reference connectors: a real shop caps a page at
+          // 100 and hands back a cursor. A fixture that returns its whole
+          // catalogue however many were asked for makes a dashboard that only
+          // ever reads the first page look like it works.
+          const limit = Math.min(
+            Math.max(Number(url.searchParams.get('limit')) || 24, 1),
+            100
+          )
+          const cursor = url.searchParams.get('cursor')
+          const from = cursor
+            ? products.findIndex((product) => product.id === cursor) + 1
+            : 0
+          const page = products.slice(from, from + limit)
+          const more = from + limit < products.length
+
+          return send({
+            products: page.map(shape),
+            nextCursor: more ? (page[page.length - 1]?.id ?? null) : null,
+            total: products.length,
+          })
         }
 
         if (url.pathname.includes('/products/')) {
@@ -298,7 +320,12 @@ export class FakeShop {
     // the secret, so it was refused. Test again now that it can answer — which
     // is also what records the capabilities the dashboard reports.
     await page.getByRole('button', { name: 'Test now' }).click()
-    await page.getByText(/fake-shop/).waitFor({ timeout: 15_000 })
+    // The platform name is reported twice now — once in the success line and
+    // once as a badge — so this asks for the first rather than for the only.
+    await page
+      .getByText(/fake-shop/)
+      .first()
+      .waitFor({ timeout: 15_000 })
   }
 
   /** Exactly the verification docs/product-source.md §3 asks merchants for. */

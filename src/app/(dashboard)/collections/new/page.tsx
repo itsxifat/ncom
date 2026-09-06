@@ -17,6 +17,8 @@ export default async function NewCollectionPage() {
       />
       <CollectionForm
         products={catalog.products}
+        productsCursor={catalog.nextCursor}
+        productsTotal={catalog.total}
         currencyCode={catalog.currencyCode}
         initial={{
           title: '',

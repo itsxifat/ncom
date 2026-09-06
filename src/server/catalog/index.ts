@@ -32,6 +32,7 @@ export {
   listProducts,
   listRemoteProducts,
   searchProducts,
+  searchProductPage,
   getProduct,
   getProductsByIds,
   resolveVariants,

@@ -1,6 +1,6 @@
 'use client'
 
-import { useActionState, useMemo, useState } from 'react'
+import { useActionState, useCallback, useMemo, useState } from 'react'
 import { Gift, Package, Plus, Trash2 } from 'lucide-react'
 import {
   saveOfferAction,
@@ -105,11 +105,17 @@ export function OfferForm({
   currencyCode,
   initial,
   products,
+  productsCursor = null,
+  productsTotal = null,
   stores,
 }: {
   currencyCode: string
   initial: OfferFormInitial
+  /** The first page of the catalogue, plus whatever this offer already holds. */
   products: PickerProduct[]
+  /** Where the picker's next page starts, for catalogues bigger than a page. */
+  productsCursor?: string | null
+  productsTotal?: number | null
   stores: OfferFormStore[]
 }) {
   const boundAction = saveOfferAction.bind(null, initial.id ?? null)
@@ -125,9 +131,28 @@ export function OfferForm({
   ) => setForm((current) => ({ ...current, [key]: value }))
 
   const payload = useMemo(() => JSON.stringify(form), [form])
+
+  // Products the merchant reached by scrolling the picker past its first page.
+  // The rest of this form — the size rules, the gift list, the row that names
+  // what was chosen — resolves ids out of one catalogue, and a product picked
+  // from page four is not in the page the server sent.
+  const [found, setFound] = useState<PickerProduct[]>([])
+  const remember = useCallback((product: PickerProduct) => {
+    setFound((current) =>
+      current.some((seen) => seen.id === product.id)
+        ? current
+        : [...current, product]
+    )
+  }, [])
+
+  const catalog = useMemo(() => {
+    const onPage = new Set(products.map((product) => product.id))
+    return [...products, ...found.filter((product) => !onPage.has(product.id))]
+  }, [products, found])
+
   const byId = useMemo(
-    () => new Map(products.map((product) => [product.id, product])),
-    [products]
+    () => new Map(catalog.map((product) => [product.id, product])),
+    [catalog]
   )
 
   const isPool = form.kind !== 'FIXED'
@@ -313,7 +338,10 @@ export function OfferForm({
       >
         <ItemEditor
           items={form.items}
-          products={products}
+          products={catalog}
+          productsCursor={productsCursor}
+          productsTotal={productsTotal}
+          onFound={remember}
           currencyCode={currencyCode}
           showQuantity={!isPool}
           onChange={(items) => set('items', items)}
@@ -398,7 +426,7 @@ export function OfferForm({
       >
         <VariantRuleEditor
           items={form.items}
-          products={products}
+          products={catalog}
           rules={form.variantRules}
           currencyCode={currencyCode}
           offerPrices={!isLadder}
@@ -630,12 +658,19 @@ function ScopePicker({
 function ItemEditor({
   items,
   products,
+  productsCursor,
+  productsTotal,
+  onFound,
   currencyCode,
   showQuantity,
   onChange,
 }: {
   items: OfferFormItem[]
   products: PickerProduct[]
+  productsCursor: string | null
+  productsTotal: number | null
+  /** Hands back a product found past the picker's first page, so it resolves. */
+  onFound: (product: PickerProduct) => void
   currencyCode: string
   showQuantity: boolean
   onChange: (items: OfferFormItem[]) => void
@@ -820,14 +855,17 @@ function ItemEditor({
 
       <ProductPickerDialog
         initialProducts={products}
+        initialCursor={productsCursor}
+        total={productsTotal}
         currencyCode={currencyCode}
         title="Add a product to this offer"
-        onPick={(productId) =>
+        onPick={(productId, _variantId, product) => {
+          onFound(product)
           onChange([
             ...items,
             { productId, variantId: null, variantIds: [], quantity: 1 },
           ])
-        }
+        }}
         trigger={
           <Button type="button" variant="outline">
             <Plus />

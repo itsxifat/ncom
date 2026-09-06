@@ -5,9 +5,8 @@ import { loadOfferContext } from '../offer-data'
 
 export default async function NewOfferPage() {
   const { organization } = await getActiveOrganization()
-  const { currencyCode, products, stores } = await loadOfferContext(
-    organization.id
-  )
+  const { currencyCode, products, productsCursor, productsTotal, stores } =
+    await loadOfferContext(organization.id)
 
   // A workspace with exactly one store has nothing to choose, so it is chosen.
   const onlyStore = stores.length === 1 ? stores[0] : null
@@ -22,6 +21,8 @@ export default async function NewOfferPage() {
       <OfferForm
         currencyCode={currencyCode}
         products={products}
+        productsCursor={productsCursor}
+        productsTotal={productsTotal}
         stores={stores}
         initial={{
           label: '',

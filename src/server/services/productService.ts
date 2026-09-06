@@ -8,7 +8,7 @@ import {
   getProduct as readProduct,
   getProductsByIds,
   listProducts as readProducts,
-  searchProducts,
+  searchProductPage,
   isSellable,
   type ProductPage,
   type CatalogProduct,
@@ -176,15 +176,15 @@ export async function listProducts(
 
   const take = Math.min(Math.max(options.take ?? 24, 1), 100)
 
+  // A searched list pages like an unsearched one. It used to return a single
+  // page with no cursor, so a merchant searching "shirt" on a shop that sells
+  // three hundred of them was told there were fifty.
   const page: ProductPage = options.search
-    ? {
-        products: await searchProducts(organizationId, options.search, {
-          limit: take,
-          includeDrafts: true,
-        }),
-        nextCursor: null,
-        total: null,
-      }
+    ? await searchProductPage(organizationId, options.search, {
+        limit: take,
+        cursor: options.cursor,
+        includeDrafts: true,
+      })
     : await readProducts(organizationId, {
         limit: take,
         cursor: options.cursor,
@@ -279,33 +279,83 @@ export interface PickerProduct {
   }[]
 }
 
-export async function listPickerProducts(
-  organizationId: string,
-  options: { search?: string; take?: number; includeArchived?: boolean } = {}
-): Promise<{
+/**
+ * One page of the catalogue, and where the next one starts.
+ *
+ * Paged rather than "everything at once" because half of a merged catalogue is
+ * the merchant's own website: asking it for forty thousand products so that
+ * someone can tick three is a request nobody should make of a shared host, and
+ * asking it for sixty and calling that the catalogue is how a picker ends up
+ * unable to find a product that plainly exists. So the pickers take a page and
+ * fetch the next one as the merchant scrolls.
+ */
+export interface PickerPage {
   products: PickerProduct[]
   currencyCode: string
-  total: number
-}> {
+  /** How many match in total, when both halves can be counted. Null when not. */
+  total: number | null
+  /** Hand back to read the next page. Null once the catalogue is exhausted. */
+  nextCursor: string | null
+}
+
+export async function listPickerProducts(
+  organizationId: string,
+  options: {
+    search?: string
+    take?: number
+    cursor?: string | null
+    includeArchived?: boolean
+  } = {}
+): Promise<PickerPage> {
   await requireOrgAccess(organizationId, 'VIEWER')
 
   const take = Math.min(options.take ?? 60, 200)
 
-  const [currencyCode, found] = await Promise.all([
+  const [currencyCode, page] = await Promise.all([
     organizationCurrency(organizationId),
-    searchProducts(organizationId, options.search ?? '', {
+    searchProductPage(organizationId, options.search ?? '', {
       limit: take,
+      cursor: options.cursor,
       includeDrafts: true,
     }),
   ])
 
-  const products = found
+  const products = page.products
     .filter(
       (product) => options.includeArchived || product.status !== 'ARCHIVED'
     )
     .map(toPickerProduct)
 
-  return { products, currencyCode, total: products.length }
+  return {
+    products,
+    currencyCode,
+    total: page.total,
+    nextCursor: page.nextCursor,
+  }
+}
+
+/**
+ * Saved references, in the shape the pickers render.
+ *
+ * A picker holds one page of a catalogue, so the product an offer was built
+ * from last month is usually not in it. Without this, editing that offer shows
+ * "Unknown product" over a bundle that is selling perfectly well — so whatever
+ * a form already points at is fetched by id and seeded into the list.
+ */
+export async function getPickerProducts(
+  organizationId: string,
+  ids: string[]
+): Promise<PickerProduct[]> {
+  await requireOrgAccess(organizationId, 'VIEWER')
+
+  const wanted = [...new Set(ids.filter(Boolean))]
+  if (wanted.length === 0) return []
+
+  const found = await getProductsByIds(organizationId, wanted)
+  return wanted
+    .map((id) => found.get(id))
+    .filter((product): product is CatalogProduct => Boolean(product))
+    .map(toPickerProduct)
 }
 
 function toPickerProduct(product: CatalogProduct): PickerProduct {

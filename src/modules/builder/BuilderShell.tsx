@@ -60,7 +60,12 @@ export function BuilderShell({
    *  which are designed without a store behind them. */
   products?: SellableVariant[]
   /** The same catalogue with photos, prices and stock, for the product picker. */
-  catalog?: { products: PickerProduct[]; currencyCode: string }
+  catalog?: {
+    products: PickerProduct[]
+    /** Where the picker's next page starts, for catalogues past one page. */
+    cursor?: string | null
+    currencyCode: string
+  }
   /**
    * How this page charges for delivery, and what it rewards a big basket with.
    * Absent for the template builder, which designs a layout with no store
@@ -98,6 +103,7 @@ export function BuilderShell({
     <ProductCatalogProvider
       variants={products}
       products={catalog?.products}
+      cursor={catalog?.cursor}
       currencyCode={catalog?.currencyCode}
     >
       <div className="bg-background fixed inset-0 z-50 flex flex-col">

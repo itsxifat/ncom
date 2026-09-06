@@ -1,7 +1,10 @@
 import { notFound } from 'next/navigation'
 import { getActiveOrganization } from '@/server/services/organizationService'
 import { listCollections } from '@/server/services/collectionService'
-import { listPickerProducts } from '@/server/services/productService'
+import {
+  getPickerProducts,
+  listPickerProducts,
+} from '@/server/services/productService'
 import { prisma } from '@/server/db/client'
 import { PageHeader } from '@/components/app/page-header'
 import { PageShell } from '@/components/app/page-shell'
@@ -29,6 +32,15 @@ export default async function EditCollectionPage({
     }),
   ])
 
+  // The picker holds one page of the catalogue, and a collection's members are
+  // not necessarily on it — so they are fetched by id and folded in, or the
+  // list says "Selected (12)" above three rows.
+  const productIds = members.map((member) => member.productId)
+  const onPage = new Set(catalog.products.map((product) => product.id))
+  const chosen = (await getPickerProducts(organization.id, productIds)).filter(
+    (product) => !onPage.has(product.id)
+  )
+
   return (
     <PageShell>
       <PageHeader
@@ -37,7 +49,9 @@ export default async function EditCollectionPage({
         title={collection.title}
       />
       <CollectionForm
-        products={catalog.products}
+        products={[...catalog.products, ...chosen]}
+        productsCursor={catalog.nextCursor}
+        productsTotal={catalog.total}
         currencyCode={catalog.currencyCode}
         initial={{
           id: collection.id,
@@ -52,7 +66,7 @@ export default async function EditCollectionPage({
             operator: rule.operator,
             value: rule.value,
           })),
-          productIds: members.map((member) => member.productId),
+          productIds,
           seoTitle: collection.seoTitle ?? '',
           seoDescription: collection.seoDescription ?? '',
         }}

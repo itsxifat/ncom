@@ -2,11 +2,15 @@ import 'server-only'
 import { prisma } from '@/server/db/client'
 import {
   listCategories,
-  searchProducts,
+  resolveVariants,
   isCatalogError,
   type CatalogCategory,
-  type CatalogProduct,
 } from '@/server/catalog'
+import {
+  getPickerProducts,
+  listPickerProducts,
+  type PickerProduct,
+} from '@/server/services/productService'
 
 /**
  * The catalogue and storefronts a discount can be aimed at.
@@ -14,28 +18,41 @@ import {
  * Read from the merchant's own website, which changes two things about the old
  * version worth knowing.
  *
- * The first is the ceiling. This used to select every product in the workspace;
- * now it reads one page from their connector, because "give me all 40,000
- * products so someone can tick three" is a request to a merchant's own server
- * and not one to make on the strength of a dropdown. A merchant whose targets
- * are not in the list can still save the discount — the ids are stored as typed
- * strings and matched at pricing time — they simply cannot pick them here.
+ * The first is how much of it arrives at once. This sends the first page and
+ * the cursor after it; the picker fetches the rest as the merchant scrolls.
+ * Asking for the whole catalogue up front — "give me all 40,000 products so
+ * someone can tick three" — is a request to a merchant's own server and not one
+ * to make on the strength of a dropdown, and the version that asked for one
+ * fixed page instead simply hid every product past it.
  *
  * The second is what a "collection" is. There is no Collection table any more:
  * scoped discounts match against whatever groups the connector files a product
  * under, which is its categories. So the collection picker shows their tree.
  *
- * Sizes are flattened to one list with the product name on each, because the
- * question the merchant is answering — "which sizes are excluded" — is about
- * sizes, not about the products they belong to, and a nested picker makes them
- * open four products to tick four rows.
+ * Whatever the discount already targets is fetched by id and folded into the
+ * same list, so an existing rule reads back as products and sizes rather than
+ * as a row of ids that happen to be off the first page.
  */
-export async function loadDiscountTargets(organizationId: string) {
-  const [products, categories, stores] = await Promise.all([
-    searchProducts(organizationId, '', {
-      limit: 200,
-      includeDrafts: true,
-    }).catch(emptyOnCatalogFailure<CatalogProduct>),
+export async function loadDiscountTargets(
+  organizationId: string,
+  selected: { productIds?: string[]; variantIds?: string[] } = {}
+): Promise<{
+  products: PickerProduct[]
+  productsCursor: string | null
+  productsTotal: number | null
+  collections: { id: string; title: string }[]
+  stores: { id: string; name: string }[]
+}> {
+  const [picker, chosen, sized, categories, stores] = await Promise.all([
+    listPickerProducts(organizationId, { take: 60 }).catch(
+      emptyPageOnCatalogFailure
+    ),
+    getPickerProducts(organizationId, selected.productIds ?? []).catch(
+      emptyOnCatalogFailure<PickerProduct>
+    ),
+    productsOwningVariants(organizationId, selected.variantIds ?? []).catch(
+      emptyOnCatalogFailure<PickerProduct>
+    ),
     listCategories(organizationId).catch(
       emptyOnCatalogFailure<CatalogCategory>
     ),
@@ -46,32 +63,48 @@ export async function loadDiscountTargets(organizationId: string) {
     }),
   ])
 
+  const seen = new Set(picker.products.map((product) => product.id))
+  const referenced = [...chosen, ...sized].filter((product) => {
+    if (seen.has(product.id)) return false
+    seen.add(product.id)
+    return true
+  })
+
   return {
-    products: products.map((product) => ({
-      id: product.id,
-      title: product.title,
-    })),
+    products: [...picker.products, ...referenced],
+    productsCursor: picker.nextCursor,
+    productsTotal: picker.total,
     collections: categories.map((category) => ({
       id: category.id,
       title: category.name,
     })),
-    // A single-variant product has one row called "Default Title", which is a
-    // detail of how variants are modelled rather than a size, and only clutters
-    // the list.
-    variants: products.flatMap((product) =>
-      product.variants
-        .filter(
-          (variant) =>
-            product.variants.length > 1 || variant.title !== 'Default Title'
-        )
-        .map((variant) => ({
-          id: variant.id,
-          productTitle: product.title,
-          title: variant.title,
-        }))
-    ),
     stores,
   }
+}
+
+/**
+ * The products behind a set of saved size ids.
+ *
+ * A size-level rule stores variant ids alone, so the only way to show it as
+ * "Classic Tee · Large" rather than as a hex string is to ask the catalogue
+ * which products those variants belong to and seed the picker with them.
+ */
+async function productsOwningVariants(
+  organizationId: string,
+  variantIds: string[]
+): Promise<PickerProduct[]> {
+  if (variantIds.length === 0) return []
+
+  const resolved = await resolveVariants(
+    organizationId,
+    variantIds.map((variantId) => ({ variantId }))
+  )
+
+  const productIds = [
+    ...new Set([...resolved.values()].map((entry) => entry.product.id)),
+  ]
+
+  return getPickerProducts(organizationId, productIds)
 }
 
 /**
@@ -84,5 +117,15 @@ export async function loadDiscountTargets(organizationId: string) {
  */
 function emptyOnCatalogFailure<T>(error: unknown): T[] {
   if (isCatalogError(error)) return []
+  throw error
+}
+
+function emptyPageOnCatalogFailure(error: unknown): {
+  products: PickerProduct[]
+  nextCursor: string | null
+  total: number | null
+} {
+  if (isCatalogError(error))
+    return { products: [], nextCursor: null, total: null }
   throw error
 }

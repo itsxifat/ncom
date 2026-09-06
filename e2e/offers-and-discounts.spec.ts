@@ -457,6 +457,211 @@ test('reopening a ladder shows the rungs that were saved', async ({ page }) => {
   )
 })
 
+/**
+ * A catalogue bigger than one page, which is every real one.
+ *
+ * The picker used to render the page the server sent it and stop, so a shop of
+ * six hundred products could only put its first sixty into an offer — and the
+ * merchant, who can see the rest on their own website, concludes the product is
+ * missing. The bulk products are removed again at the end because the shop is
+ * shared with every other test in this file, and each of those picks a product
+ * by clicking its title in an unpaged list.
+ */
+test('the picker reaches a product past its first page, and can offer it', async ({
+  page,
+}) => {
+  await seedStorefront(organizationId)
+
+  const stamp = Date.now().toString(36)
+  const bulk = Array.from({ length: 150 }, (_, index) =>
+    seedProduct(`Bulk ${stamp} ${String(index).padStart(3, '0')}`, [
+      10_000 + index,
+    ])
+  )
+  const last = bulk[bulk.length - 1]
+  const label = `Deep pick ${Date.now()}`
+
+  try {
+    await page.goto('/discounts/offers/new')
+    await page.getByLabel('Name').first().fill(label)
+    await page.locator('#offer-scope').click()
+    await page
+      .getByRole('option', { name: 'Every store in this workspace' })
+      .click()
+
+    await page.getByRole('button', { name: 'Add a product' }).click()
+    const dialog = page.getByRole('dialog')
+    const target = dialog.getByText(last.title, { exact: true })
+
+    // The first page is a page, not the catalogue: the product at the far end
+    // of it is not on screen yet.
+    await expect(dialog.getByText(bulk[0].title)).toBeVisible()
+    await expect(target).toHaveCount(0)
+
+    // The photo has to be big enough to tell two similar products apart, which
+    // a 40px square is not.
+    const thumb = await dialog.locator('img').first().boundingBox()
+    expect(thumb, 'a product row must render its photo').not.toBeNull()
+    expect(thumb!.width).toBeGreaterThanOrEqual(56)
+
+    // Hovering one shows it at a size a person can actually look at.
+    await dialog.locator('img').first().hover()
+    await expect(page.locator('[data-slot="product-preview"]')).toBeVisible()
+
+    // Scrolling the list fetches the next page, and the next, until the
+    // catalogue runs out.
+    const list = dialog.locator('.overflow-y-auto').first()
+    for (let round = 0; round < 25 && (await target.count()) === 0; round++) {
+      await list.evaluate((node) => node.scrollTo(0, node.scrollHeight))
+      await page.waitForTimeout(400)
+    }
+
+    await expect(target).toBeVisible()
+    await target.click()
+
+    // Chosen from page three, it still has to resolve to a name and a price
+    // rather than to "Unknown product".
+    await expect(page.getByText(last.title).first()).toBeVisible()
+    await expect(page.getByText('Unknown product')).toHaveCount(0)
+
+    await page.getByRole('button', { name: /^(Create|Save) offer$/ }).click()
+    await page
+      .waitForURL(/\/discounts\/offers\/(?!new$)[a-z0-9]+$/, {
+        timeout: 30_000,
+      })
+      .catch(async () => {
+        throw new Error(
+          `Offer was not created. Form said: ${await page.locator('body').innerText()}`
+        )
+      })
+
+    const saved = await offerByLabel(organizationId, label)
+    expect(saved.items.map((item) => item.productId)).toEqual([last.id])
+  } finally {
+    for (const product of bulk) shop.products.delete(product.id)
+  }
+})
+
+/**
+ * The same catalogue, in the discount editor, which had no photos at all: it
+ * listed products as a column of ticked titles, and every product past the
+ * first page was simply absent.
+ */
+test('a discount can be aimed at a product past the first page', async ({
+  page,
+}) => {
+  const stamp = Date.now().toString(36)
+  const bulk = Array.from({ length: 120 }, (_, index) =>
+    seedProduct(`Scope ${stamp} ${String(index).padStart(3, '0')}`, [
+      20_000 + index,
+    ])
+  )
+  const last = bulk[bulk.length - 1]
+  const title = `Scoped discount ${Date.now()}`
+
+  try {
+    await page.goto('/discounts/new')
+    await page.getByLabel('Internal title').fill(title)
+    await page.getByLabel('Percentage off').first().fill('10')
+
+    await page.getByLabel('Applies to').click()
+    await page.getByRole('option', { name: 'Specific products' }).click()
+
+    // Search rather than scroll, because a merchant with a catalogue this size
+    // types the name — and the search has to reach the whole of it too.
+    const search = page.getByLabel('Search products').first()
+    await search.fill(last.title)
+
+    const row = page.getByText(last.title, { exact: true }).first()
+    await expect(row).toBeVisible({ timeout: 15_000 })
+    await row.click()
+
+    await page.getByRole('button', { name: 'Add code' }).click()
+
+    await page.getByRole('button', { name: /^(Create|Save) discount$/ }).click()
+    await page
+      .waitForURL(/\/discounts\/(?!new$)[a-z0-9]+$/, { timeout: 30_000 })
+      .catch(async () => {
+        throw new Error(
+          `Discount was not created. Form said: ${await page.locator('body').innerText()}`
+        )
+      })
+
+    const saved = await one<{ targetProductIds: string[] }>(
+      `SELECT "targetProductIds"
+         FROM "Discount" WHERE "organizationId" = $1 AND title = $2`,
+      [organizationId, title]
+    )
+    expect(saved.targetProductIds).toEqual([last.id])
+
+    // Reopening it must show the product it targets, not a bare id: the
+    // picker holds one page and this one is nowhere near it.
+    await page.reload()
+    await expect(page.getByText(last.title).first()).toBeVisible()
+  } finally {
+    for (const product of bulk) shop.products.delete(product.id)
+  }
+})
+
+/**
+ * Size-level targeting, which is a picker of its own.
+ *
+ * Sizes used to be one flat list of every variant in the catalogue — a
+ * thousand rows on a real shop, and only ever the ones belonging to the
+ * products on the first page. They are chosen inside their product now, which
+ * is also the only way that list can be paged.
+ */
+test('a discount can be aimed at one size of a product', async ({ page }) => {
+  const shirt = seedProduct(`Sized ${Date.now()}`, [30_000, 40_000, 50_000])
+  const title = `Size discount ${Date.now()}`
+  const medium = shirt.variants[1]
+
+  await page.goto('/discounts/new')
+  await page.getByLabel('Internal title').fill(title)
+  await page.getByLabel('Percentage off').first().fill('25')
+
+  await page.getByLabel('Applies to').click()
+  await page.getByRole('option', { name: 'Specific sizes' }).click()
+
+  await page.getByLabel('Search products').first().fill(shirt.title)
+  const row = page.getByText(shirt.title, { exact: true }).first()
+  await expect(row).toBeVisible({ timeout: 15_000 })
+
+  // The product opens to its sizes rather than being ticked itself.
+  await row.click()
+  // Anchored on the size's own name: a SKU is random text and matching it
+  // loosely picks whichever row happens to contain the letter.
+  const size = page
+    .locator('label')
+    .filter({ hasText: new RegExp(`^${medium.title}\\s*·`) })
+    .first()
+  await expect(size).toBeVisible()
+  await size.click()
+
+  await page.getByRole('button', { name: 'Add code' }).click()
+  await page.getByRole('button', { name: /^(Create|Save) discount$/ }).click()
+  await page
+    .waitForURL(/\/discounts\/(?!new$)[a-z0-9]+$/, { timeout: 30_000 })
+    .catch(async () => {
+      throw new Error(
+        `Discount was not created. Form said: ${await page.locator('body').innerText()}`
+      )
+    })
+
+  const saved = await one<{ targetVariantIds: string[] }>(
+    `SELECT "targetVariantIds"
+       FROM "Discount" WHERE "organizationId" = $1 AND title = $2`,
+    [organizationId, title]
+  )
+  expect(saved.targetVariantIds).toEqual([medium.id])
+
+  // And it reads back as a size with a name, not as a stored id.
+  await page.reload()
+  await expect(
+    page.getByText(`${shirt.title} · ${medium.title}`).first()
+  ).toBeVisible()
+})
+
 test('a code discount saves its rule and its code', async ({ page }) => {
   const title = `Code discount ${Date.now()}`
   const code = `SAVE${Date.now().toString().slice(-6)}`

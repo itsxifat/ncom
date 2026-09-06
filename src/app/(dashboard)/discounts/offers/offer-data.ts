@@ -1,6 +1,10 @@
 import 'server-only'
 import { prisma } from '@/server/db/client'
-import { listPickerProducts } from '@/server/services/productService'
+import {
+  getPickerProducts,
+  listPickerProducts,
+  type PickerProduct,
+} from '@/server/services/productService'
 import { getOrganizationSettings } from '@/server/services/organizationSettingsService'
 import type { OfferFormStore } from '@/components/store/offer-form'
 
@@ -13,17 +17,31 @@ import type { OfferFormStore } from '@/components/store/offer-form'
  * screen and another way on the other is how a product shows up in the picker
  * but not in the size list.
  */
-export async function loadOfferContext(organizationId: string): Promise<{
+export async function loadOfferContext(
+  organizationId: string,
+  /**
+   * Products this offer already holds. Fetched by id alongside the first page,
+   * because the editor resolves every id it is holding out of the same list and
+   * one that is not in it renders as "Unknown product" on a bundle that is
+   * selling perfectly well.
+   */
+  referenceIds: string[] = []
+): Promise<{
   currencyCode: string
-  products: Awaited<ReturnType<typeof listPickerProducts>>['products']
+  products: PickerProduct[]
+  /** Where the picker's second page starts. Null when there is no second page. */
+  productsCursor: string | null
+  productsTotal: number | null
   stores: OfferFormStore[]
 }> {
-  const [settings, picker, stores] = await Promise.all([
+  const [settings, picker, referenced, stores] = await Promise.all([
     getOrganizationSettings(organizationId),
-    // Everything, not one page of it: the editor resolves every id an offer
-    // already holds out of this list, and a product missing from it renders as
-    // "Unknown product" on a bundle that is selling perfectly well.
-    listPickerProducts(organizationId, { take: 200, includeArchived: true }),
+    // One page, not the whole catalogue: the picker fetches the next as the
+    // merchant scrolls, and half of a merged catalogue is the merchant's own
+    // website — which should not be asked for forty thousand products so that
+    // three can be ticked.
+    listPickerProducts(organizationId, { take: 60, includeArchived: true }),
+    getPickerProducts(organizationId, referenceIds),
     prisma.store.findMany({
       where: { organizationId },
       orderBy: { name: 'asc' },
@@ -38,9 +56,16 @@ export async function loadOfferContext(organizationId: string): Promise<{
     }),
   ])
 
+  const onPage = new Set(picker.products.map((product) => product.id))
+
   return {
     currencyCode: settings?.currencyCode ?? picker.currencyCode,
-    products: picker.products,
+    products: [
+      ...picker.products,
+      ...referenced.filter((product) => !onPage.has(product.id)),
+    ],
+    productsCursor: picker.nextCursor,
+    productsTotal: picker.total,
     stores,
   }
 }

@@ -28,9 +28,10 @@ export default async function NewDiscountPage() {
       <DiscountForm
         currencyCode={settings?.currencyCode ?? 'USD'}
         products={targets.products}
+        productsCursor={targets.productsCursor}
+        productsTotal={targets.productsTotal}
         collections={targets.collections}
         stores={targets.stores}
-        variants={targets.variants}
         initial={{
           title: '',
           method: 'CODE',

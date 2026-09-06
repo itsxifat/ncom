@@ -22,13 +22,16 @@ export default async function EditOfferPage({
   const { offerId } = await params
   const { organization } = await getActiveOrganization()
 
-  const [offer, context] = await Promise.all([
-    getOffer(organization.id, offerId),
-    loadOfferContext(organization.id),
-  ])
+  const offer = await getOffer(organization.id, offerId)
   if (!offer) notFound()
 
-  const { currencyCode, products, stores } = context
+  // Loaded after the offer rather than beside it, because which products have
+  // to be in the picker's first payload is a question only the offer answers.
+  const { currencyCode, products, productsCursor, productsTotal, stores } =
+    await loadOfferContext(
+      organization.id,
+      offer.items.map((item) => item.productId)
+    )
 
   return (
     <>
@@ -42,6 +45,8 @@ export default async function EditOfferPage({
       <OfferForm
         currencyCode={currencyCode}
         products={products}
+        productsCursor={productsCursor}
+        productsTotal={productsTotal}
         stores={stores}
         initial={{
           id: offer.id,

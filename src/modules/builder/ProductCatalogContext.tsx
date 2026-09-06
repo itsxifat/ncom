@@ -29,12 +29,19 @@ export interface SellableVariant {
 export interface ProductCatalog {
   variants: SellableVariant[]
   products: PickerProduct[]
+  /**
+   * Where the picker's next page of `products` starts. The catalogue can be
+   * bigger than one page — most are — and without this the inspector could
+   * only ever offer the first sixty products of a shop.
+   */
+  cursor: string | null
   currencyCode: string
 }
 
 const EMPTY: ProductCatalog = {
   variants: [],
   products: [],
+  cursor: null,
   currencyCode: 'USD',
 }
 
@@ -43,11 +50,13 @@ const ProductCatalogContext = createContext<ProductCatalog>(EMPTY)
 export function ProductCatalogProvider({
   variants,
   products,
+  cursor,
   currencyCode,
   children,
 }: {
   variants: SellableVariant[]
   products?: PickerProduct[]
+  cursor?: string | null
   currencyCode?: string
   children: React.ReactNode
 }) {
@@ -56,6 +65,7 @@ export function ProductCatalogProvider({
       value={{
         variants,
         products: products ?? [],
+        cursor: cursor ?? null,
         currencyCode: currencyCode ?? variants[0]?.currencyCode ?? 'USD',
       }}
     >

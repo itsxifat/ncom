@@ -69,6 +69,7 @@ export default async function PageEditPage({
       products={products}
       catalog={{
         products: picker.products,
+        cursor: picker.nextCursor,
         currencyCode: picker.currencyCode,
       }}
       delivery={{

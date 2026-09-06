@@ -20,6 +20,11 @@ import { Switch } from '@/components/ui/switch'
 import { SettingsSection } from '@/components/app/settings-section'
 import { FormSelect, MoneyInput } from '@/components/store/form-controls'
 import { Checkbox } from '@/components/ui/checkbox'
+import {
+  ProductMultiPicker,
+  VariantMultiPicker,
+} from '@/components/store/product-picker'
+import type { PickerProduct } from '@/server/services/productService'
 
 export interface DiscountFormInitial {
   id?: string
@@ -155,18 +160,24 @@ export function DiscountForm({
   currencyCode,
   initial,
   products,
+  productsCursor = null,
+  productsTotal = null,
   collections,
   stores = [],
-  variants = [],
 }: {
   currencyCode: string
   initial: DiscountFormInitial
-  products: { id: string; title: string }[]
+  /**
+   * The first page of the catalogue, plus whatever this discount already
+   * targets. The pickers below fetch the rest as the merchant scrolls, so a
+   * shop with six hundred products can aim a discount at any of them.
+   */
+  products: PickerProduct[]
+  productsCursor?: string | null
+  productsTotal?: number | null
   collections: { id: string; title: string }[]
   /** Storefronts this workspace runs, for limiting the campaign to some. */
   stores?: { id: string; name: string }[]
-  /** Every sellable size, for size-level targeting and exclusions. */
-  variants?: { id: string; productTitle: string; title: string }[]
 }) {
   const boundAction = saveDiscountAction.bind(null, initial.id ?? null)
   const [state, action, pending] = useActionState<StoreActionState, FormData>(
@@ -420,13 +431,13 @@ export function DiscountForm({
 
           {form.appliesTo === 'VARIANTS' && (
             <Field>
-              <IdChecklist
-                options={variants.map((variant) => ({
-                  id: variant.id,
-                  label: `${variant.productTitle} · ${variant.title}`,
-                }))}
-                selected={form.targetVariantIds}
-                empty="No sizes in the catalogue yet."
+              <VariantMultiPicker
+                initialProducts={products}
+                initialCursor={productsCursor}
+                total={productsTotal}
+                currencyCode={currencyCode}
+                selectedIds={form.targetVariantIds}
+                emptyLabel="No products in the catalogue yet."
                 onChange={(next) => set('targetVariantIds', next)}
               />
             </Field>
@@ -434,29 +445,15 @@ export function DiscountForm({
 
           {form.appliesTo === 'PRODUCTS' && (
             <Field>
-              <div className="max-h-64 overflow-y-auto rounded-lg border p-2">
-                {products.map((product) => (
-                  <label
-                    key={product.id}
-                    className="hover:bg-muted flex items-center gap-2 rounded px-2 py-1.5 text-sm"
-                  >
-                    <Checkbox
-                      checked={form.targetProductIds.includes(product.id)}
-                      onCheckedChange={(checked) =>
-                        set(
-                          'targetProductIds',
-                          checked
-                            ? [...form.targetProductIds, product.id]
-                            : form.targetProductIds.filter(
-                                (id) => id !== product.id
-                              )
-                        )
-                      }
-                    />
-                    {product.title}
-                  </label>
-                ))}
-              </div>
+              <ProductMultiPicker
+                initialProducts={products}
+                initialCursor={productsCursor}
+                total={productsTotal}
+                currencyCode={currencyCode}
+                selectedIds={form.targetProductIds}
+                emptyLabel="No products in the catalogue yet."
+                onChange={(next) => set('targetProductIds', next)}
+              />
             </Field>
           )}
 
@@ -497,24 +494,29 @@ export function DiscountForm({
               Carved out of whatever the scope above selected — the thin-margin
               size, the loss leader, the item already on clearance.
             </FieldDescription>
-            <IdChecklist
-              options={products.map((product) => ({
-                id: product.id,
-                label: product.title,
-              }))}
-              selected={form.excludedProductIds}
-              empty="No products yet."
-              heading="Products"
+            <FieldLabel className="text-muted-foreground text-xs font-medium">
+              Products
+            </FieldLabel>
+            <ProductMultiPicker
+              initialProducts={products}
+              initialCursor={productsCursor}
+              total={productsTotal}
+              currencyCode={currencyCode}
+              selectedIds={form.excludedProductIds}
+              emptyLabel="No products in the catalogue yet."
               onChange={(next) => set('excludedProductIds', next)}
             />
-            <IdChecklist
-              options={variants.map((variant) => ({
-                id: variant.id,
-                label: `${variant.productTitle} · ${variant.title}`,
-              }))}
-              selected={form.excludedVariantIds}
-              empty="No sizes yet."
-              heading="Sizes"
+
+            <FieldLabel className="text-muted-foreground mt-2 text-xs font-medium">
+              Sizes
+            </FieldLabel>
+            <VariantMultiPicker
+              initialProducts={products}
+              initialCursor={productsCursor}
+              total={productsTotal}
+              currencyCode={currencyCode}
+              selectedIds={form.excludedVariantIds}
+              emptyLabel="No products in the catalogue yet."
               onChange={(next) => set('excludedVariantIds', next)}
             />
           </Field>

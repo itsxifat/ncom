@@ -525,21 +525,26 @@ export async function adjustInventoryDeltaAction(
 }
 
 /**
- * Catalogue search for the product pickers.
+ * Catalogue search for the product pickers, one page at a time.
  *
  * Server-side rather than filtering a preloaded list in the browser: a picker
  * that quietly cannot find products past its first page is worse than one with
  * no search, because the merchant concludes the product does not exist.
+ *
+ * `cursor` is the same picker asking for the next page — of a search or of the
+ * unsearched catalogue, whichever it is showing — so scrolling reaches every
+ * product rather than the first screenful the connector happened to send.
  */
 export async function searchCatalogAction(
   query: string,
-  includeArchived = false
+  options: { includeArchived?: boolean; cursor?: string | null } = {}
 ) {
   const { organization } = await getActiveOrganization()
 
   return listPickerProducts(organization.id, {
     search: query,
-    includeArchived,
+    includeArchived: options.includeArchived,
+    cursor: options.cursor,
     take: 60,
   })
 }

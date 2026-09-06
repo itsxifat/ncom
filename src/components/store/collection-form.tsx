@@ -77,10 +77,15 @@ export interface CollectionFormInitial {
 export function CollectionForm({
   initial,
   products,
+  productsCursor = null,
+  productsTotal = null,
   currencyCode,
 }: {
   initial: CollectionFormInitial
+  /** The first page of the catalogue; the picker fetches the rest as needed. */
   products: PickerProduct[]
+  productsCursor?: string | null
+  productsTotal?: number | null
   currencyCode: string
 }) {
   const boundAction = saveCollectionAction.bind(null, initial.id ?? null)
@@ -312,6 +317,8 @@ export function CollectionForm({
               <FieldLabel>Products in this collection</FieldLabel>
               <ProductMultiPicker
                 initialProducts={products}
+                initialCursor={productsCursor}
+                total={productsTotal}
                 currencyCode={currencyCode}
                 selectedIds={productIds}
                 onChange={setProductIds}

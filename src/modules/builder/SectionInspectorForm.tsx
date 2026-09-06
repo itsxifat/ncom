@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import {
   useForm,
   useFieldArray,
@@ -29,6 +29,7 @@ import { FormSelect } from '@/components/ui/form-select'
 import { FontPicker } from '@/components/ui/font-picker'
 import { DateTimeField } from './DateTimeField'
 import { ProductPickerDialog } from '@/components/store/product-picker'
+import type { PickerProduct } from '@/server/services/productService'
 import { formatMoneyAmount } from '@/lib/money'
 
 /**
@@ -79,6 +80,7 @@ function ProductField({
   control: Control<any>
 }) {
   const catalog = useProductCatalog()
+  const [found, setFound] = useState<PickerProduct | null>(null)
 
   return (
     <Field>
@@ -92,9 +94,16 @@ function ProductField({
           name={name}
           control={control}
           render={({ field }) => {
-            const chosen = catalog.products.find((product) =>
-              product.variants.some((variant) => variant.id === field.value)
-            )
+            const chosen =
+              catalog.products.find((product) =>
+                product.variants.some((variant) => variant.id === field.value)
+              ) ??
+              // A product reached by scrolling the picker past its first page
+              // is not in the catalogue this screen was rendered with, and the
+              // card below would go blank the moment it was chosen.
+              (found?.variants.some((variant) => variant.id === field.value)
+                ? found
+                : undefined)
             const chosenVariant = chosen?.variants.find(
               (variant) => variant.id === field.value
             )
@@ -136,9 +145,13 @@ function ProductField({
 
                 <ProductPickerDialog
                   initialProducts={catalog.products}
+                  initialCursor={catalog.cursor}
                   currencyCode={catalog.currencyCode}
                   pickVariant
-                  onPick={(_productId, variantId) => field.onChange(variantId)}
+                  onPick={(_productId, variantId, product) => {
+                    setFound(product)
+                    field.onChange(variantId)
+                  }}
                   trigger={
                     <Button type="button" variant="outline" size="sm">
                       {chosen ? 'Change product' : 'Choose a product…'}

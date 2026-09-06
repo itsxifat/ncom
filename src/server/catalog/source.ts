@@ -246,102 +246,220 @@ export async function listRemoteProducts(
  * Search, across both catalogues, with a fallback for sites that cannot.
  *
  * A connector that does not implement `search` still gets a usable product
- * picker: its first page is fetched and filtered here. That is a worse search
- * over a smaller set, and much better than a dashboard that cannot find
- * anything on a site whose developer skipped one query parameter. Local
- * products are always searched properly, in SQL.
+ * picker: its pages are fetched and filtered here. That is a worse search over
+ * a smaller set, and much better than a dashboard that cannot find anything on
+ * a site whose developer skipped one query parameter. Local products are always
+ * searched properly, in SQL.
  *
- * The two halves are then given a fair share of a fixed-size list, which is the
- * whole difficulty. This used to concatenate local first and cut at `limit`:
- * fine while a workspace had a handful of its own products, and silently fatal
- * once it had `limit` of them, because the merchant's entire website then fell
- * off the end. Every product picker in the dashboard reads this function, so an
- * Elysium workspace with 322 rows of its own could see its shop's catalogue on
- * the products page and *nothing* from it when building an offer.
+ * One page of the answer. Everything that needs the whole catalogue — every
+ * product picker in the dashboard — pages through with the cursor rather than
+ * asking for a bigger number, because "give me all 40,000 products so someone
+ * can tick three" is a request to a merchant's own server.
  */
 export async function searchProducts(
   organizationId: string,
   term: string,
   options: { limit?: number; includeDrafts?: boolean } = {}
 ): Promise<CatalogProduct[]> {
-  const limit = options.limit ?? DEFAULT_LIMIT
-  const needle = term.trim().toLowerCase()
-
-  const [local, remote] = await Promise.all([
-    listLocalProducts(organizationId, {
-      q: needle || undefined,
-      includeDrafts: options.includeDrafts,
-      take: limit,
-    }),
-    fromRemote(
-      organizationId,
-      () => searchRemote(organizationId, needle, options),
-      [] as CatalogProduct[]
-    ),
-  ])
-
-  const forLocal = share(local.products.length, remote.length, limit)
-
-  return [
-    ...local.products.slice(0, forLocal),
-    ...remote.slice(0, limit - forLocal),
-  ]
+  const page = await searchProductPage(organizationId, term, options)
+  return page.products
 }
 
 /**
- * How many of a `limit`-sized list go to the local half.
+ * Where a paged search is up to: one number for our table, one opaque string
+ * for their website, and whether their website has run out.
  *
- * Whichever side has less than half takes what it has and the other side gets
- * the rest, so a workspace with three of its own products still sees the
- * merchant's whole first page, and one with none is unaffected. Only when both
- * could fill the list do they split it, local first — because those are the
- * ones this dashboard can edit, and a merchant looking for one of their own
- * products expects to find it near the top.
+ * Encoded rather than exposed because half of it is the merchant's own cursor,
+ * whose format is theirs and may be anything.
  */
-function share(localCount: number, remoteCount: number, limit: number): number {
-  if (remoteCount === 0) return Math.min(localCount, limit)
-  if (localCount === 0) return 0
-
-  const half = Math.ceil(limit / 2)
-  return Math.min(localCount, Math.max(half, limit - remoteCount))
+interface SearchCursor {
+  /** Local rows already spent. Null once the table is exhausted. */
+  local: number | null
+  /** Where their site is up to. Null before the first call. */
+  remote: string | null
+  /** True once their site has said there is no next page. */
+  remoteDone: boolean
 }
 
-async function searchRemote(
+const SEARCH_START: SearchCursor = { local: 0, remote: null, remoteDone: false }
+
+function encodeSearchCursor(state: SearchCursor): string {
+  return Buffer.from(JSON.stringify(state)).toString('base64url')
+}
+
+/** A cursor we did not mint — or one from another list — restarts the search. */
+function decodeSearchCursor(cursor: string | null | undefined): SearchCursor {
+  if (!cursor) return SEARCH_START
+
+  try {
+    const parsed: unknown = JSON.parse(
+      Buffer.from(cursor, 'base64url').toString('utf8')
+    )
+    if (!parsed || typeof parsed !== 'object') return SEARCH_START
+
+    const { local, remote, remoteDone } = parsed as Record<string, unknown>
+    return {
+      local: typeof local === 'number' && local >= 0 ? local : null,
+      remote: typeof remote === 'string' ? remote : null,
+      remoteDone: remoteDone === true,
+    }
+  } catch {
+    return SEARCH_START
+  }
+}
+
+/** What the remote half contributes when the workspace has no site connected. */
+const NO_REMOTE: ProductPage = { products: [], nextCursor: null, total: 0 }
+
+/**
+ * The merged search, one page at a time.
+ *
+ * While both catalogues still have rows they split the page; once one is spent
+ * the other takes all of it. Each side is asked for exactly as many products as
+ * will be shown, which is what makes paging safe: a remote product fetched and
+ * then sliced off the end of a fixed-size list is one the next cursor has
+ * already moved past, and it would never be seen again. The old fixed-share
+ * version could only ever return one page for that reason, so a picker showed
+ * the first sixty products of a catalogue and nothing else existed as far as
+ * the merchant could tell.
+ */
+export async function searchProductPage(
+  organizationId: string,
+  term: string,
+  options: {
+    limit?: number
+    cursor?: string | null
+    includeDrafts?: boolean
+  } = {}
+): Promise<ProductPage> {
+  const limit = options.limit ?? DEFAULT_LIMIT
+  const needle = term.trim().toLowerCase()
+  const state = decodeSearchCursor(options.cursor)
+
+  const localWanted =
+    state.local === null ? 0 : state.remoteDone ? limit : Math.ceil(limit / 2)
+
+  // Our own table first, and then their website for whatever is left of the
+  // page. Sequential rather than side by side on purpose: the second call has
+  // to ask for exactly the number of products that will be shown, and one
+  // indexed query against our own database is a rounding error next to an HTTP
+  // call to a merchant's shared host. Asking for more and slicing would be the
+  // bug this function exists to avoid — a fetched product cut off the end of a
+  // page is one the next cursor has already moved past.
+  const local =
+    localWanted === 0
+      ? { products: [], nextCursor: null, total: 0 }
+      : await listLocalProducts(organizationId, {
+          q: needle || undefined,
+          includeDrafts: options.includeDrafts,
+          take: localWanted,
+          skip: state.local ?? 0,
+        })
+
+  const remote = state.remoteDone
+    ? NO_REMOTE
+    : await fromRemote(
+        organizationId,
+        () =>
+          searchRemotePage(organizationId, needle, {
+            // Never zero: a page that asked their site for nothing would come
+            // back empty and read as a site with nothing left in it.
+            limit: Math.max(1, limit - local.products.length),
+            cursor: state.remote,
+            includeDrafts: options.includeDrafts,
+          }),
+        NO_REMOTE
+      )
+
+  const spentLocal = (state.local ?? 0) + local.products.length
+  const localDone =
+    state.local === null ||
+    local.products.length < localWanted ||
+    spentLocal >= (local.total ?? 0)
+  const remoteDone = state.remoteDone || remote.nextCursor === null
+
+  return {
+    products: [...local.products, ...remote.products],
+    nextCursor:
+      localDone && remoteDone
+        ? null
+        : encodeSearchCursor({
+            local: localDone ? null : spentLocal,
+            remote: remote.nextCursor,
+            remoteDone,
+          }),
+    // Only the first page can honestly state the size of the whole, and only
+    // when their site counted its half. Null means "not knowable", which is
+    // what a picker showing "60 of ?" needs to be told.
+    total:
+      state.local === 0 && state.remote === null && remote.total !== null
+        ? (local.total ?? 0) + remote.total
+        : null,
+  }
+}
+
+/** How many of their pages the fallback filter pulls before giving up. */
+const FILTER_PAGE_LIMIT = 5
+
+async function searchRemotePage(
   organizationId: string,
   needle: string,
-  options: { limit?: number; includeDrafts?: boolean }
-): Promise<CatalogProduct[]> {
+  options: {
+    limit: number
+    cursor: string | null
+    includeDrafts?: boolean
+  }
+): Promise<ProductPage> {
   const connection = await requireConnection(organizationId)
-  const limit = options.limit ?? DEFAULT_LIMIT
 
-  if (connection.capabilities.search && needle) {
-    const page = await listRemoteProducts(organizationId, {
-      q: needle,
-      limit,
+  if (!needle || connection.capabilities.search) {
+    return listRemoteProducts(organizationId, {
+      q: needle || undefined,
+      limit: options.limit,
+      cursor: options.cursor,
       includeDrafts: options.includeDrafts,
     })
-    return page.products
   }
 
-  const page = await listRemoteProducts(organizationId, {
-    limit: Math.max(limit, 100),
-    includeDrafts: options.includeDrafts,
-  })
-  if (!needle) return page.products.slice(0, limit)
+  // Their site cannot search, so pages are pulled and filtered here. A page
+  // whose matches all fall out is not the end of the catalogue, so this keeps
+  // walking — up to a bound, because "matches nothing" must not turn one
+  // keystroke into forty thousand products fetched from a merchant's shop.
+  const matched: CatalogProduct[] = []
+  let cursor = options.cursor
+  let total: number | null = null
 
-  return page.products
-    .filter((product) => {
-      const haystack = [
-        product.title,
-        product.handle,
-        product.vendor ?? '',
-        ...product.variants.map((variant) => variant.sku ?? ''),
-      ]
-        .join(' ')
-        .toLowerCase()
-      return haystack.includes(needle)
+  for (let page = 0; page < FILTER_PAGE_LIMIT; page++) {
+    const fetched: ProductPage = await listRemoteProducts(organizationId, {
+      limit: Math.max(options.limit, 50),
+      cursor,
+      includeDrafts: options.includeDrafts,
     })
-    .slice(0, limit)
+
+    total = fetched.total
+    matched.push(
+      ...fetched.products.filter((product) => matches(product, needle))
+    )
+    cursor = fetched.nextCursor
+
+    if (!cursor || matched.length >= options.limit) break
+  }
+
+  return { products: matched, nextCursor: cursor, total }
+}
+
+/** The fields a merchant expects a search box to look at. */
+function matches(product: CatalogProduct, needle: string): boolean {
+  const haystack = [
+    product.title,
+    product.handle,
+    product.vendor ?? '',
+    ...product.variants.map((variant) => variant.sku ?? ''),
+  ]
+    .join(' ')
+    .toLowerCase()
+
+  return haystack.includes(needle)
 }
 
 export const getProduct = cache(
