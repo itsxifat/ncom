@@ -1,4 +1,5 @@
 import { cn } from '@/lib/utils'
+import { El } from './elements'
 
 /**
  * The shared layout vocabulary every landing-page block is built from.
@@ -54,20 +55,29 @@ export function BlockSection({
 export function BlockHeading({
   children,
   className = '',
+  part = 'heading',
+  html,
 }: {
   children?: React.ReactNode
   className?: string
+  /** The element key this heading is styled by. */
+  part?: string
+  /** Rich text, when the block's heading field carries formatting. */
+  html?: string | null
 }) {
-  if (!children) return null
+  if (!children && !html) return null
   return (
-    <h2
+    <El
+      as="h2"
+      part={part}
+      html={html}
       className={cn(
         'text-2xl font-bold tracking-tight text-[color:var(--lp-text)] sm:text-3xl',
         className
       )}
     >
       {children}
-    </h2>
+    </El>
   )
 }
 
@@ -84,11 +94,16 @@ export function FillImg({
   alt = '',
   className,
   loading,
+  part,
+  index,
 }: {
   src?: string | null
   alt?: string
   className?: string
   loading?: 'eager' | 'lazy'
+  /** Element key, so a merchant can restyle this image like anything else. */
+  part?: string
+  index?: number
 }) {
   if (!src) return null
   return (
@@ -97,6 +112,8 @@ export function FillImg({
       src={src}
       alt={alt}
       loading={loading}
+      data-el={part}
+      data-el-i={index}
       className={cn('absolute inset-0 h-full w-full object-cover', className)}
     />
   )
@@ -107,15 +124,25 @@ export function BlockImg({
   src,
   alt = '',
   className,
+  part,
+  index,
 }: {
   src?: string | null
   alt?: string
   className?: string
+  part?: string
+  index?: number
 }) {
   if (!src) return null
   return (
     // eslint-disable-next-line @next/next/no-img-element
-    <img src={src} alt={alt} className={cn('h-auto w-full', className)} />
+    <img
+      src={src}
+      alt={alt}
+      data-el={part}
+      data-el-i={index}
+      className={cn('h-auto w-full', className)}
+    />
   )
 }
 

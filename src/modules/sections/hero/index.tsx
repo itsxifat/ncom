@@ -2,6 +2,7 @@ import { z } from 'zod'
 import type { SectionDefinition, SectionRendererProps } from '../registry'
 import { SectionWrapper } from '../primitives'
 import { ALIGN, FillImg, HERO_HEIGHTS } from '../blockPrimitives'
+import { El, Extras } from '../elements'
 import { cn } from '@/lib/utils'
 
 export const heroContentSchema = z.object({
@@ -39,7 +40,9 @@ function HeroRenderer({ content, config }: SectionRendererProps<HeroContent>) {
 
   return (
     <SectionWrapper config={config} defaultPadding={false}>
-      <div
+      <El
+        as="div"
+        part="frame"
         className={cn(
           'relative flex flex-col justify-center overflow-hidden',
           HERO_HEIGHTS[height] || HERO_HEIGHTS.large
@@ -49,7 +52,7 @@ function HeroRenderer({ content, config }: SectionRendererProps<HeroContent>) {
           <>
             {mobileImage && (
               <div className="absolute inset-0 sm:hidden">
-                <FillImg src={mobileImage} loading="eager" />
+                <FillImg part="mobileImage" src={mobileImage} loading="eager" />
               </div>
             )}
             <div
@@ -58,65 +61,87 @@ function HeroRenderer({ content, config }: SectionRendererProps<HeroContent>) {
                 mobileImage && 'hidden sm:block'
               )}
             >
-              <FillImg src={image || mobileImage} loading="eager" />
+              <FillImg
+                part="image"
+                src={image || mobileImage}
+                loading="eager"
+              />
             </div>
-            <div
-              className="absolute inset-0 bg-black"
-              style={{ opacity: Math.min(90, Math.max(0, overlay)) / 100 }}
+            {/*
+              The darkening is applied through a custom property read by a
+              class, not as an inline `style`. Inline styles outrank every
+              selector, so an inline opacity here would quietly beat whatever
+              the merchant sets on this element in the design panel — the one
+              control that is explicitly meant to override it.
+            */}
+            <El
+              as="div"
+              part="overlay"
+              className="absolute inset-0 bg-black [opacity:var(--hero-overlay)]"
+              style={
+                {
+                  '--hero-overlay': Math.min(90, Math.max(0, overlay)) / 100,
+                } as React.CSSProperties
+              }
             />
           </>
         )}
 
         <div className="relative w-full px-4 sm:px-6">
-          <div
+          <El
+            as="div"
+            part="content"
             className={cn(
               'mx-auto flex max-w-3xl flex-col gap-4',
               ALIGN[align] || ALIGN.center
             )}
           >
             {eyebrow && (
-              <span
-                className="inline-block rounded-full px-3 py-1.5 text-[11px] font-semibold tracking-[3px] uppercase"
-                style={{ background: 'var(--lp-accent)', color: '#fff' }}
-              >
-                {eyebrow}
-              </span>
+              <El
+                as="span"
+                part="eyebrow"
+                html={eyebrow}
+                className="inline-block rounded-full bg-[var(--lp-accent)] px-3 py-1.5 text-[11px] font-semibold tracking-[3px] text-white uppercase"
+              />
             )}
             {title && (
-              <h1
+              <El
+                as="h1"
+                part="title"
+                html={title}
                 className={cn(
                   'text-3xl leading-[1.1] font-bold tracking-tight sm:text-5xl',
                   hasImage ? 'text-white' : 'text-[color:var(--lp-text)]'
                 )}
-              >
-                {title}
-              </h1>
+              />
             )}
             {subtitle && (
-              <p
+              <El
+                as="p"
+                part="subtitle"
+                html={subtitle}
                 className={cn(
                   'max-w-xl text-base sm:text-lg',
                   hasImage ? 'text-white/85' : 'text-[color:var(--lp-text)]/70'
                 )}
-              >
-                {subtitle}
-              </p>
+              />
             )}
             {ctaText && (
               // An anchor rather than a scripted scroll: it lands on the order
               // form with smooth scrolling from CSS alone, so the one control
               // the whole page exists for still works before hydration.
-              <a
+              <El
+                as="a"
+                part="button"
                 href="#order"
-                className="mt-2 inline-flex w-fit items-center justify-center rounded-full px-8 py-3.5 text-sm font-semibold tracking-wide text-white shadow-lg transition-transform hover:scale-[1.03] active:scale-[0.99]"
-                style={{ background: 'var(--lp-accent)' }}
-              >
-                {ctaText}
-              </a>
+                html={ctaText}
+                className="mt-2 inline-flex w-fit items-center justify-center rounded-full bg-[var(--lp-accent)] px-8 py-3.5 text-sm font-semibold tracking-wide text-white shadow-lg transition-transform hover:scale-[1.03] active:scale-[0.99]"
+              />
             )}
-          </div>
+            <Extras config={config} slot="content" />
+          </El>
         </div>
-      </div>
+      </El>
     </SectionWrapper>
   )
 }
@@ -131,10 +156,15 @@ export const heroSection: SectionDefinition<HeroContent> = {
   editorFields: [
     { type: 'image', name: 'image', label: 'Background image' },
     { type: 'image', name: 'mobileImage', label: 'Mobile image' },
-    { type: 'text', name: 'eyebrow', label: 'Eyebrow' },
-    { type: 'text', name: 'title', label: 'Headline' },
-    { type: 'textarea', name: 'subtitle', label: 'Subheadline' },
-    { type: 'text', name: 'ctaText', label: 'Button text' },
+    { type: 'richtext', name: 'eyebrow', label: 'Eyebrow' },
+    { type: 'richtext', name: 'title', label: 'Headline' },
+    {
+      type: 'richtext',
+      name: 'subtitle',
+      label: 'Subheadline',
+      multiline: true,
+    },
+    { type: 'richtext', name: 'ctaText', label: 'Button text' },
     {
       type: 'select',
       name: 'align',
@@ -155,5 +185,22 @@ export const heroSection: SectionDefinition<HeroContent> = {
       max: 90,
     },
   ],
+  elements: [
+    { key: 'frame', label: 'Banner frame', kind: 'container' },
+    { key: 'image', label: 'Background image', kind: 'image' },
+    { key: 'mobileImage', label: 'Mobile image', kind: 'image' },
+    { key: 'overlay', label: 'Image darkening', kind: 'container' },
+    { key: 'content', label: 'Text stack', kind: 'container', slot: true },
+    { key: 'eyebrow', label: 'Eyebrow', kind: 'text', contentField: 'eyebrow' },
+    { key: 'title', label: 'Headline', kind: 'heading', contentField: 'title' },
+    {
+      key: 'subtitle',
+      label: 'Subheadline',
+      kind: 'text',
+      contentField: 'subtitle',
+    },
+    { key: 'button', label: 'Button', kind: 'button', contentField: 'ctaText' },
+  ],
+  slots: [{ key: 'content', label: 'Text stack' }],
   Renderer: HeroRenderer,
 }

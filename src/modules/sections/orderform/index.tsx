@@ -88,15 +88,55 @@ export const orderformSection: SectionDefinition<OrderformContent> = {
   schema: orderformContentSchema,
   defaultContent: orderformDefaultContent,
   editorFields: [
-    { type: 'text', name: 'title', label: 'Heading' },
-    { type: 'text', name: 'subtitle', label: 'Subheading' },
+    { type: 'richtext', name: 'title', label: 'Heading' },
+    { type: 'richtext', name: 'subtitle', label: 'Subheading' },
     { type: 'text', name: 'submitText', label: 'Button text' },
     { type: 'boolean', name: 'askEmail', label: 'Ask for an email' },
     { type: 'boolean', name: 'askNote', label: 'Ask for a note' },
     { type: 'text', name: 'noteLabel', label: 'Note label' },
-    { type: 'text', name: 'successTitle', label: 'Thank-you heading' },
-    { type: 'textarea', name: 'successMessage', label: 'Thank-you message' },
+    { type: 'richtext', name: 'successTitle', label: 'Thank-you heading' },
+    {
+      type: 'richtext',
+      name: 'successMessage',
+      label: 'Thank-you message',
+      multiline: true,
+    },
     { type: 'text', name: 'countryCode', label: 'Country code' },
   ],
+  // Only the wording and the frame. The offer picker, the address fields and
+  // the totals are deliberately absent: they are the machinery that takes the
+  // order, and a merchant who could restyle a field label into invisibility
+  // would be able to break the one thing the page exists to do.
+  elements: [
+    { key: 'header', label: 'Heading area', kind: 'container', slot: true },
+    { key: 'title', label: 'Heading', kind: 'heading', contentField: 'title' },
+    {
+      key: 'subtitle',
+      label: 'Subheading',
+      kind: 'text',
+      contentField: 'subtitle',
+    },
+    { key: 'form', label: 'Form panel', kind: 'container' },
+    {
+      key: 'submit',
+      label: 'Confirm button',
+      kind: 'button',
+      contentField: 'submitText',
+    },
+    { key: 'successIcon', label: 'Thank-you icon', kind: 'icon' },
+    {
+      key: 'successTitle',
+      label: 'Thank-you heading',
+      kind: 'heading',
+      contentField: 'successTitle',
+    },
+    {
+      key: 'successMessage',
+      label: 'Thank-you message',
+      kind: 'text',
+      contentField: 'successMessage',
+    },
+  ],
+  slots: [{ key: 'header', label: 'Under the heading' }],
   Renderer: OrderformRenderer,
 }

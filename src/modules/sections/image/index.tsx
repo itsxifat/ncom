@@ -2,6 +2,7 @@ import { z } from 'zod'
 import type { SectionDefinition, SectionRendererProps } from '../registry'
 import { SectionWrapper } from '../primitives'
 import { BlockImg, BlockSection, FillImg } from '../blockPrimitives'
+import { El, Extras } from '../elements'
 import { cn } from '@/lib/utils'
 
 export const imageContentSchema = z.object({
@@ -58,19 +59,23 @@ function ImageRenderer({
   // aspect box + object-fit crops or letterboxes it.
   const inner = aspect ? (
     <div className={cn('relative w-full overflow-hidden', aspect, rounded)}>
-      <FillImg src={content.image} className={fit} />
+      <FillImg part="image" src={content.image} className={fit} />
     </div>
   ) : (
     <BlockImg
+      part="image"
       src={content.image}
       className={cn(fit === 'object-contain' && 'object-contain', rounded)}
     />
   )
 
   const caption = content.caption ? (
-    <p className="mt-3 text-center text-[12px] text-[color:var(--lp-text)]/50">
-      {content.caption}
-    </p>
+    <El
+      as="p"
+      part="caption"
+      html={content.caption}
+      className="mt-3 text-center text-[12px] text-[color:var(--lp-text)]/50"
+    />
   ) : null
 
   if (full) {
@@ -79,10 +84,14 @@ function ImageRenderer({
         <BlockSection full>
           {inner}
           {content.caption && (
-            <p className="mt-3 px-4 text-center text-[12px] text-[color:var(--lp-text)]/50">
-              {content.caption}
-            </p>
+            <El
+              as="p"
+              part="caption"
+              html={content.caption}
+              className="mt-3 px-4 text-center text-[12px] text-[color:var(--lp-text)]/50"
+            />
           )}
+          <Extras config={config} slot="content" />
         </BlockSection>
       </SectionWrapper>
     )
@@ -94,10 +103,26 @@ function ImageRenderer({
         <div
           className={cn('flex', IMG_JUSTIFY[content.align] || 'justify-center')}
         >
-          <div className="w-full" style={{ maxWidth: IMG_MAXW[size] || 760 }}>
+          {/*
+            The chosen size arrives as a custom property read by a class rather
+            than as an inline `max-width`. Inline wins over every selector, so
+            an inline value here would have made the element's own width control
+            in the design panel do nothing.
+          */}
+          <El
+            as="div"
+            part="frame"
+            className="w-full [max-width:var(--img-maxw)]"
+            style={
+              {
+                '--img-maxw': `${IMG_MAXW[size] || 760}px`,
+              } as React.CSSProperties
+            }
+          >
             {inner}
             {caption}
-          </div>
+            <Extras config={config} slot="content" />
+          </El>
         </div>
       </BlockSection>
     </SectionWrapper>
@@ -113,7 +138,7 @@ export const imageSection: SectionDefinition<ImageContent> = {
   defaultContent: imageDefaultContent,
   editorFields: [
     { type: 'image', name: 'image', label: 'Image' },
-    { type: 'text', name: 'caption', label: 'Caption' },
+    { type: 'richtext', name: 'caption', label: 'Caption' },
     {
       type: 'select',
       name: 'width',
@@ -146,5 +171,16 @@ export const imageSection: SectionDefinition<ImageContent> = {
     },
     { type: 'boolean', name: 'rounded', label: 'Rounded corners' },
   ],
+  elements: [
+    { key: 'frame', label: 'Image frame', kind: 'container', slot: true },
+    { key: 'image', label: 'Image', kind: 'image' },
+    {
+      key: 'caption',
+      label: 'Caption',
+      kind: 'text',
+      contentField: 'caption',
+    },
+  ],
+  slots: [{ key: 'content', label: 'Under the image' }],
   Renderer: ImageRenderer,
 }

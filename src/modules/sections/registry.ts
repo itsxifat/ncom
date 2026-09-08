@@ -2,6 +2,7 @@ import type { ZodType } from 'zod'
 import type { ComponentType } from 'react'
 import type { PageTheme, SectionConfig } from './types'
 import type { FieldConfig } from './editorFields'
+import type { ElementDescriptor } from './elementDescriptors'
 import type {
   PublicOffer,
   PublicPromotions,
@@ -88,6 +89,27 @@ export interface SectionDefinition<T = unknown> {
   schema: ZodType<T>
   defaultContent: T
   editorFields: FieldConfig[]
+  /**
+   * The individually styleable things this block draws.
+   *
+   * Every key here must match a `data-el` the renderer emits, and every
+   * `data-el` the renderer emits should appear here — the first direction is
+   * what makes a merchant's styling land on anything, the second is what stops
+   * an element existing on the page that the editor cannot select or name.
+   *
+   * A block with an empty list still works; it is simply not customisable
+   * below the section wrapper.
+   */
+  elements: ElementDescriptor[]
+  /**
+   * Where merchant-added elements go, in the order the editor offers them.
+   *
+   * Blocks render each slot with `<Extras slot="…" />`. Most declare the single
+   * default slot; a block with genuinely distinct regions (the hero's text
+   * stack versus its full-bleed frame) declares more so "add a button" can ask
+   * which one.
+   */
+  slots?: { key: string; label: string }[]
   Renderer: ComponentType<SectionRendererProps<T>>
 }
 
@@ -158,6 +180,12 @@ for (const [key, definition] of Object.entries(sectionRegistry)) {
       `Section "${key}" is missing schema/Renderer. This usually means its ` +
         `module is marked 'use client' — move the interactive part into a ` +
         `separate client file and keep the definition server-safe.`
+    )
+  }
+  if (!Array.isArray(definition?.elements)) {
+    throw new Error(
+      `Section "${key}" does not declare an \`elements\` list. Add one (it may ` +
+        `be empty) so the builder can name what the block draws.`
     )
   }
 }

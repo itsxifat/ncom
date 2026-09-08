@@ -3,6 +3,7 @@ import { Star } from 'lucide-react'
 import type { SectionDefinition, SectionRendererProps } from '../registry'
 import { SectionWrapper } from '../primitives'
 import { BlockHeading, BlockSection, FillImg } from '../blockPrimitives'
+import { El, Extras } from '../elements'
 
 export const testimonialsContentSchema = z.object({
   title: z.string().max(200).default('What customers say'),
@@ -43,16 +44,25 @@ function TestimonialsRenderer({
   return (
     <SectionWrapper config={config} defaultPadding={false}>
       <BlockSection className="py-12">
-        <BlockHeading className="mb-8 text-center">
-          {content.title}
-        </BlockHeading>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <BlockHeading
+          part="title"
+          html={content.title}
+          className="mb-8 text-center"
+        />
+        <El
+          as="div"
+          part="grid"
+          className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
+        >
           {items.map((it, i) => (
-            <div
+            <El
               key={i}
+              as="div"
+              part="card"
+              index={i}
               className="rounded-xl border border-black/[0.07] bg-white/60 p-5"
             >
-              <div className="mb-3 flex gap-0.5">
+              <El as="div" part="stars" index={i} className="mb-3 flex gap-0.5">
                 {Array.from({
                   length: Math.min(5, Math.max(1, Number(it.rating) || 5)),
                 }).map((_, k) => (
@@ -62,30 +72,50 @@ function TestimonialsRenderer({
                     className="fill-amber-400 text-amber-400"
                   />
                 ))}
-              </div>
-              <p className="text-[13px] leading-relaxed text-[color:var(--lp-text)]/75">
-                {it.text}
-              </p>
-              <div className="mt-4 flex items-center gap-2.5">
+              </El>
+              <El
+                as="p"
+                part="quote"
+                index={i}
+                html={it.text}
+                className="text-[13px] leading-relaxed text-[color:var(--lp-text)]/75"
+              />
+              <El
+                as="div"
+                part="byline"
+                index={i}
+                className="mt-4 flex items-center gap-2.5"
+              >
                 {it.image ? (
                   <div className="relative h-8 w-8 flex-shrink-0 overflow-hidden rounded-full">
-                    <FillImg src={it.image} />
+                    <FillImg part="avatar" index={i} src={it.image} />
                   </div>
                 ) : (
-                  <div
-                    className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white"
-                    style={{ background: 'var(--lp-accent)' }}
+                  // The initial stands in for a photo the merchant did not
+                  // upload. It is the same element key either way, so styling
+                  // "the avatar" reaches both and a card with a photo and a
+                  // card without still match each other.
+                  <El
+                    as="div"
+                    part="avatar"
+                    index={i}
+                    className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[var(--lp-accent)] text-[11px] font-bold text-white"
                   >
                     {(it.name || '?').charAt(0).toUpperCase()}
-                  </div>
+                  </El>
                 )}
-                <p className="text-[12px] font-medium text-[color:var(--lp-text)]">
-                  {it.name || 'Verified buyer'}
-                </p>
-              </div>
-            </div>
+                <El
+                  as="p"
+                  part="name"
+                  index={i}
+                  html={it.name || 'Verified buyer'}
+                  className="text-[12px] font-medium text-[color:var(--lp-text)]"
+                />
+              </El>
+            </El>
           ))}
-        </div>
+        </El>
+        <Extras config={config} slot="content" />
       </BlockSection>
     </SectionWrapper>
   )
@@ -99,14 +129,14 @@ export const testimonialsSection: SectionDefinition<TestimonialsContent> = {
   schema: testimonialsContentSchema,
   defaultContent: testimonialsDefaultContent,
   editorFields: [
-    { type: 'text', name: 'title', label: 'Heading' },
+    { type: 'richtext', name: 'title', label: 'Heading' },
     {
       type: 'array',
       name: 'items',
       label: 'Reviews',
       itemFields: [
-        { type: 'text', name: 'name', label: 'Name' },
-        { type: 'textarea', name: 'text', label: 'Review' },
+        { type: 'richtext', name: 'name', label: 'Name' },
+        { type: 'richtext', name: 'text', label: 'Review', multiline: true },
         {
           type: 'select',
           name: 'rating',
@@ -118,5 +148,16 @@ export const testimonialsSection: SectionDefinition<TestimonialsContent> = {
       ],
     },
   ],
+  elements: [
+    { key: 'title', label: 'Heading', kind: 'heading', contentField: 'title' },
+    { key: 'grid', label: 'Grid', kind: 'container' },
+    { key: 'card', label: 'Review card', kind: 'container', repeated: true },
+    { key: 'stars', label: 'Stars', kind: 'icon', repeated: true },
+    { key: 'quote', label: 'Review text', kind: 'text', repeated: true },
+    { key: 'byline', label: 'Byline row', kind: 'container', repeated: true },
+    { key: 'avatar', label: 'Avatar', kind: 'image', repeated: true },
+    { key: 'name', label: 'Name', kind: 'text', repeated: true },
+  ],
+  slots: [{ key: 'content', label: 'Below the reviews' }],
   Renderer: TestimonialsRenderer,
 }

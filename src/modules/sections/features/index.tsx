@@ -3,6 +3,7 @@ import { Check } from 'lucide-react'
 import type { SectionDefinition, SectionRendererProps } from '../registry'
 import { SectionWrapper } from '../primitives'
 import { BlockHeading, BlockSection } from '../blockPrimitives'
+import { El, Extras } from '../elements'
 
 export const featuresContentSchema = z.object({
   title: z.string().max(200).default("Why you'll love it"),
@@ -42,46 +43,68 @@ function FeaturesRenderer({
   return (
     <SectionWrapper config={config} defaultPadding={false}>
       <BlockSection className="py-12">
-        <BlockHeading className="mb-8 text-center">
-          {content.title}
-        </BlockHeading>
-        <div
+        <BlockHeading
+          part="title"
+          html={content.title}
+          className="mb-8 text-center"
+        />
+        <El
+          as="div"
+          part="grid"
           className={
             isGrid
               ? 'grid gap-5 sm:grid-cols-2 lg:grid-cols-3'
               : 'mx-auto max-w-2xl space-y-4'
           }
         >
-          {items.map((it, i) => (
-            <div
-              key={i}
+          {items.map((item, index) => (
+            // Every element inside a card carries the same key at every index,
+            // so styling "the cards" is one edit. The index rides along in
+            // `data-el-i` for the merchant who genuinely wants card three to
+            // differ — same mechanism, one more attribute in the selector.
+            <El
+              key={index}
+              as="div"
+              part="card"
+              index={index}
               className={
                 isGrid
                   ? 'rounded-xl border border-black/[0.07] bg-white/60 p-5'
                   : 'flex items-start gap-3'
               }
             >
-              <span
-                className="mb-3 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full"
-                style={{ background: 'var(--lp-accent)' }}
+              <El
+                as="span"
+                part="icon"
+                index={index}
+                className="mb-3 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-[var(--lp-accent)]"
               >
                 <Check size={13} strokeWidth={3} className="text-white" />
-              </span>
+              </El>
               <div>
-                {it.title && (
-                  <p className="text-[15px] font-semibold text-[color:var(--lp-text)]">
-                    {it.title}
-                  </p>
+                {item.title && (
+                  <El
+                    as="p"
+                    part="cardTitle"
+                    index={index}
+                    html={item.title}
+                    className="text-[15px] font-semibold text-[color:var(--lp-text)]"
+                  />
                 )}
-                {it.text && (
-                  <p className="mt-1 text-[13px] leading-relaxed text-[color:var(--lp-text)]/65">
-                    {it.text}
-                  </p>
+                {item.text && (
+                  <El
+                    as="p"
+                    part="cardText"
+                    index={index}
+                    html={item.text}
+                    className="mt-1 text-[13px] leading-relaxed text-[color:var(--lp-text)]/65"
+                  />
                 )}
               </div>
-            </div>
+            </El>
           ))}
-        </div>
+        </El>
+        <Extras config={config} slot="content" />
       </BlockSection>
     </SectionWrapper>
   )
@@ -95,7 +118,7 @@ export const featuresSection: SectionDefinition<FeaturesContent> = {
   schema: featuresContentSchema,
   defaultContent: featuresDefaultContent,
   editorFields: [
-    { type: 'text', name: 'title', label: 'Heading' },
+    { type: 'richtext', name: 'title', label: 'Heading' },
     {
       type: 'select',
       name: 'layout',
@@ -107,10 +130,24 @@ export const featuresSection: SectionDefinition<FeaturesContent> = {
       name: 'items',
       label: 'Points',
       itemFields: [
-        { type: 'text', name: 'title', label: 'Title' },
-        { type: 'textarea', name: 'text', label: 'Description' },
+        { type: 'richtext', name: 'title', label: 'Title' },
+        {
+          type: 'richtext',
+          name: 'text',
+          label: 'Description',
+          multiline: true,
+        },
       ],
     },
   ],
+  elements: [
+    { key: 'title', label: 'Heading', kind: 'heading', contentField: 'title' },
+    { key: 'grid', label: 'Grid', kind: 'container' },
+    { key: 'card', label: 'Card', kind: 'container', repeated: true },
+    { key: 'icon', label: 'Tick', kind: 'icon', repeated: true },
+    { key: 'cardTitle', label: 'Card title', kind: 'heading', repeated: true },
+    { key: 'cardText', label: 'Card text', kind: 'text', repeated: true },
+  ],
+  slots: [{ key: 'content', label: 'Below the grid' }],
   Renderer: FeaturesRenderer,
 }

@@ -27,6 +27,7 @@ import { Button } from '@/components/ui/button'
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { FormSelect } from '@/components/ui/form-select'
 import { FontPicker } from '@/components/ui/font-picker'
+import { RichTextEditor } from '@/components/ui/rich-text-editor'
 import { DateTimeField } from './DateTimeField'
 import { ProductPickerDialog } from '@/components/store/product-picker'
 import type { PickerProduct } from '@/server/services/productService'
@@ -443,6 +444,27 @@ function FieldRenderer({
               <FieldLabel>{field.label}</FieldLabel>
               {hint}
             </div>
+          </Field>
+        )}
+      />
+    )
+  }
+
+  if (field.type === 'richtext') {
+    return (
+      <Controller
+        name={name}
+        control={control}
+        render={({ field: controllerField }) => (
+          <Field>
+            <FieldLabel>{field.label}</FieldLabel>
+            <RichTextEditor
+              value={(controllerField.value as string) ?? ''}
+              onChange={controllerField.onChange}
+              placeholder={field.placeholder}
+              multiline={field.multiline}
+            />
+            {hint}
           </Field>
         )}
       />

@@ -2,6 +2,7 @@ import { z } from 'zod'
 import type { SectionDefinition, SectionRendererProps } from '../registry'
 import { SectionWrapper } from '../primitives'
 import { BlockHeading, BlockSection, FillImg } from '../blockPrimitives'
+import { El, Extras } from '../elements'
 import { cn } from '@/lib/utils'
 
 export const galleryContentSchema = z.object({
@@ -35,24 +36,32 @@ function GalleryRenderer({
   return (
     <SectionWrapper config={config} defaultPadding={false}>
       <BlockSection className="py-10">
-        <BlockHeading className="mb-6 text-center">
-          {content.title}
-        </BlockHeading>
-        <div
+        <BlockHeading
+          part="title"
+          html={content.title}
+          className="mb-6 text-center"
+        />
+        <El
+          as="div"
+          part="grid"
           className={cn(
             'grid gap-3',
             COLS[String(content.columns)] || COLS['3']
           )}
         >
           {images.map((it, i) => (
-            <div
+            <El
               key={i}
+              as="div"
+              part="tile"
+              index={i}
               className="relative aspect-square overflow-hidden rounded-xl bg-black/5"
             >
-              <FillImg src={it.image} />
-            </div>
+              <FillImg part="photo" index={i} src={it.image} />
+            </El>
           ))}
-        </div>
+        </El>
+        <Extras config={config} slot="content" />
       </BlockSection>
     </SectionWrapper>
   )
@@ -66,7 +75,7 @@ export const gallerySection: SectionDefinition<GalleryContent> = {
   schema: galleryContentSchema,
   defaultContent: galleryDefaultContent,
   editorFields: [
-    { type: 'text', name: 'title', label: 'Heading' },
+    { type: 'richtext', name: 'title', label: 'Heading' },
     {
       type: 'select',
       name: 'columns',
@@ -81,5 +90,12 @@ export const gallerySection: SectionDefinition<GalleryContent> = {
       itemFields: [{ type: 'image', name: 'image', label: 'Image', aspect: 1 }],
     },
   ],
+  elements: [
+    { key: 'title', label: 'Heading', kind: 'heading', contentField: 'title' },
+    { key: 'grid', label: 'Grid', kind: 'container' },
+    { key: 'tile', label: 'Tile', kind: 'container', repeated: true },
+    { key: 'photo', label: 'Photo', kind: 'image', repeated: true },
+  ],
+  slots: [{ key: 'content', label: 'Below the grid' }],
   Renderer: GalleryRenderer,
 }

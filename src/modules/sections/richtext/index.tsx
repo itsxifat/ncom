@@ -2,6 +2,7 @@ import { z } from 'zod'
 import type { SectionDefinition, SectionRendererProps } from '../registry'
 import { SectionWrapper } from '../primitives'
 import { BlockHeading, BlockSection } from '../blockPrimitives'
+import { El, Extras } from '../elements'
 
 export const richtextContentSchema = z.object({
   title: z.string().max(200).default(''),
@@ -18,8 +19,10 @@ function RichtextRenderer({
   content,
   config,
 }: SectionRendererProps<RichtextContent>) {
-  // A blank line starts a new paragraph — the one piece of formatting a plain
-  // textarea can express, and the only one merchants reach for.
+  // A blank line starts a new paragraph. Still the split, now that the body
+  // carries formatting: bold and colour are inline decisions inside a
+  // paragraph, and where one paragraph ends is a structural one the merchant
+  // makes the same way they always have — by pressing return twice.
   const paragraphs = String(content.body || '')
     .split(/\n{2,}/)
     .filter(Boolean)
@@ -27,21 +30,26 @@ function RichtextRenderer({
   return (
     <SectionWrapper config={config} defaultPadding={false}>
       <BlockSection className="py-10">
-        <div
+        <El
+          as="div"
+          part="column"
           className={
             content.align === 'center' ? 'mx-auto max-w-2xl text-center' : ''
           }
         >
-          <BlockHeading className="mb-4">{content.title}</BlockHeading>
-          {paragraphs.map((p, i) => (
-            <p
-              key={i}
+          <BlockHeading part="title" html={content.title} className="mb-4" />
+          {paragraphs.map((paragraph, index) => (
+            <El
+              key={index}
+              as="p"
+              part="body"
+              index={index}
+              html={paragraph}
               className="mb-3 text-[15px] leading-relaxed whitespace-pre-line text-[color:var(--lp-text)]/75"
-            >
-              {p}
-            </p>
+            />
           ))}
-        </div>
+          <Extras config={config} slot="content" />
+        </El>
       </BlockSection>
     </SectionWrapper>
   )
@@ -55,8 +63,8 @@ export const richtextSection: SectionDefinition<RichtextContent> = {
   schema: richtextContentSchema,
   defaultContent: richtextDefaultContent,
   editorFields: [
-    { type: 'text', name: 'title', label: 'Heading' },
-    { type: 'textarea', name: 'body', label: 'Body' },
+    { type: 'richtext', name: 'title', label: 'Heading' },
+    { type: 'richtext', name: 'body', label: 'Body', multiline: true },
     {
       type: 'select',
       name: 'align',
@@ -64,5 +72,17 @@ export const richtextSection: SectionDefinition<RichtextContent> = {
       options: ['left', 'center'],
     },
   ],
+  elements: [
+    { key: 'column', label: 'Text column', kind: 'container', slot: true },
+    { key: 'title', label: 'Heading', kind: 'heading', contentField: 'title' },
+    {
+      key: 'body',
+      label: 'Paragraph',
+      kind: 'text',
+      repeated: true,
+      contentField: 'body',
+    },
+  ],
+  slots: [{ key: 'content', label: 'Text column' }],
   Renderer: RichtextRenderer,
 }

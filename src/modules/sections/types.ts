@@ -1,3 +1,6 @@
+import type { ElementDesignMap } from './elementStyle'
+import type { ExtraElement } from './elementDescriptors'
+
 export interface PageTheme {
   primaryColor: string
   secondaryColor: string
@@ -81,6 +84,36 @@ export interface SectionConfig {
   // ── Visibility ──────────────────────────────────────────────────────
   hideOnMobile?: boolean
   hideOnDesktop?: boolean
+
+  // ── Per-element design ──────────────────────────────────────────────
+  /**
+   * How each individual thing inside this block looks, keyed by the element
+   * key the block declares in its `elements` descriptor list.
+   *
+   * This is the layer below everything above it. The fields above style the
+   * section *wrapper* — one background, one padding, one text colour for the
+   * whole block — while this reaches each headline, button, card and image the
+   * block draws, per breakpoint, with a hover state and an entrance animation.
+   *
+   * Same inheritance contract as the rest of this interface, one level deeper:
+   * a property nobody set produces no CSS at all, so the block's own classes
+   * and the page theme keep painting it. That is what makes this safe to add to
+   * pages that already exist, and what makes "reset" a delete.
+   */
+  elements?: ElementDesignMap
+
+  /**
+   * Elements a merchant added to this block that its author did not put there
+   * — a second button, a badge, a spacer.
+   *
+   * They live in the config rather than in `content` because they are not part
+   * of what the block *means*: the block's zod schema describes the data it
+   * sells with, and an extra decoration is not that. Keeping them here also
+   * means adding one never invalidates a content schema, so a page published
+   * with extras still parses against a block definition that knows nothing
+   * about them.
+   */
+  extras?: ExtraElement[]
 
   // ── Advanced ────────────────────────────────────────────────────────
   /** Becomes the element id, so nav links can jump to this section. */

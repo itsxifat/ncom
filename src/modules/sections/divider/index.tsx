@@ -2,6 +2,7 @@ import { z } from 'zod'
 import type { SectionDefinition, SectionRendererProps } from '../registry'
 import { SectionWrapper } from '../primitives'
 import { SPACING } from '../blockPrimitives'
+import { El, Extras } from '../elements'
 
 export const dividerContentSchema = z.object({
   rule: z.boolean().default(true),
@@ -20,13 +21,18 @@ function DividerRenderer({
 }: SectionRendererProps<DividerContent>) {
   return (
     <SectionWrapper config={config} defaultPadding={false}>
-      <div className={SPACING[content.size] || SPACING.medium}>
+      <El
+        as="div"
+        part="space"
+        className={SPACING[content.size] || SPACING.medium}
+      >
         {content.rule !== false && (
           <div className="mx-auto max-w-5xl px-4 sm:px-6">
-            <hr className="border-black/[0.08]" />
+            <El as="hr" part="rule" className="border-black/[0.08]" />
           </div>
         )}
-      </div>
+        <Extras config={config} slot="content" />
+      </El>
     </SectionWrapper>
   )
 }
@@ -47,5 +53,10 @@ export const dividerSection: SectionDefinition<DividerContent> = {
       options: ['small', 'medium', 'large'],
     },
   ],
+  elements: [
+    { key: 'space', label: 'Spacing', kind: 'spacer', slot: true },
+    { key: 'rule', label: 'Line', kind: 'divider' },
+  ],
+  slots: [{ key: 'content', label: 'Divider area' }],
   Renderer: DividerRenderer,
 }

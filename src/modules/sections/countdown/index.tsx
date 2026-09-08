@@ -46,6 +46,7 @@ function CountdownRenderer({
         ) : (
           <CountdownBody
             content={content}
+            config={config}
             target={target}
             sectionId={sectionId ?? ''}
             editing={Boolean(editing)}
@@ -112,19 +113,19 @@ export const countdownSection: SectionDefinition<CountdownContent> = {
 
     { type: 'heading', name: 'group:text', label: 'Text' },
     {
-      type: 'text',
+      type: 'richtext',
       name: 'title',
       label: 'Heading',
       placeholder: 'Offer ends in',
     },
     {
-      type: 'text',
+      type: 'richtext',
       name: 'subtitle',
       label: 'Line under the timer',
       placeholder: 'Free delivery on every order until then',
     },
     {
-      type: 'text',
+      type: 'richtext',
       name: 'ctaText',
       label: 'Button text',
       placeholder: 'Leave empty for no button',
@@ -203,11 +204,33 @@ export const countdownSection: SectionDefinition<CountdownContent> = {
       ],
     },
     {
-      type: 'text',
+      type: 'richtext',
       name: 'expiredText',
       label: 'Message',
       showWhen: { field: 'onExpire', equals: 'message' },
     },
   ],
+  elements: [
+    { key: 'panel', label: 'Panel', kind: 'container', slot: true },
+    { key: 'title', label: 'Heading', kind: 'text', contentField: 'title' },
+    { key: 'clock', label: 'Clock row', kind: 'container' },
+    { key: 'unit', label: 'Unit box', kind: 'container', repeated: true },
+    { key: 'digits', label: 'Digits', kind: 'text', repeated: true },
+    { key: 'unitLabel', label: 'Unit label', kind: 'text', repeated: true },
+    {
+      key: 'subtitle',
+      label: 'Line under the timer',
+      kind: 'text',
+      contentField: 'subtitle',
+    },
+    { key: 'button', label: 'Button', kind: 'button', contentField: 'ctaText' },
+    {
+      key: 'expired',
+      label: 'Expired message',
+      kind: 'text',
+      contentField: 'expiredText',
+    },
+  ],
+  slots: [{ key: 'content', label: 'Inside the panel' }],
   Renderer: CountdownRenderer,
 }

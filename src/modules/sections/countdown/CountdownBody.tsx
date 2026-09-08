@@ -1,9 +1,11 @@
 'use client'
 
 import { useState } from 'react'
+import { El, Extras } from '../elements'
 import { cn } from '@/lib/utils'
 import { CountdownClock } from './CountdownClock'
 import type { CountdownContent } from './content'
+import type { SectionConfig } from '../types'
 
 /**
  * Everything a countdown block draws.
@@ -26,11 +28,13 @@ const ALIGN_ITEMS: Record<CountdownContent['align'], string> = {
 
 export function CountdownBody({
   content,
+  config,
   target,
   sectionId,
   editing,
 }: {
   content: CountdownContent
+  config?: SectionConfig
   /** Fixed deadline as an epoch, or null when the block runs evergreen. */
   target: number | null
   sectionId: string
@@ -48,15 +52,21 @@ export function CountdownBody({
   const onPanel = content.panel
 
   return (
-    <div
+    // The accent arrives as a custom property and is painted by a class, not
+    // by an inline `background`. Inline declarations outrank every selector, so
+    // an inline paint here would have made this element's own colour controls
+    // in the design panel do nothing at all.
+    <El
+      as="div"
+      part="panel"
       className={cn(
         'flex flex-col',
         ALIGN_ITEMS[content.align],
-        onPanel && 'rounded-2xl px-6 py-8'
+        onPanel && 'rounded-2xl px-6 py-8 [background:var(--cd-accent)]'
       )}
       style={
         {
-          background: onPanel ? accent : undefined,
+          '--cd-accent': accent,
           // Amber reads as a warning against a brand-coloured panel, where red
           // on red would vanish; red is the clearer signal on the page's own
           // background.
@@ -65,14 +75,15 @@ export function CountdownBody({
       }
     >
       {content.title && (
-        <p
+        <El
+          as="p"
+          part="title"
+          html={content.title}
           className={cn(
             'mb-4 text-[12px] tracking-[3px] uppercase',
             onPanel ? 'text-white/85' : 'text-[color:var(--lp-text)]/60'
           )}
-        >
-          {content.title}
-        </p>
+        />
       )}
 
       <CountdownClock
@@ -85,28 +96,30 @@ export function CountdownBody({
       />
 
       {content.subtitle && (
-        <p
+        <El
+          as="p"
+          part="subtitle"
+          html={content.subtitle}
           className={cn(
             'mt-4 max-w-prose text-[13px] leading-relaxed',
             onPanel ? 'text-white/80' : 'text-[color:var(--lp-text)]/65'
           )}
-        >
-          {content.subtitle}
-        </p>
+        />
       )}
 
       {content.ctaText && !(expired && content.onExpire === 'message') && (
-        <a
+        <El
+          as="a"
+          part="button"
           href="#order"
-          className="mt-5 inline-flex w-fit items-center justify-center rounded-full px-7 py-3 text-[14px] font-semibold shadow-lg transition-transform hover:scale-[1.03] active:scale-[0.99]"
-          style={
+          html={content.ctaText}
+          className={cn(
+            'mt-5 inline-flex w-fit items-center justify-center rounded-full px-7 py-3 text-[14px] font-semibold shadow-lg transition-transform hover:scale-[1.03] active:scale-[0.99]',
             onPanel
-              ? { background: '#fff', color: accent }
-              : { background: accent, color: '#fff' }
-          }
-        >
-          {content.ctaText}
-        </a>
+              ? 'bg-white [color:var(--cd-accent)]'
+              : 'text-white [background:var(--cd-accent)]'
+          )}
+        />
       )}
 
       {editing && expired && content.onExpire === 'hide' && (
@@ -121,6 +134,8 @@ export function CountdownBody({
           Expired — this block is hidden on the published page.
         </p>
       )}
-    </div>
+
+      <Extras config={config} slot="content" />
+    </El>
   )
 }

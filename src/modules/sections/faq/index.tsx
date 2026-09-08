@@ -2,6 +2,7 @@ import { z } from 'zod'
 import type { SectionDefinition, SectionRendererProps } from '../registry'
 import { SectionWrapper } from '../primitives'
 import { BlockHeading, BlockSection } from '../blockPrimitives'
+import { Extras } from '../elements'
 import { FaqList } from './FaqList'
 
 export const faqContentSchema = z.object({
@@ -36,10 +37,13 @@ function FaqRenderer({ content, config }: SectionRendererProps<FaqContent>) {
   return (
     <SectionWrapper config={config} defaultPadding={false}>
       <BlockSection className="py-12">
-        <BlockHeading className="mb-6 text-center">
-          {content.title}
-        </BlockHeading>
+        <BlockHeading
+          part="title"
+          html={content.title}
+          className="mb-6 text-center"
+        />
         <FaqList items={items} />
+        <Extras config={config} slot="content" />
       </BlockSection>
     </SectionWrapper>
   )
@@ -53,16 +57,25 @@ export const faqSection: SectionDefinition<FaqContent> = {
   schema: faqContentSchema,
   defaultContent: faqDefaultContent,
   editorFields: [
-    { type: 'text', name: 'title', label: 'Heading' },
+    { type: 'richtext', name: 'title', label: 'Heading' },
     {
       type: 'array',
       name: 'items',
       label: 'Questions',
       itemFields: [
-        { type: 'text', name: 'q', label: 'Question' },
-        { type: 'textarea', name: 'a', label: 'Answer' },
+        { type: 'richtext', name: 'q', label: 'Question' },
+        { type: 'richtext', name: 'a', label: 'Answer', multiline: true },
       ],
     },
   ],
+  elements: [
+    { key: 'title', label: 'Heading', kind: 'heading', contentField: 'title' },
+    { key: 'list', label: 'Question list', kind: 'container' },
+    { key: 'row', label: 'Question row', kind: 'container', repeated: true },
+    { key: 'question', label: 'Question', kind: 'text', repeated: true },
+    { key: 'chevron', label: 'Arrow', kind: 'icon', repeated: true },
+    { key: 'answer', label: 'Answer', kind: 'text', repeated: true },
+  ],
+  slots: [{ key: 'content', label: 'Below the list' }],
   Renderer: FaqRenderer,
 }

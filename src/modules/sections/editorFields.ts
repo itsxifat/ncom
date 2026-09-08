@@ -1,3 +1,5 @@
+import { richTextToPlain } from './sanitizeHtml'
+
 /**
  * A small declarative description of a section's editable fields, used by
  * the builder's generic Inspector form (SchemaForm) to render an editing
@@ -34,6 +36,17 @@ export type SelectOption = string | { value: string; label: string }
 
 export type FieldConfig =
   | (FieldBase & { type: 'text'; placeholder?: string })
+  // Formatted copy. The value is an HTML fragment restricted to inline
+  // typographic tags, sanitised at render by `sanitizeHtml.ts` — never a
+  // document, never a layout. Plain strings are valid values and render
+  // unchanged, which is what let existing blocks move their prose fields onto
+  // this type without touching a single stored row.
+  | (FieldBase & {
+      type: 'richtext'
+      placeholder?: string
+      /** Taller editor, for fields that hold paragraphs rather than a line. */
+      multiline?: boolean
+    })
   // `aspect` is the width/height of the frame this image renders into, and is
   // set only where the block genuinely fixes one — a square gallery tile, a
   // round avatar. It locks the cropper to that shape. Blocks that let the
@@ -130,6 +143,11 @@ export function collectText(
     const value = record[field.name]
     if (field.type === 'text' || field.type === 'textarea') {
       if (typeof value === 'string') parts.push(value)
+    } else if (field.type === 'richtext') {
+      // Stripped to words: the tag names and hex colours inside a formatted
+      // value are not prose, and feeding them to the script detection would
+      // skew it toward Latin on a page written in Bangla.
+      if (typeof value === 'string') parts.push(richTextToPlain(value))
     } else if (field.type === 'stringArray') {
       if (Array.isArray(value)) {
         parts.push(...value.filter((v): v is string => typeof v === 'string'))

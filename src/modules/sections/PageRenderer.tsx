@@ -1,5 +1,7 @@
 import { getSectionDefinition, type StorefrontCommerce } from './registry'
 import { PageThemeProvider } from './theme'
+import { buildElementStylesheet, pageUsesAnimation } from './elementStyle'
+import { ScrollAnimations } from './ScrollAnimations'
 import type { PageTheme, SectionConfig } from './types'
 
 export interface RenderablePageSection {
@@ -58,40 +60,57 @@ export function PageRenderer({
    */
   editing?: boolean
 }) {
+  // The per-element design of every visible section, as one stylesheet.
+  //
+  // Built here rather than inside each section because the breakpoint overrides
+  // are media queries, and media queries only cascade correctly when they are
+  // in a known order in a single sheet. A `<style>` per section would let a
+  // section's tablet rules land after a later section's mobile rules, and a
+  // page would style differently depending on the order its blocks happen to
+  // be in.
+  const visible = sections.filter((section) => section.isVisible)
+  const elementConfigs = visible.map((section) => ({
+    id: section.id,
+    elements: (section.config as SectionConfig | null)?.elements,
+  }))
+  const elementCss = buildElementStylesheet(elementConfigs)
+  // Never in the builder: an editor where blocks fade out as you scroll past
+  // them is an editor you cannot work in, and the merchant needs to see what
+  // they are styling, not watch it play.
+  const animates = !editing && pageUsesAnimation(elementConfigs)
+
   return (
     // `scroll-smooth` is what makes every CTA on the page glide to the order
     // form from a plain `#order` anchor, with no script involved.
     <PageThemeProvider theme={theme} className="scroll-smooth">
-      {sections
-        .filter((section) => section.isVisible)
-        .map((section) => {
-          const key = sectionType(section)
-          if (!key) return null
-          const definition = getSectionDefinition(RENAMED_KEYS[key] ?? key)
-          if (!definition) return null
+      {elementCss && <style>{elementCss}</style>}
+      {animates && <ScrollAnimations />}
+      {visible.map((section) => {
+        const key = sectionType(section)
+        if (!key) return null
+        const definition = getSectionDefinition(RENAMED_KEYS[key] ?? key)
+        if (!definition) return null
 
-          const parsed = definition.schema.safeParse(section.content)
-          const content = parsed.success
-            ? parsed.data
-            : definition.defaultContent
-          const config = (section.config ?? undefined) as
-            SectionConfig | undefined
+        const parsed = definition.schema.safeParse(section.content)
+        const content = parsed.success ? parsed.data : definition.defaultContent
+        const config = (section.config ?? undefined) as
+          SectionConfig | undefined
 
-          const Renderer = definition.Renderer
-          return (
-            <div key={section.id} data-section-id={section.id}>
-              <Renderer
-                content={content}
-                config={config}
-                theme={theme}
-                sectionId={section.id}
-                storeId={storeId}
-                commerce={commerce}
-                editing={editing}
-              />
-            </div>
-          )
-        })}
+        const Renderer = definition.Renderer
+        return (
+          <div key={section.id} data-section-id={section.id}>
+            <Renderer
+              content={content}
+              config={config}
+              theme={theme}
+              sectionId={section.id}
+              storeId={storeId}
+              commerce={commerce}
+              editing={editing}
+            />
+          </div>
+        )
+      })}
     </PageThemeProvider>
   )
 }

@@ -13,6 +13,7 @@ import {
   Truck,
 } from 'lucide-react'
 import { SectionWrapper } from '../primitives'
+import { El, Extras } from '../elements'
 import type { SectionConfig } from '../types'
 import type { StorefrontCommerce } from '../registry'
 import type { OrderformContent } from './index'
@@ -250,19 +251,26 @@ export function OrderFormClient({
       <SectionWrapper config={config} defaultPadding={false}>
         <section id="order" className="px-4 py-16 sm:px-6">
           <div className="mx-auto max-w-lg rounded-2xl border border-black/[0.07] bg-white p-10 text-center">
-            <div
-              className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-full"
-              style={{ background: 'var(--lp-accent)' }}
+            <El
+              as="div"
+              part="successIcon"
+              className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-[var(--lp-accent)]"
             >
               <PartyPopper size={24} className="text-white" />
-            </div>
-            <h2 className="text-xl font-bold text-[color:var(--lp-text)]">
-              {content.successTitle}
-            </h2>
+            </El>
+            <El
+              as="h2"
+              part="successTitle"
+              html={content.successTitle}
+              className="text-xl font-bold text-[color:var(--lp-text)]"
+            />
             {content.successMessage && (
-              <p className="mt-2 text-[14px] leading-relaxed text-[color:var(--lp-text)]/65">
-                {content.successMessage}
-              </p>
+              <El
+                as="p"
+                part="successMessage"
+                html={content.successMessage}
+                className="mt-2 text-[14px] leading-relaxed text-[color:var(--lp-text)]/65"
+              />
             )}
             <div className="mt-6 space-y-1.5 rounded-xl bg-black/[0.03] px-5 py-4 text-left">
               <p className="text-[12px] text-[color:var(--lp-text)]/55">
@@ -314,18 +322,27 @@ export function OrderFormClient({
     <SectionWrapper config={config} defaultPadding={false}>
       <section id="order" className="scroll-mt-4 px-4 py-14 sm:px-6">
         <div className="mx-auto max-w-3xl">
-          <div className="mb-8 text-center">
-            <h2 className="text-2xl font-bold tracking-tight text-[color:var(--lp-text)] sm:text-3xl">
-              {content.title}
-            </h2>
+          <El as="div" part="header" className="mb-8 text-center">
+            <El
+              as="h2"
+              part="title"
+              html={content.title}
+              className="text-2xl font-bold tracking-tight text-[color:var(--lp-text)] sm:text-3xl"
+            />
             {content.subtitle && (
-              <p className="mt-2 text-[14px] text-[color:var(--lp-text)]/60">
-                {content.subtitle}
-              </p>
+              <El
+                as="p"
+                part="subtitle"
+                html={content.subtitle}
+                className="mt-2 text-[14px] text-[color:var(--lp-text)]/60"
+              />
             )}
-          </div>
+            <Extras config={config} slot="header" />
+          </El>
 
-          <form
+          <El
+            as="form"
+            part="form"
             onSubmit={submit}
             className="overflow-hidden rounded-2xl border border-black/[0.07] bg-white"
           >
@@ -659,15 +676,16 @@ export function OrderFormClient({
                 </p>
               )}
 
-              <button
+              <El
+                as="button"
+                part="submit"
                 type="submit"
                 disabled={sending || !priced}
-                className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl py-4 text-[15px] font-semibold tracking-wide text-white shadow-lg transition-transform hover:scale-[1.01] active:scale-[0.99] disabled:opacity-60 disabled:hover:scale-100"
-                style={{ background: 'var(--lp-accent)' }}
+                className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-[var(--lp-accent)] py-4 text-[15px] font-semibold tracking-wide text-white shadow-lg transition-transform hover:scale-[1.01] active:scale-[0.99] disabled:opacity-60 disabled:hover:scale-100"
               >
                 {sending && <Loader2 size={16} className="animate-spin" />}
                 {sending ? 'Placing your order…' : content.submitText}
-              </button>
+              </El>
 
               <div className="flex items-center justify-center gap-5 pt-2 text-[11px] text-[color:var(--lp-text)]/50">
                 <span className="flex items-center gap-1.5">
@@ -678,7 +696,7 @@ export function OrderFormClient({
                 </span>
               </div>
             </div>
-          </form>
+          </El>
         </div>
       </section>
     </SectionWrapper>

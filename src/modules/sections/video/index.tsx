@@ -2,6 +2,7 @@ import { z } from 'zod'
 import type { SectionDefinition, SectionRendererProps } from '../registry'
 import { SectionWrapper } from '../primitives'
 import { BlockHeading, BlockSection, youtubeId } from '../blockPrimitives'
+import { El, Extras } from '../elements'
 
 export const videoContentSchema = z.object({
   title: z.string().max(200).default(''),
@@ -23,10 +24,16 @@ function VideoRenderer({
   return (
     <SectionWrapper config={config} defaultPadding={false}>
       <BlockSection className="py-10">
-        <BlockHeading className="mb-6 text-center">
-          {content.title}
-        </BlockHeading>
-        <div className="relative aspect-video overflow-hidden rounded-2xl bg-black">
+        <BlockHeading
+          part="title"
+          html={content.title}
+          className="mb-6 text-center"
+        />
+        <El
+          as="div"
+          part="frame"
+          className="relative aspect-video overflow-hidden rounded-2xl bg-black"
+        >
           <iframe
             src={`https://www.youtube-nocookie.com/embed/${id}`}
             title={content.title || 'Video'}
@@ -34,12 +41,16 @@ function VideoRenderer({
             allowFullScreen
             className="absolute inset-0 h-full w-full"
           />
-        </div>
+        </El>
         {content.caption && (
-          <p className="mt-3 text-center text-[12px] text-[color:var(--lp-text)]/50">
-            {content.caption}
-          </p>
+          <El
+            as="p"
+            part="caption"
+            html={content.caption}
+            className="mt-3 text-center text-[12px] text-[color:var(--lp-text)]/50"
+          />
         )}
+        <Extras config={config} slot="content" />
       </BlockSection>
     </SectionWrapper>
   )
@@ -53,9 +64,15 @@ export const videoSection: SectionDefinition<VideoContent> = {
   schema: videoContentSchema,
   defaultContent: videoDefaultContent,
   editorFields: [
-    { type: 'text', name: 'title', label: 'Heading' },
+    { type: 'richtext', name: 'title', label: 'Heading' },
     { type: 'text', name: 'url', label: 'YouTube URL' },
-    { type: 'text', name: 'caption', label: 'Caption' },
+    { type: 'richtext', name: 'caption', label: 'Caption' },
   ],
+  elements: [
+    { key: 'title', label: 'Heading', kind: 'heading', contentField: 'title' },
+    { key: 'frame', label: 'Video frame', kind: 'embed' },
+    { key: 'caption', label: 'Caption', kind: 'text', contentField: 'caption' },
+  ],
+  slots: [{ key: 'content', label: 'Below the video' }],
   Renderer: VideoRenderer,
 }

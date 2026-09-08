@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { El } from '../elements'
 import { cn } from '@/lib/utils'
 import type { CountdownContent } from './content'
 
@@ -205,9 +206,12 @@ export function CountdownClock({
 
   if (expired && content.onExpire === 'message') {
     return (
-      <p className={cn('text-lg font-semibold', digitTone)}>
-        {content.expiredText || 'This offer has ended.'}
-      </p>
+      <El
+        as="p"
+        part="expired"
+        html={content.expiredText || 'This offer has ended.'}
+        className={cn('text-lg font-semibold', digitTone)}
+      />
     )
   }
 
@@ -215,7 +219,9 @@ export function CountdownClock({
   const minimal = content.style === 'minimal'
 
   return (
-    <div
+    <El
+      as="div"
+      part="clock"
       role="timer"
       // The clock repaints every second; announcing that would make a screen
       // reader unusable. The deadline itself is in the label instead.
@@ -229,8 +235,11 @@ export function CountdownClock({
       )}
     >
       {parts.map((part, index) => (
-        <div
+        <El
           key={part.label}
+          as="div"
+          part="unit"
+          index={index}
           className={cn(
             'text-center',
             boxed &&
@@ -249,7 +258,10 @@ export function CountdownClock({
               )
           )}
         >
-          <p
+          <El
+            as="p"
+            part="digits"
+            index={index}
             className={cn(
               'font-bold tabular-nums',
               DIGIT_SIZE[content.size],
@@ -264,9 +276,12 @@ export function CountdownClock({
                 :
               </span>
             )}
-          </p>
+          </El>
           {content.showLabels && (
-            <p
+            <El
+              as="p"
+              part="unitLabel"
+              index={index}
               className={cn(
                 'mt-1 tracking-[2px] uppercase',
                 content.size === 'large' ? 'text-[10px]' : 'text-[9px]',
@@ -274,10 +289,10 @@ export function CountdownClock({
               )}
             >
               {part.label}
-            </p>
+            </El>
           )}
-        </div>
+        </El>
       ))}
-    </div>
+    </El>
   )
 }
