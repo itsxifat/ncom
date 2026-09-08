@@ -105,6 +105,10 @@ function toVariantChoice(
       available: variant.available,
       policy: variant.policy,
     }),
+    // Left out of the offer, not off the page: the buyer may still order it,
+    // at its own price, and the pricing module keeps it out of every discount
+    // and every rung. See OfferVariantRule for why that is the useful reading.
+    excluded: rule?.excluded ?? false,
     // Only a rule that actually names a mode overrides anything. A row that
     // exists purely to exclude a size carries no pricing, and treating its
     // zeroed columns as "0% off" would quietly cancel the offer on that size
@@ -134,7 +138,8 @@ function toVariantChoice(
  *
  * A draft product is still refused: publication status is the merchant saying
  * this is not ready to be seen, which is a different statement from "we ran
- * out". So is a line whose every size the merchant excluded by hand.
+ * out". So is a line of a flat-priced bundle whose every size the merchant
+ * excluded by hand — see `dropExcluded` below for why only that one.
  *
  * The reason travels with the refusal rather than being re-derived by whoever
  * wants to explain it. A merchant whose bundle never appears on their page is
@@ -155,7 +160,12 @@ type LineResult =
 function toOfferLine(
   item: OfferRow['items'][number],
   rules: VariantRules,
-  catalogue: Catalogue
+  catalogue: Catalogue,
+  /**
+   * Whether an excluded size must be removed from the options rather than
+   * marked. True only for a set sold at one flat total — see `resolveOffer`.
+   */
+  dropExcluded: boolean
 ): LineResult {
   const product = catalogue.get(item.productId)
 
@@ -197,15 +207,25 @@ function toOfferLine(
     if (narrowed.length > 0) candidates = narrowed
   }
 
-  // Sizes the merchant carved out of this offer are gone, not shown at a price
-  // the offer does not honour.
-  candidates = candidates.filter((variant) => !rules.get(variant.id)?.excluded)
+  // Sizes the merchant carved out of this offer stay on the card, marked, and
+  // are sold at their own price. Removing them, which is what this used to do,
+  // took a size off sale to keep it out of a discount — the buyer who came for
+  // the XL found the product listed in every size but theirs, with nothing on
+  // the page admitting it existed. The exception is a bundle sold for one flat
+  // total, where there is no line price to charge an excluded size at.
+  if (dropExcluded) {
+    candidates = candidates.filter(
+      (variant) => !rules.get(variant.id)?.excluded
+    )
+  }
 
   const choices = candidates.map((variant) => toVariantChoice(variant, rules))
   if (choices.length === 0) {
     return {
       ok: false,
-      reason: `every option of "${product.title}" is excluded from this offer`,
+      reason: dropExcluded
+        ? `every option of "${product.title}" is excluded from this offer`
+        : `"${product.title}" has no options to sell`,
     }
   }
   return {
@@ -242,7 +262,18 @@ function resolveOffer(row: OfferRow, catalogue: Catalogue): OfferResult {
     row.variantRules.map((rule) => [rule.variantId, rule])
   )
 
-  const results = row.items.map((item) => toOfferLine(item, rules, catalogue))
+  // One flat total for the whole set cannot be split, so there is no price
+  // left to sell an excluded size at: charging list *on top of* the bundle
+  // would ask more than the goods list for, and taking the size's share out of
+  // a number the merchant typed by hand is not a share anyone can compute.
+  // There, and only there, excluding still means the bundle is not sold in
+  // that size. Every other offer prices its goods piece by piece and can say
+  // the useful thing instead.
+  const flatTotal = row.kind === 'FIXED' && row.pricingMode === 'FIXED'
+
+  const results = row.items.map((item) =>
+    toOfferLine(item, rules, catalogue, flatTotal)
+  )
   const kept = results.filter(
     (result): result is { ok: true; line: OfferLine; soldOut: boolean } =>
       result.ok
@@ -360,6 +391,7 @@ function regularTotalOf(offer: PublicOffer): number {
   return offer.items.reduce((total, line) => {
     const preferred =
       line.variants.find((variant) => variant.id === line.pinnedVariantId) ??
+      line.variants.find((variant) => variant.available && !variant.excluded) ??
       line.variants.find((variant) => variant.available) ??
       line.variants[0]
     return total + (preferred?.priceCents ?? 0) * Math.max(1, line.quantity)

@@ -430,6 +430,7 @@ export function OfferForm({
           rules={form.variantRules}
           currencyCode={currencyCode}
           offerPrices={!isLadder}
+          flatBundle={form.kind === 'FIXED' && form.pricingMode === 'FIXED'}
           onChange={(variantRules) => set('variantRules', variantRules)}
         />
       </SettingsSection>
@@ -1037,8 +1038,9 @@ function TierEditor({
  * offer narrows and a merchant is never scrolling past sizes they already
  * excluded at the product level.
  *
- * Excluding wins over pricing: an excluded size is not sold at all, so its rate
- * would be a rule nothing can read, and the controls collapse to say so.
+ * Excluding wins over pricing: an excluded size is sold at its own list price
+ * by definition, so a rate on top of it would be a second and contradicting
+ * answer, and the controls collapse to say so.
  */
 function VariantRuleEditor({
   items,
@@ -1046,6 +1048,7 @@ function VariantRuleEditor({
   rules,
   currencyCode,
   offerPrices,
+  flatBundle,
   onChange,
 }: {
   items: OfferFormItem[]
@@ -1054,6 +1057,13 @@ function VariantRuleEditor({
   currencyCode: string
   /** False for a ladder, where the basket has one price and a rate cannot bite. */
   offerPrices: boolean
+  /**
+   * One flat total for the whole set — the only offer where excluding a size
+   * takes it off sale, because that total cannot be split into a line price to
+   * charge the excluded size at. Worth saying plainly: it is the one case that
+   * does not behave the way the rest of this panel promises.
+   */
+  flatBundle: boolean
   onChange: (rules: OfferFormRule[]) => void
 }) {
   const byId = useMemo(
@@ -1147,7 +1157,11 @@ function VariantRuleEditor({
                 </p>
               </div>
 
-              {excluded && <Badge variant="secondary">Not in this offer</Badge>}
+              {excluded && (
+                <Badge variant="secondary">
+                  {flatBundle ? 'Not sold in this set' : 'Regular price'}
+                </Badge>
+              )}
               {!excluded && rule?.pricingMode && (
                 <Badge variant="lime">Own rate</Badge>
               )}
@@ -1220,9 +1234,11 @@ function VariantRuleEditor({
 
       <p className="text-muted-foreground flex items-center gap-2 p-3 text-xs">
         <Gift className="size-3.5 shrink-0" />
-        {offerPrices
-          ? 'Sizes you exclude disappear from the buyer’s options rather than showing at a price the offer does not honour.'
-          : 'A ladder prices the whole basket, so only exclusions apply here.'}
+        {flatBundle
+          ? 'One price covers the whole set, so there is no price left to sell an excluded size at — this set is simply not sold in the sizes you exclude.'
+          : offerPrices
+            ? 'A size you exclude stays on sale at its own regular price. The offer’s discount does not touch it, and the order form tells the customer so.'
+            : 'A ladder prices the whole basket, so only exclusions apply here. An excluded size still sells, at its regular price, beside the offer — it fills no rung of the ladder.'}
       </p>
     </div>
   )

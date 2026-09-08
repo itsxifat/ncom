@@ -878,6 +878,213 @@ test('a mix & match ladder charges the rung, and refuses a count it never priced
   })
 })
 
+/**
+ * Publishes the seeded page with an order form on it, so the buyer's side of an
+ * offer can be looked at rather than only posted to.
+ *
+ * The snapshot is written by hand for the reason the rest of this file writes
+ * SQL: a published page is an immutable JSON blob plus a pointer, and going
+ * through the builder UI to produce one would be three screens of clicking for
+ * a fixture. Everything a visitor's request touches — the block registry, the
+ * offer resolver, the pricing module — is still the real thing.
+ */
+async function publishOrderForm(pageId: string) {
+  const sectionId = id('sec')
+  const section = {
+    id: sectionId,
+    order: 0,
+    type: 'orderform',
+    // Empty content parses to the block's own defaults, which is what a
+    // merchant who dropped the block on a page and typed nothing would get.
+    content: {},
+    config: {},
+    isVisible: true,
+  }
+
+  await db.query(
+    `INSERT INTO "PageSection" (id, "pageId", type, "order", content, config, "updatedAt")
+     VALUES ($1, $2, 'orderform', 0, '{}'::jsonb, '{}'::jsonb, now())`,
+    [sectionId, pageId]
+  )
+
+  const versionId = id('ver')
+  await db.query(
+    `INSERT INTO "PageVersion" (id, "pageId", snapshot, "publishedAt", "createdAt")
+     VALUES ($1, $2, $3::jsonb, now(), now())`,
+    [
+      versionId,
+      pageId,
+      JSON.stringify({
+        title: 'Landing',
+        seoTitle: null,
+        seoDescription: null,
+        ogImageUrl: null,
+        robotsIndex: true,
+        theme: {
+          primaryColor: '#111111',
+          secondaryColor: '#666666',
+          backgroundColor: '#ffffff',
+          textColor: '#111111',
+          headingFont: 'Inter',
+          bodyFont: 'Inter',
+          buttonStyle: 'SOLID',
+          borderRadius: '12px',
+          spacingScale: '1',
+          containerWidth: '1120px',
+        },
+        sections: [section],
+      }),
+    ]
+  )
+
+  await db.query(
+    `UPDATE "Page" SET "publishedVersionId" = $1, status = 'PUBLISHED',
+            "publishedAt" = now() WHERE id = $2`,
+    [versionId, pageId]
+  )
+}
+
+/**
+ * A size left out of a mix & match offer.
+ *
+ * The reported bug, and it was reported as three separate ones: the excluded
+ * size vanished from the order form, a buyer could not order it at all, and
+ * nothing anywhere said why. Excluding is a *pricing* statement — "the offer
+ * does not cover the XL" — and it was behaving as a stock one.
+ *
+ * So this proves the size is on the form, that the form says what it will cost,
+ * that it can be bought, and that buying it does not quietly buy the offer:
+ * the ladder still needs its own three pieces, and the excluded one is charged
+ * at list beside them.
+ */
+test('a size excluded from an offer stays on sale at its own price', async ({
+  page,
+  request,
+}) => {
+  const { storeId, pageId } = await seedStorefront(organizationId)
+  const store = await one<{ subdomain: string }>(
+    `SELECT subdomain FROM "Store" WHERE id = $1`,
+    [storeId]
+  )
+  // S and M at 500, L at 600 — the dearer size is the one a merchant keeps out.
+  const shirt = seedProduct(
+    `Excluded shirt ${Date.now()}`,
+    [50_000, 50_000, 60_000]
+  )
+  const large = shirt.variants[2]
+  const medium = shirt.variants[1]
+  const label = `Excluded ladder ${Date.now()}`
+
+  await page.goto('/discounts/offers/new')
+  await page.getByLabel('Name').first().fill(label)
+  await page.locator('#offer-page').click()
+  await page.getByRole('option', { name: 'Landing' }).click()
+  await page.getByLabel('Offer type').click()
+  await page.getByRole('option', { name: /Mix & match/ }).click()
+  await page.getByRole('button', { name: 'Add a product' }).click()
+  await page.getByText(shirt.title).first().click()
+  await page.getByRole('button', { name: 'Add a quantity' }).click()
+  await page.getByLabel('Quantity').nth(0).fill('3')
+  await page.getByLabel('Price', { exact: true }).nth(0).fill('1200')
+
+  // The one click this test is about. The rows are the product's sizes in
+  // order, so the third is the L.
+  await page.getByRole('checkbox', { name: 'Exclude' }).nth(2).click()
+
+  await page.getByRole('button', { name: /^(Create|Save) offer$/ }).click()
+  await page
+    .waitForURL(/\/discounts\/offers\/(?!new$)[a-z0-9]+$/, { timeout: 30_000 })
+    .catch(async () => {
+      throw new Error(
+        `Offer was not created. Form said: ${await page.locator('body').innerText()}`
+      )
+    })
+
+  const saved = await offerByLabel(organizationId, label)
+  const rules = await all<{ variantId: string; excluded: boolean }>(
+    `SELECT "variantId", excluded FROM "OfferVariantRule" WHERE "offerId" = $1`,
+    [saved.id]
+  )
+  expect(rules).toEqual([{ variantId: large.id, excluded: true }])
+
+  const key = (
+    await one<{ key: string }>(`SELECT key FROM "Offer" WHERE id = $1`, [
+      saved.id,
+    ])
+  ).key
+
+  await test.step('the buyer can see it, and is told what it will cost', async () => {
+    await publishOrderForm(pageId)
+    await page.goto(`http://${store.subdomain}.localhost:3001/landing`)
+
+    const form = page.locator('#order')
+    // The page carries every offer this file has ever built, so the form leads
+    // with someone else's. Pick this one.
+    await form.getByRole('button', { name: new RegExp(label) }).click()
+
+    // The chip reads "L" and says the rest to a screen reader, so the size is
+    // not something only a sighted buyer finds out about.
+    const largeChip = form.getByRole('button', {
+      name: 'L — not in this offer, regular price',
+    })
+    await expect(largeChip).toBeVisible()
+    await expect(
+      form.getByRole('button', { name: 'M', exact: true })
+    ).toBeVisible()
+    await expect(form.getByText(/Offer applies to S and M only/)).toBeVisible()
+
+    // Choosing it says so plainly, rather than leaving the buyer to notice a
+    // saving that quietly shrank.
+    await largeChip.click()
+    await expect(form.getByText(/L is not part of this offer/)).toBeVisible()
+    await expect(form.getByText(/sold at its regular price/)).toBeVisible()
+  })
+
+  await test.step('and can order it on its own', async () => {
+    const result = await placeOrder(request, store.subdomain, {
+      storeId,
+      pageId,
+      offerKey: key,
+      selections: [{ productId: shirt.id, variantId: large.id, quantity: 1 }],
+    })
+    // Before this change the route answered "One of the chosen items isn't
+    // part of this offer" — the size was in the catalogue, in stock, and
+    // unbuyable.
+    expect(result.status, JSON.stringify(result.body)).toBe(200)
+    expect(result.body.totalCents).toBe(60_000)
+  })
+
+  await test.step('it fills no rung of the ladder', async () => {
+    const result = await placeOrder(request, store.subdomain, {
+      storeId,
+      pageId,
+      offerKey: key,
+      selections: [
+        { productId: shirt.id, variantId: medium.id, quantity: 2 },
+        { productId: shirt.id, variantId: large.id, quantity: 1 },
+      ],
+    })
+    expect(result.status).toBe(400)
+    expect(result.body.error).toContain('at least 3 items from this offer')
+  })
+
+  await test.step('and rides along beside a rung that is filled', async () => {
+    const result = await placeOrder(request, store.subdomain, {
+      storeId,
+      pageId,
+      offerKey: key,
+      selections: [
+        { productId: shirt.id, variantId: medium.id, quantity: 3 },
+        { productId: shirt.id, variantId: large.id, quantity: 1 },
+      ],
+    })
+    expect(result.status, JSON.stringify(result.body)).toBe(200)
+    // The rung's 1200 for the three mediums, plus the L at its own 600.
+    expect(result.body.totalCents).toBe(180_000)
+    expect(result.body.quantity).toBe(4)
+  })
+})
+
 test('a code discount comes off a real order, and a wrong code does not', async ({
   page,
   request,

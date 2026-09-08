@@ -176,6 +176,8 @@ export function OrderFormClient({
   const shippingCents = promo?.shippingCents ?? baseShipping
   const discountCents = promo?.discountCents ?? 0
   const offerSavings = quote ? Math.max(0, quote.savingCents) : 0
+  /** Money in the basket the offer does not cover, at list. Usually zero. */
+  const outsideOfferCents = quote?.outsideOfferCents ?? 0
   const total = Math.max(0, goodsCents - discountCents + shippingCents)
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
@@ -553,6 +555,18 @@ export function OrderFormClient({
                 </div>
               )}
 
+              {/* Not a charge of its own — it is already inside the figure
+                  above — so it is a sentence rather than a row. Without it a
+                  buyer reads a saving smaller than the badge promised and has
+                  nothing on the page telling them which part of their basket
+                  the offer was never on. */}
+              {outsideOfferCents > 0 && priced && (
+                <p className="text-[11px] leading-snug text-amber-700">
+                  Includes {money(outsideOfferCents)} of sizes that are not in
+                  this offer, at their regular price.
+                </p>
+              )}
+
               {offer.gift && priced && (
                 <div
                   className="flex justify-between text-[13px]"
@@ -806,6 +820,56 @@ function ProductThumb({
   )
 }
 
+/**
+ * "S, M and L" — a few option names, as a buyer would read them out.
+ */
+function listNames(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? ''
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
+}
+
+/**
+ * What the offer does and does not cover on this product.
+ *
+ * Rendered only where the merchant actually left a size out, so an ordinary
+ * offer carries no extra text at all. Two situations, two sentences, because
+ * they are two different pieces of news:
+ *
+ *   - the buyer is standing on an excluded size, and needs to know *now* that
+ *     the badge on the card is not the price they are about to pay;
+ *   - the buyer has not chosen yet, and is better told which sizes the offer is
+ *     for than left to discover it by watching the total move.
+ *
+ * Naming the price on the first one matters. "Not in this offer" alone reads as
+ * a refusal — the thing this whole change exists to stop — while "sold at its
+ * regular price ৳550" says plainly that they can still have it.
+ */
+function OfferScopeNote({
+  variants,
+  selectedId,
+  money,
+}: {
+  variants: OfferVariantChoice[]
+  selectedId: string | null | undefined
+  money: (cents: number) => string
+}) {
+  const excluded = variants.filter((variant) => variant.excluded)
+  if (excluded.length === 0) return null
+
+  const included = variants.filter((variant) => !variant.excluded)
+  const chosen = variants.find((variant) => variant.id === selectedId)
+
+  return (
+    <p className="mt-1 text-[11px] leading-snug text-amber-700">
+      {chosen?.excluded
+        ? `${chosen.title} is not part of this offer — it is sold at its regular price, ${money(chosen.priceCents)}.`
+        : included.length > 0
+          ? `Offer applies to ${listNames(included.map((variant) => variant.title))} only. ${listNames(excluded.map((variant) => variant.title))} ${excluded.length === 1 ? 'is' : 'are'} sold at the regular price.`
+          : 'These sizes are outside this offer — they are sold at their regular price.'}
+    </p>
+  )
+}
+
 /** One line of a FIXED offer: the product, and its options as chips. */
 function FixedLine({
   line,
@@ -879,16 +943,24 @@ function FixedLine({
                     disabled={!variant.available}
                     aria-pressed={active}
                     // Says which size is gone, for a screen reader and for
-                    // anyone who reads a faded chip as "not selected yet".
+                    // anyone who reads a faded chip as "not selected yet". A
+                    // size outside the offer is said out loud for the same
+                    // reason: the dashed border below is invisible to a reader.
                     aria-label={
-                      variant.available
-                        ? undefined
-                        : `${variant.title} — out of stock`
+                      !variant.available
+                        ? `${variant.title} — out of stock`
+                        : variant.excluded
+                          ? `${variant.title} — not in this offer, regular price`
+                          : undefined
                     }
                     onClick={() => onChoose(variant.id)}
                     className={cn(
                       'min-w-[42px] rounded-lg border px-3 py-1.5 text-[12.5px] font-medium transition-colors disabled:opacity-35',
-                      !variant.available && 'line-through'
+                      !variant.available && 'line-through',
+                      // Still a real, tappable option — it is simply not one of
+                      // the offer's. Dashed rather than faded, because faded is
+                      // what this form uses for "you cannot have this".
+                      variant.excluded && 'border-dashed'
                     )}
                     style={{
                       borderColor: active
@@ -916,6 +988,15 @@ function FixedLine({
               )}
           </>
         ) : null}
+        <OfferScopeNote
+          variants={line.variants}
+          selectedId={
+            chosen ??
+            line.pinnedVariantId ??
+            (line.variants.length === 1 ? line.variants[0].id : null)
+          }
+          money={money}
+        />
       </div>
     </div>
   )
@@ -945,16 +1026,37 @@ function PoolPicker({
 }) {
   const isCollection = offer.kind === 'COLLECTION'
   const totalQty = Object.values(picks).reduce((n, x) => n + x, 0)
-  const atMax = bounds.max > 0 && totalQty >= bounds.max
+
+  // The ladder, the rung and the cap are all about the offer's own pieces. A
+  // size the merchant excluded is in the basket and paid for at list, but it
+  // fills no rung and uses up no allowance — so counting it here would light
+  // up "3 for 1000" for a buyer holding two shirts and an XL, and then the
+  // server would price the basket by a different rule than the page showed.
+  const excludedIds = useMemo(() => {
+    const ids = new Set<string>()
+    for (const line of offer.pool) {
+      for (const variant of line.variants) {
+        if (variant.excluded) ids.add(variant.id)
+      }
+    }
+    return ids
+  }, [offer])
+  const offerQty = Object.entries(picks).reduce(
+    (n, [variantId, count]) => (excludedIds.has(variantId) ? n : n + count),
+    0
+  )
+  const extraQty = totalQty - offerQty
+
+  const atMax = bounds.max > 0 && offerQty >= bounds.max
   // Which rung the buyer is standing on. A threshold ladder keeps the last one
   // they passed; an exact ladder only lights up when they land on a rung, which
   // is the truth — one item either side of it and that price is not on offer.
   const activeTierQty = !isCollection
     ? 0
     : offer.tierMode === 'THRESHOLD'
-      ? ([...offer.tiers].reverse().find((t) => t.quantity <= totalQty)
+      ? ([...offer.tiers].reverse().find((t) => t.quantity <= offerQty)
           ?.quantity ?? 0)
-      : (offer.tiers.find((t) => t.quantity === totalQty)?.quantity ?? 0)
+      : (offer.tiers.find((t) => t.quantity === offerQty)?.quantity ?? 0)
   const rangeLabel =
     bounds.min === bounds.max && bounds.max
       ? `${bounds.max}`
@@ -1024,12 +1126,14 @@ function PoolPicker({
           {totalQty === 0
             ? `Add ${bounds.min || 1} or more to see your price`
             : atMax
-              ? `Maximum ${bounds.max} items selected`
-              : `${totalQty} selected${
-                  totalQty < (bounds.min || 1)
-                    ? ` — add ${(bounds.min || 1) - totalQty} more`
+              ? `Maximum ${bounds.max} items selected${
+                  extraQty > 0 ? ` · ${extraQty} at the regular price` : ''
+                }`
+              : `${offerQty}${extraQty > 0 ? ' in this offer' : ' selected'}${
+                  offerQty > 0 && offerQty < (bounds.min || 1)
+                    ? ` — add ${(bounds.min || 1) - offerQty} more`
                     : ''
-                }`}
+                }${extraQty > 0 ? ` · ${extraQty} at the regular price` : ''}`}
         </p>
       </div>
     </div>
@@ -1102,6 +1206,10 @@ function PoolRow({
 
   const variant =
     sellable.find((candidate) => candidate.id === variantId) ?? null
+  // The basket's maximum counts the pieces the offer covers, so a size outside
+  // it is never what fills the basket up and must not be blocked by a full one.
+  const capped = (choice: OfferVariantChoice | null) =>
+    atMax && !choice?.excluded
   const qty = variant ? (picks[variant.id] ?? 0) : 0
   const rowQty = sellable.reduce((n, v) => n + (picks[v.id] ?? 0), 0)
   const pickedAny = rowQty > 0
@@ -1110,14 +1218,14 @@ function PoolRow({
   const fromCents = Math.min(...sellable.map((v) => v.priceCents))
   const varies = new Set(sellable.map((v) => v.priceCents)).size > 1
 
-  const choose = (choiceId: string) => {
-    setVariantId(choiceId)
+  const choose = (choice: OfferVariantChoice) => {
+    setVariantId(choice.id)
     setNeedsChoice(false)
     // Naming an option on an untouched row *is* the buyer choosing the product;
     // making them tap again to confirm what they just said would be strange. A
     // row that already holds picks is a buyer adding a second option to it, so
     // there only the chip moves and the stepper adds.
-    if (rowQty === 0 && !atMax) onPicks({ ...picks, [choiceId]: 1 })
+    if (rowQty === 0 && !capped(choice)) onPicks({ ...picks, [choice.id]: 1 })
   }
 
   const bump = (delta: number) => {
@@ -1125,7 +1233,7 @@ function PoolRow({
       setNeedsChoice(true)
       return
     }
-    if (delta > 0 && atMax) return
+    if (delta > 0 && capped(variant)) return
     onPicks({ ...picks, [variant.id]: Math.max(0, qty + delta) })
   }
 
@@ -1140,7 +1248,7 @@ function PoolRow({
       onPicks({ ...picks, [variant.id]: 0 })
       return
     }
-    if (atMax) return
+    if (capped(variant)) return
     onPicks({ ...picks, [variant.id]: 1 })
   }
 
@@ -1170,10 +1278,10 @@ function PoolRow({
               {/* A size on its own terms says so on the row it is chosen from.
                   Without this the total moves when the buyer switches from M to
                   L and nothing on screen explains why. */}
-              {variant?.pricing?.mode === 'AUTO' && (
+              {(variant?.excluded || variant?.pricing?.mode === 'AUTO') && (
                 <span className="font-normal text-[color:var(--lp-text)]/45">
                   {' '}
-                  · no offer
+                  · {variant.excluded ? 'not in this offer' : 'no offer'}
                 </span>
               )}
             </p>
@@ -1189,6 +1297,14 @@ function PoolRow({
               {needsChoice ? 'Please select a size first' : 'Select a size'}
             </p>
           )}
+          {/* Only the sizes that can actually be bought: naming a sold-out one
+              as "in the offer" sends the buyer looking for a chip that is
+              crossed out. */}
+          <OfferScopeNote
+            variants={sellable}
+            selectedId={variant?.id}
+            money={money}
+          />
         </div>
 
         {/* Wraps rather than squeezing: on a phone the stepper drops to its own
@@ -1208,8 +1324,16 @@ function PoolRow({
                     type="button"
                     key={choice.id}
                     aria-pressed={active}
-                    onClick={() => choose(choice.id)}
-                    className="min-w-[42px] rounded-lg border px-3 py-1.5 text-[12.5px] font-medium transition-colors"
+                    aria-label={
+                      choice.excluded
+                        ? `${choice.title} — not in this offer, regular price`
+                        : undefined
+                    }
+                    onClick={() => choose(choice)}
+                    className={cn(
+                      'min-w-[42px] rounded-lg border px-3 py-1.5 text-[12.5px] font-medium transition-colors',
+                      choice.excluded && 'border-dashed'
+                    )}
                     style={{
                       // A size the buyer has already taken stays marked even
                       // while another one is the active chip, or their first
@@ -1259,7 +1383,7 @@ function PoolRow({
             <button
               type="button"
               onClick={() => bump(1)}
-              disabled={atMax && Boolean(variant)}
+              disabled={Boolean(variant) && capped(variant)}
               className="flex h-8 w-8 items-center justify-center rounded-full text-white disabled:opacity-30"
               style={{ background: 'var(--lp-accent)' }}
               aria-label="Add one"

@@ -208,8 +208,21 @@ export interface OfferQuote {
   goodsCents: number
   /** regularCents - goodsCents, never negative. */
   savingCents: number
-  /** Total pieces, which is what the ladder and promotions key off. */
+  /**
+   * Total pieces in the basket, which is what promotions key off.
+   *
+   * Not what the ladder or the min/max key off: an excluded size is in the
+   * basket but not in the offer, so it is counted here and nowhere else.
+   */
   quantity: number
+  /**
+   * The part of `goodsCents` charged at list because the offer excludes it.
+   *
+   * Zero on an ordinary basket. Positive is what lets the form say which part
+   * of the total the offer is not touching, rather than leaving a buyer to
+   * work out why their saving is smaller than the badge promised.
+   */
+  outsideOfferCents: number
   /** Set when the selection cannot be priced; goodsCents is meaningless then. */
   error: string | null
 }
@@ -230,6 +243,14 @@ export interface OfferQuote {
  * "20% off the shirts, nothing off the XL": the XL's units are lifted out of
  * the discount base rather than discounted and then added back, which would
  * round differently and drift by a unit or two on a large basket.
+ *
+ * An excluded size is lifted out one step further. It is in the basket and it
+ * is charged — at list, always — but it is not in the offer: no rule of the
+ * offer's touches it, it does not fill a ladder's rung, and it neither counts
+ * towards a minimum nor uses up a maximum. So "any 3 shirts for 1000, not the
+ * XL" sells two mediums and an XL as *two* shirts towards the rung plus one XL
+ * at its own price, which is the only reading of that sentence a merchant
+ * would recognise.
  */
 export function quoteOffer(
   offer: PublicOffer,
@@ -241,6 +262,7 @@ export function quoteOffer(
     goodsCents: 0,
     savingCents: 0,
     quantity: 0,
+    outsideOfferCents: 0,
     error: null,
   }
 
@@ -278,11 +300,15 @@ export function quoteOffer(
 
   let regularCents = 0
   let quantity = 0
-  /** Every chosen piece's list price, for a THRESHOLD ladder's overflow. */
+  /** Every piece the offer covers, at list, for a THRESHOLD ladder's overflow. */
   const unitPrices: number[] = []
   /** Regular totals split by the rule that prices them. */
   let plainRegular = 0
   const ruled: { rule: OfferPricingRule; regularCents: number }[] = []
+  /** The excluded sizes in the basket, at list. Never discounted by anything. */
+  let outsideOfferCents = 0
+  /** Pieces the offer actually covers — what the ladder and the bounds read. */
+  let offerQuantity = 0
 
   for (const selection of selections) {
     const variant = variantLookup(selection.variantId)
@@ -294,6 +320,17 @@ export function quoteOffer(
 
     regularCents += lineRegular
     quantity += lineQuantity
+
+    // Out of the offer means out of every part of it. Falling through to the
+    // buckets below would put an excluded size into the discount base, and
+    // pushing its price into `unitPrices` would let it pay for a rung it is
+    // not allowed to fill.
+    if (variant.excluded) {
+      outsideOfferCents += lineRegular
+      continue
+    }
+
+    offerQuantity += lineQuantity
     for (let piece = 0; piece < lineQuantity; piece++) {
       unitPrices.push(variant.priceCents)
     }
@@ -303,30 +340,53 @@ export function quoteOffer(
     else plainRegular += lineRegular
   }
 
-  const bounds = quantityBounds(offer)
-  if (quantity < bounds.min) {
+  // Nothing in the basket is on offer, because every size in it was excluded.
+  // That is a purchase at list, not a failed attempt at the bundle: refusing it
+  // for missing the minimum would refuse to sell the very sizes exclusion
+  // exists to keep on sale.
+  if (offerQuantity === 0) {
     return {
-      ...empty,
+      regularCents,
+      goodsCents: outsideOfferCents,
+      savingCents: 0,
       quantity,
-      error: `Please choose at least ${bounds.min} item${bounds.min === 1 ? '' : 's'}.`,
+      outsideOfferCents,
+      error: null,
     }
   }
-  if (bounds.max > 0 && quantity > bounds.max) {
+
+  /** What the offer's own goods list for, with the excluded ones taken out. */
+  const offerRegular = regularCents - outsideOfferCents
+  // Says which count a refusal is about once the basket holds both kinds. "You
+  // have 4" beside a rule about 3 reads as a bug when one of the four is a size
+  // the offer never covered.
+  const scope = outsideOfferCents > 0 ? ' from this offer' : ''
+
+  const bounds = quantityBounds(offer)
+  if (offerQuantity < bounds.min) {
     return {
       ...empty,
       quantity,
-      error: `You can order up to ${bounds.max} item${bounds.max === 1 ? '' : 's'}.`,
+      error: `Please choose at least ${bounds.min} item${bounds.min === 1 ? '' : 's'}${scope}.`,
+    }
+  }
+  if (bounds.max > 0 && offerQuantity > bounds.max) {
+    return {
+      ...empty,
+      quantity,
+      error: `You can order up to ${bounds.max} item${bounds.max === 1 ? '' : 's'}${scope}.`,
     }
   }
 
   // A COLLECTION is priced by the rung, not by what is in the basket — the
-  // whole mechanic is that any three cost the same. Per-size terms cannot
-  // apply here for the same reason: there is one price for the set, and a
-  // size that must not be discounted is excluded from the pool instead.
+  // whole mechanic is that any three cost the same. A per-size *rate* cannot
+  // apply here for the same reason: there is one price for the set. An
+  // exclusion still can, because it does not modify the set's price — it takes
+  // those pieces out of the set and sells them beside it.
   if (offer.kind === 'COLLECTION') {
-    const tierPrice = tierPriceFor(offer.tiers, quantity, {
+    const tierPrice = tierPriceFor(offer.tiers, offerQuantity, {
       mode: offer.tierMode,
-      regularCents,
+      regularCents: offerRegular,
       unitPrices,
     })
     if (tierPrice === null) {
@@ -341,28 +401,35 @@ export function quoteOffer(
         quantity,
         error:
           rungs.length > 0
-            ? `This offer is sold in sets of ${listQuantities(rungs)} — you have ${quantity}.`
+            ? `This offer is sold in sets of ${listQuantities(rungs)} — you have ${offerQuantity}${scope ? ' in it' : ''}.`
             : 'No price is set for that many items.',
       }
     }
+    const goodsCents = tierPrice + outsideOfferCents
     return {
       regularCents,
-      goodsCents: tierPrice,
-      savingCents: Math.max(0, regularCents - tierPrice),
+      goodsCents,
+      savingCents: Math.max(0, regularCents - goodsCents),
       quantity,
+      outsideOfferCents,
       error: null,
     }
   }
 
   // A flat bundle total covers whatever is in the set, so a per-size rate has
   // nothing to modify — the merchant already named the only price there is.
+  // (offerService keeps excluded sizes out of a set priced this way for the
+  // same reason: there is no line price left to charge them at. The term below
+  // is what makes this arithmetic true anyway rather than true by luck.)
   if (offer.pricing.mode === 'FIXED') {
-    const goodsCents = applyOfferPricing(offer.pricing, regularCents)
+    const goodsCents =
+      applyOfferPricing(offer.pricing, offerRegular) + outsideOfferCents
     return {
       regularCents,
       goodsCents,
       savingCents: Math.max(0, regularCents - goodsCents),
       quantity,
+      outsideOfferCents,
       error: null,
     }
   }
@@ -373,13 +440,15 @@ export function quoteOffer(
       (total, entry) =>
         total + applyOfferPricing(entry.rule, entry.regularCents),
       0
-    )
+    ) +
+    outsideOfferCents
 
   return {
     regularCents,
     goodsCents,
     savingCents: Math.max(0, regularCents - goodsCents),
     quantity,
+    outsideOfferCents,
     error: null,
   }
 }
@@ -431,9 +500,12 @@ export function priceVariesByVariant(offer: PublicOffer): boolean {
   if (offer.pricing.mode === 'FIXED') return false
 
   // A size priced on its own terms moves the total by itself, even where every
-  // variant lists for the same money.
+  // variant lists for the same money. An excluded size is the sharpest case of
+  // that: it is the one option the headline price does not apply to.
   const ruled = [...offer.items, ...offer.pool].some((line) =>
-    line.variants.some((variant) => variant.pricing !== null)
+    line.variants.some(
+      (variant) => variant.pricing !== null || variant.excluded
+    )
   )
   if (ruled) return true
 
@@ -465,6 +537,12 @@ export function priceVariesByVariant(offer: PublicOffer): boolean {
  * pool at the minimum quantity, with the offer's discount applied to *that*
  * basket: discounting one item by a whole basket's discount would advertise a
  * bundle for less than any of its own contents.
+ *
+ * Excluded sizes are not candidates. This number is what the offer's card
+ * leads with, and a size the merchant kept out of the offer cannot be the
+ * price of it — quoting the one option the discount never reaches would
+ * advertise a promotion that does not exist. They come back only when there is
+ * nothing else left to price, where the alternative is a card saying nothing.
  */
 export function headlinePrice(offer: PublicOffer): number {
   if (offer.kind === 'COLLECTION') {
@@ -475,9 +553,7 @@ export function headlinePrice(offer: PublicOffer): number {
 
     // A percentage rung has no total of its own, so the cheapest way to fill it
     // is the cheapest thing in the pool taken that many times.
-    const prices = offer.pool.flatMap((line) =>
-      line.variants.filter((v) => v.available).map((v) => v.priceCents)
-    )
+    const prices = onOffer(offer.pool).map((v) => v.priceCents)
     if (prices.length === 0) return 0
     const regular = Math.min(...prices) * first.quantity
     return Math.max(
@@ -487,19 +563,18 @@ export function headlinePrice(offer: PublicOffer): number {
   }
 
   if (offer.kind === 'ALACARTE') {
-    const cheapest = offer.pool
-      .flatMap((line) => line.variants.filter((v) => v.available))
-      .reduce<OfferVariantChoice | null>(
-        (best, variant) =>
-          !best || variant.priceCents < best.priceCents ? variant : best,
-        null
-      )
+    const cheapest = onOffer(offer.pool).reduce<OfferVariantChoice | null>(
+      (best, variant) =>
+        !best || variant.priceCents < best.priceCents ? variant : best,
+      null
+    )
     if (!cheapest) return 0
     const minQuantity = Math.max(1, offer.minQuantity || 1)
-    return applyOfferPricing(
-      cheapest.pricing ?? offer.pricing,
-      cheapest.priceCents * minQuantity
-    )
+    const regular = cheapest.priceCents * minQuantity
+    // Only reachable when the whole pool is excluded, and then the honest
+    // headline is what it costs: its list price, with no discount claimed.
+    if (cheapest.excluded) return regular
+    return applyOfferPricing(cheapest.pricing ?? offer.pricing, regular)
   }
 
   // A flat bundle price covers the set whatever is in it, so per-size terms
@@ -510,21 +585,43 @@ export function headlinePrice(offer: PublicOffer): number {
 
   let plain = 0
   let ruled = 0
+  let outside = 0
   for (const line of offer.items) {
     const variant = preferredVariant(line)
     const lineRegular = (variant?.priceCents ?? 0) * Math.max(1, line.quantity)
-    if (variant?.pricing)
+    if (variant?.excluded) outside += lineRegular
+    else if (variant?.pricing)
       ruled += applyOfferPricing(variant.pricing, lineRegular)
     else plain += lineRegular
   }
 
-  return applyOfferPricing(offer.pricing, plain) + ruled
+  return applyOfferPricing(offer.pricing, plain) + ruled + outside
 }
 
-/** The variant a line leads with: the pin, else the first sellable one. */
+/**
+ * The sellable variants of a pool that the offer actually covers.
+ *
+ * Falls back to the excluded ones rather than to nothing: a pool whose every
+ * size is out of the offer still sells, and a card with no price at all is a
+ * worse answer than one leading with a price the offer does not discount.
+ */
+function onOffer(pool: PublicOffer['pool']): OfferVariantChoice[] {
+  const sellable = pool.flatMap((line) =>
+    line.variants.filter((variant) => variant.available)
+  )
+  const covered = sellable.filter((variant) => !variant.excluded)
+  return covered.length > 0 ? covered : sellable
+}
+
+/**
+ * The variant a line leads with: the pin, else the first sellable one the offer
+ * covers — an excluded size is what this line costs *without* the offer, so it
+ * only leads when there is nothing else to lead with.
+ */
 function preferredVariant(line: PublicOffer['items'][number]) {
   return (
     line.variants.find((variant) => variant.id === line.pinnedVariantId) ??
+    line.variants.find((variant) => variant.available && !variant.excluded) ??
     line.variants.find((variant) => variant.available) ??
     line.variants[0] ??
     null

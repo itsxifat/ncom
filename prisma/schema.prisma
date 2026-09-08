@@ -544,9 +544,18 @@ model Offer {
 ///
 /// Two independent things can be said about a size:
 ///
-///   - `excluded` — this size is not part of the offer at all. It disappears
-///     from the buyer's options rather than appearing at a price the offer
-///     does not honour.
+///   - `excluded` — this size is not part of the offer. It stays on sale and
+///     stays on the page: it is charged at its own list price, no rule of the
+///     offer touches it, and it fills no rung of a ladder and no minimum.
+///     "Any 3 shirts for 1000, not the XL" sells two mediums and an XL as two
+///     shirts towards the rung plus one XL at its own price.
+///
+///     It used to disappear from the buyer's options instead, which took a
+///     size off sale to keep it out of a discount — the buyer who came for the
+///     XL found the product listed in every size but theirs. The one offer
+///     that still hides it is a set sold for one flat total: that number
+///     covers the whole set and cannot be split, so there is no line price
+///     left to charge an excluded size at.
 ///   - a pricing override — this size is in the offer, at its own terms. Null
 ///     `pricingMode` means "whatever the offer says", which is the common case
 ///     and the default.

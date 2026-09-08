@@ -21,6 +21,7 @@
     "check:adopt-remote": "tsx --conditions=react-server scripts/check-adopt-remote.mts",
     "check:catalog-merge": "tsx --conditions=react-server scripts/check-catalog-merge.mts",
     "check:cold-start": "tsx --conditions=react-server scripts/check-cold-start.mts",
+    "check:offer-exclusions": "tsx --conditions=react-server scripts/check-offer-exclusions.mts",
     "backfill:order-images": "tsx --conditions=react-server scripts/backfill-order-line-images.mts"
   },
   "lint-staged": {

@@ -21,6 +21,21 @@ export interface OfferVariantChoice {
   /** False when tracked stock has run out and the policy is to deny. */
   available: boolean
   /**
+   * True when the merchant left this size out of the offer.
+   *
+   * It is still on sale, and still on the page. What it is out of is the
+   * *promotion*: it is charged at its own list price, no rule of the offer
+   * touches it, and it neither fills a ladder's rung nor counts towards a
+   * minimum. Hiding it — which is what excluding used to do — took a size off
+   * sale that the merchant only meant to keep out of the discount, and the
+   * buyer who came for that size found nothing to buy and no explanation.
+   *
+   * One offer cannot say this: a set sold for one flat total has no per-line
+   * price to fall back to, so there an exclusion still means the bundle is not
+   * sold in that size, and offerService leaves it out of the options.
+   */
+  excluded: boolean
+  /**
    * This size's own terms inside the offer, when the merchant gave it any.
    *
    * Null — the ordinary case — means the offer's rule applies. A rule here is

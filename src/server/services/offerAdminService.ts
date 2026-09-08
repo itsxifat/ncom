@@ -653,8 +653,8 @@ function normalizeRuleInput(rules: OfferVariantRuleInput[] | undefined) {
   return [...byVariant.values()].map((rule) => ({
     variantId: rule.variantId,
     excluded: rule.excluded,
-    // An excluded size is not sold at all, so a price on it would be a rule
-    // nothing can ever read.
+    // An excluded size is sold at its own list price by definition, so a rate
+    // on it would be a second and contradicting answer to the same question.
     pricingMode: rule.excluded ? null : rule.pricingMode,
     priceCents: Math.max(0, Math.round(rule.priceCents)),
     discountBps: Math.max(0, Math.round(rule.discountBps)),
