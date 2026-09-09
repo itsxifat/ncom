@@ -57,16 +57,18 @@ function ImageRenderer({
 
   // "auto" shape → let the image set its own height (no fill); otherwise the
   // aspect box + object-fit crops or letterboxes it.
+  //
+  // Fit is deliberately absent from the "auto" branch. With no fixed box the
+  // image's height already follows its own proportions, so there is nothing to
+  // crop into or letterbox against and `object-fit` paints identically either
+  // way — which is why the Fit control is hidden for that shape rather than
+  // offered and ignored.
   const inner = aspect ? (
     <div className={cn('relative w-full overflow-hidden', aspect, rounded)}>
       <FillImg part="image" src={content.image} className={fit} />
     </div>
   ) : (
-    <BlockImg
-      part="image"
-      src={content.image}
-      className={cn(fit === 'object-contain' && 'object-contain', rounded)}
-    />
+    <BlockImg part="image" src={content.image} className={rounded} />
   )
 
   const caption = content.caption ? (
@@ -168,6 +170,13 @@ export const imageSection: SectionDefinition<ImageContent> = {
       name: 'fit',
       label: 'Fit',
       options: ['cover', 'contain'],
+      description: 'Whether the picture fills the shape or sits inside it.',
+      // Only a fixed shape has a box to fit into. Shown for anything but
+      // "auto", where the image sizes itself and the control could do nothing.
+      showWhen: {
+        field: 'aspect',
+        equals: ['square', 'landscape', 'portrait', 'wide'],
+      },
     },
     { type: 'boolean', name: 'rounded', label: 'Rounded corners' },
   ],

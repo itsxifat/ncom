@@ -2,6 +2,7 @@ import type { CSSProperties } from 'react'
 
 import { cn } from '@/lib/utils'
 import { fontStack } from '@/lib/fonts'
+import { isLightColor } from '@/lib/color'
 import type { PageTheme } from './types'
 
 const RADIUS_VALUES: Record<string, string> = {
@@ -72,6 +73,22 @@ export function PageThemeProvider({
         backgroundColor: 'var(--page-background)',
         color: 'var(--page-text)',
         fontFamily: 'var(--page-font-body)',
+        /*
+         * The storefront's own colour scheme, read from its background.
+         *
+         * `color-scheme` decides how the browser paints the parts of a control
+         * it owns — a text field's inner surface, its caret, autofill,
+         * scrollbars. Left alone it inherits from NCOM's <html>, which carries
+         * the *merchant's workspace* preference: a merchant working in dark
+         * mode saw their order form's fields painted dark inside the builder
+         * canvas, while every visitor — who has no such preference — got the
+         * light ones. Same markup, two different pages, and nothing in the
+         * editor to explain it.
+         *
+         * Derived rather than hard-coded to `light`, so a merchant who builds a
+         * genuinely dark storefront gets dark form chrome on a real phone too.
+         */
+        colorScheme: isLightColor(theme.backgroundColor) ? 'light' : 'dark',
       }}
       // `flex-1` so a merchant's background always reaches the bottom of the
       // viewport. NCOM's own <html> carries `dark`, which makes `body` ink — and

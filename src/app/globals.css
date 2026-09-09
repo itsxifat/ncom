@@ -315,3 +315,23 @@
 @utility overscroll-none-y {
   overscroll-behavior-y: contain;
 }
+
+/*
+ * A full-height hero, measured against the viewport a phone actually shows.
+ *
+ * `vh` is the *large* viewport — the height the page gets once the browser's
+ * URL bar has retracted — so `85vh` on a phone is around 96% of what a visitor
+ * can see when the page loads, and the bottom of the hero (usually the button)
+ * starts below the fold. The builder's canvas is a fixed-height frame with no
+ * URL bar, where `vh` and `svh` are the same number, so it reported an honest
+ * 85% and the merchant had no way to see the difference.
+ *
+ * `svh` is that same "before anything retracts" height, which is what the
+ * design meant all along. No `vh` fallback: every browser in this app's target
+ * range has understood `svh` since 2022, and Lightning CSS strips a duplicate
+ * declaration it can prove is dead — so writing one only made the source lie
+ * about what ships.
+ */
+@utility lp-hero-full {
+  min-height: 85svh;
+}

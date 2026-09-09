@@ -125,6 +125,43 @@ interface CachedStore {
   id: string
   organizationId: string
   isSearchIndexable: boolean
+  /**
+   * The store's *current* theme, not the one frozen into a page snapshot.
+   *
+   * A theme is store-level: it is edited on the theme screen, not on a page,
+   * and there is no publish step there to press. Reading it from the snapshot
+   * meant a merchant changed their brand colour, saw it everywhere in the
+   * builder — which renders the live row — and their published pages kept the
+   * old one until each was republished one at a time. That is the "looks right
+   * in the editor, wrong on the real link" gap, and it applies to every page a
+   * store has at once.
+   *
+   * Resolved live for the same reason offers are (see offerAdminService): a
+   * store-level setting takes effect on the next request. The snapshot keeps
+   * its copy as a fallback, so a version published before this still renders.
+   */
+  theme: PageTheme | null
+}
+
+/** The Redis key holding a store's resolved row, so a write can drop it. */
+function storeCacheKey(subdomain: string): string {
+  return `store-by-subdomain:${subdomain}`
+}
+
+/**
+ * Drops a store's cached row after something on it changes.
+ *
+ * Called from the theme write. Without it the new brand would take up to
+ * `PROJECT_CACHE_TTL_SECONDS` to appear, which is exactly the kind of "it
+ * worked when I checked five minutes later" behaviour that makes a merchant
+ * think the save failed and press it again.
+ */
+export async function invalidateStoreCache(subdomain: string): Promise<void> {
+  try {
+    await redis.del(storeCacheKey(subdomain))
+  } catch {
+    // Cache is best-effort; the TTL still expires it.
+  }
 }
 
 /**
@@ -137,7 +174,7 @@ async function resolveStoreByHandle(
   const subdomain = await resolveSiteHandle(handle)
   if (!subdomain) return null
 
-  const cacheKey = `store-by-subdomain:${subdomain}`
+  const cacheKey = storeCacheKey(subdomain)
 
   try {
     const cached = await redis.get(cacheKey)
@@ -146,10 +183,18 @@ async function resolveStoreByHandle(
     // cache is best-effort
   }
 
-  const store = await prisma.store.findUnique({
+  const row = await prisma.store.findUnique({
     where: { subdomain },
-    select: { id: true, organizationId: true, isSearchIndexable: true },
+    select: {
+      id: true,
+      organizationId: true,
+      isSearchIndexable: true,
+      theme: true,
+    },
   })
+  const store: CachedStore | null = row
+    ? { ...row, theme: (row.theme as PageTheme | null) ?? null }
+    : null
 
   if (store) {
     try {
@@ -225,13 +270,18 @@ export async function getPublishedPageForRender(
   const snapshot = await getSnapshot(page.publishedVersionId)
   if (!snapshot) return null
 
+  // The store's theme now, falling back to the one this version was published
+  // with — a page snapshotted before the theme was resolved live still has
+  // somewhere to read its colours from.
+  const theme = store.theme ?? snapshot.theme
+
   // Not cached: analytics IDs should take effect on the next request, not
   // wait for a republish, and this is one cheap indexed lookup per render.
   const integration = await prisma.storeIntegrationConfig.findUnique({
     where: { storeId: store.id },
   })
 
-  return { store, page, snapshot, integration }
+  return { store, page, snapshot, theme, integration }
 }
 
 /** For the per-tenant sitemap.xml/robots.txt routes. */

@@ -15,11 +15,20 @@ import { El } from './elements'
  * re-skinnable from the theme alone.
  */
 
+/**
+ * Hero heights.
+ *
+ * The fixed ones are in pixels because a hero's job is to be a known size on
+ * the way to the fold, and a pixel is the same on every device. `full` is the
+ * exception, and it is a utility rather than `min-h-[85vh]` because `vh` on a
+ * phone measures the viewport *after* the URL bar retracts — see the note on
+ * `lp-hero-full` in globals.css.
+ */
 export const HERO_HEIGHTS: Record<string, string> = {
   small: 'min-h-[280px] sm:min-h-[340px]',
   medium: 'min-h-[380px] sm:min-h-[480px]',
   large: 'min-h-[480px] sm:min-h-[620px]',
-  full: 'min-h-[85vh]',
+  full: 'lp-hero-full',
 }
 
 export const SPACING: Record<string, string> = {

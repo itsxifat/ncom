@@ -39,7 +39,7 @@ export async function generateMetadata({
   const result = await getPublishedPageForRender(subdomain, path ?? [])
   if (!result) return {}
 
-  const { snapshot } = result
+  const { snapshot, theme } = result
   const url = `http://${subdomain}.${env.ROOT_DOMAIN}/${(path ?? []).join('/')}`
 
   return {
@@ -47,11 +47,10 @@ export async function generateMetadata({
     description: snapshot.seoDescription ?? undefined,
     alternates: { canonical: url },
     robots: snapshot.robotsIndex ? undefined : { index: false, follow: false },
-    // The favicon travels in the page snapshot's theme, so it is already
-    // available here without a second query.
-    icons: snapshot.theme.faviconUrl
-      ? { icon: snapshot.theme.faviconUrl }
-      : undefined,
+    // From the store's live theme, not the snapshot's copy: a merchant who
+    // changes their favicon expects the tab icon to follow, and it is the one
+    // piece of branding they cannot see change by looking at the page.
+    icons: theme.faviconUrl ? { icon: theme.faviconUrl } : undefined,
     openGraph: {
       title: snapshot.seoTitle || snapshot.title,
       description: snapshot.seoDescription ?? undefined,
@@ -76,7 +75,7 @@ export default async function PublicSitePage({
   const result = await getPublishedPageForRender(subdomain, path ?? [])
   if (!result) notFound()
 
-  const { store, page, snapshot, integration } = result
+  const { store, page, snapshot, theme, integration } = result
 
   // A tenant past their monthly allowance gets a holding page instead of their
   // site. Two switches have to agree before that happens — the platform flag and
@@ -192,7 +191,7 @@ export default async function PublicSitePage({
         />
       )}
       <PageRenderer
-        theme={snapshot.theme}
+        theme={theme}
         sections={snapshot.sections}
         storeId={store.id}
         commerce={commerce}

@@ -8,6 +8,7 @@ import {
 import { slugify, withRandomSuffix } from '@/lib/slug'
 import { RESERVED_SUBDOMAINS } from '@/lib/reserved-subdomains'
 import { DEFAULT_THEME } from '@/lib/default-theme'
+import { invalidateStoreCache } from './publishService'
 import { encryptSecret } from '@/lib/crypto'
 import { UNCHANGED_SECRET } from '@/lib/validation/integration'
 import type {
@@ -80,14 +81,21 @@ export async function updateStoreTheme(
 
   const store = await prisma.store.findFirst({
     where: { id: storeId, organizationId },
-    select: { id: true },
+    select: { id: true, subdomain: true },
   })
   if (!store) throw new Error('Store not found')
 
-  return prisma.themeSettings.update({
+  const theme = await prisma.themeSettings.update({
     where: { storeId: store.id },
     data: input,
   })
+
+  // Published pages read the store's theme live rather than the copy frozen
+  // into their snapshot, so a brand change reaches every live page without a
+  // republish — but only once the cached store row is dropped.
+  await invalidateStoreCache(store.subdomain)
+
+  return theme
 }
 
 /**
