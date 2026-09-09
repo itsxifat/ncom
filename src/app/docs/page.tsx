@@ -40,6 +40,7 @@ const NAV_SECTIONS = [
   { id: 'authentication', label: 'Authentication' },
   { id: 'conventions', label: 'Conventions' },
   { id: 'product-source', label: 'Product source' },
+  { id: 'order-destination', label: 'Order handling' },
   { id: 'orders', label: 'Orders' },
   { id: 'courier', label: 'Courier automation' },
   { id: 'webhooks', label: 'Webhooks' },
@@ -974,6 +975,214 @@ curl -s "$BASE/ping" \\
   ]
 }`}
               />
+            </Section>
+
+            <Section id="order-destination" title="Order handling">
+              <P>
+                An order placed on a landing page can be worked in NCOM — that
+                is the default, and it is what every other part of this
+                dashboard assumes — or handed straight to the website you
+                already run. If you have a shop with its own order book, its own
+                packing process and its own courier account, the second option
+                means NCOM is the front of the shop and nothing else.
+              </P>
+
+              <P>
+                You choose in <strong>Settings → Order handling</strong>. It is
+                one choice for the whole workspace, and it takes effect on the
+                next order placed; orders already taken are not moved.
+              </P>
+
+              <Callout title="What changes when orders go to your website">
+                NCOM stops screening for courier fraud, stops dispatching, and
+                stops calling <Code>/reserve</Code> on your connector — the
+                order it hands you is what takes the stock, exactly as an order
+                on your own storefront does. Every order still appears on the
+                Orders screen here, as a record of what was sent.
+              </Callout>
+
+              <H3>What you have to build</H3>
+
+              <P>
+                One route. It verifies a signature, writes an order, and answers{' '}
+                <Code>200</Code>. The signature is byte-for-byte the scheme used
+                for catalogue reads and webhooks, so if you have already written
+                either verifier you can paste it here.
+              </P>
+
+              <EndpointTable
+                rows={[
+                  [
+                    'POST',
+                    'your endpoint',
+                    'Required. One order, or one test. Answer 200 on success.',
+                  ],
+                ]}
+              />
+
+              <H3>The request</H3>
+
+              <P>
+                Headers are the same four the connector receives, plus one more.{' '}
+                <Code>X-NCOM-Idempotency-Key</Code> is the most important field
+                in this contract: it is stable across every retry, and a
+                receiver that has already stored an order with that key must
+                answer <Code>200</Code> with the order it already has rather
+                than creating a second one.
+              </P>
+
+              <CodeBlock
+                title="Headers"
+                language="bash"
+                code={`X-NCOM-Key:             ncomord_9f2b1c4d7e08
+X-NCOM-Contract:        1
+X-NCOM-Timestamp:       1772630400
+X-NCOM-Signature:       t=1772630400,v1=6f1d…c3
+X-NCOM-Idempotency-Key: clx8f2k9v0000
+User-Agent:             NCOM-Orders/1
+
+v1 = hex( hmac_sha256( secret, "<timestamp>" + "." + "<raw request body>" ) )`}
+              />
+
+              <P>
+                Every amount is an integer in the currency&rsquo;s minor unit
+                and is named <Code>…Cents</Code>. There is deliberately no
+                second decimal form of the same figure — one representation
+                means there is never a pair of numbers that can disagree. Divide
+                by 100 if you work in whole taka.
+              </P>
+
+              <P>
+                Each line carries a <Code>source</Code>. When it is{' '}
+                <Code>website</Code>, the <Code>productId</Code> and{' '}
+                <Code>variantId</Code> are the ids <em>your own connector</em>{' '}
+                handed us, so they join straight back to your rows. When it is{' '}
+                <Code>ncom</Code>, the goods are a product stored in NCOM, the
+                ids mean nothing on your side, and the line should be recorded
+                descriptively — its title, price and photo are all in the
+                payload. <Code>imageUrl</Code> is always an absolute{' '}
+                <Code>https</Code> URL or <Code>null</Code>, whichever of the
+                two catalogues it came from.
+              </P>
+
+              <CodeBlock
+                title="Body"
+                language="json"
+                code={`{
+  "version": 1,
+  "topic": "order.placed",
+  "idempotencyKey": "clx8f2k9v0000",
+  "sentAt": "2026-09-10T09:14:22.011Z",
+  "organizationId": "clx1a2b3c4000",
+  "order": {
+    "id": "clx8f2k9v0000",
+    "orderNumber": "1042",
+    "createdAt": "2026-09-10T09:14:21.880Z",
+    "currencyCode": "BDT",
+    "customer": { "name": "Rahim Uddin", "phone": "01700000000", "email": null },
+    "shippingAddress": {
+      "name": "Rahim Uddin",
+      "phone": "01700000000",
+      "email": null,
+      "address1": "House 12, Road 4, Dhanmondi",
+      "address2": null,
+      "city": "Dhaka",
+      "province": null,
+      "postalCode": null,
+      "countryCode": "BD"
+    },
+    "billingAddress": null,
+    "lines": [
+      {
+        "productId": "68b0f1c2a9e4d3b7c1a20011",
+        "variantId": "68b0f1c2a9e4d3b7c1a20014",
+        "source": "website",
+        "title": "Oxford Shirt",
+        "variantTitle": "M",
+        "sku": "OXF-M",
+        "vendor": "Elysium",
+        "imageUrl": "https://cdn.example.com/oxford.jpg",
+        "quantity": 2,
+        "unitPriceCents": 145000,
+        "discountCents": 40000,
+        "taxCents": 0,
+        "totalCents": 250000,
+        "requiresShipping": true,
+        "weightGrams": 500,
+        "isGift": false
+      }
+    ],
+    "subtotalCents": 290000,
+    "discountTotalCents": 40000,
+    "shippingTotalCents": 6000,
+    "taxTotalCents": 0,
+    "totalCents": 256000,
+    "discountCode": null,
+    "couponDiscountCents": 0,
+    "shippingMethodTitle": "Inside Dhaka",
+    "paymentMethod": "cash_on_delivery",
+    "status": "pending",
+    "note": null,
+    "campaign": {
+      "pageId": "clx5p1q2r3000",
+      "pageTitle": "Winter shirts",
+      "pageUrl": "https://shop.ncom.bd/winter-shirts",
+      "offerKey": "buy-2",
+      "offerLabel": "Buy 2, save ৳400",
+      "offerPriceCents": 250000,
+      "offerRegularCents": 290000
+    },
+    "store": {
+      "id": "clx2s3t4u5000",
+      "name": "Winter campaign",
+      "subdomain": "shop",
+      "url": "https://shop.ncom.bd"
+    }
+  }
+}`}
+              />
+
+              <H3>How to answer</H3>
+
+              <Ul>
+                <li>
+                  <strong>2xx</strong> — accepted. Send{' '}
+                  <Code>{'{ "orderId": "…", "orderNumber": "…" }'}</Code> and we
+                  show your reference on the order here. An empty body is a
+                  perfectly valid acceptance.
+                </li>
+                <li>
+                  <strong>4xx</strong> — refused for good. We stop, and the
+                  order is flagged in the dashboard for a human. Do not use this
+                  for &ldquo;I already have it&rdquo; — that is a{' '}
+                  <Code>200</Code>.
+                </li>
+                <li>
+                  <strong>5xx, 408, 429, or no answer at all</strong> — we retry
+                  with the same idempotency key: after 15s, 1m, 5m, 15m, 1h, 3h
+                  and 6h, eight attempts in all.
+                </li>
+              </Ul>
+
+              <Callout title="Test before you switch">
+                Pressing Test sends a real, fully-formed request with{' '}
+                <Code>topic</Code> set to <Code>order.test</Code>. Answer it
+                exactly as you would a real one — same signature check, same 200
+                — but do not file it. Its order number starts <Code>TEST-</Code>{' '}
+                if you want a second guard. NCOM refuses to switch orders over
+                to an endpoint that has never answered.
+              </Callout>
+
+              <H3>Where the line falls</H3>
+
+              <P>
+                NCOM keeps the order it sent you, verbatim, as the record of
+                what was handed over and when. What happens to the order after
+                that — its status, its parcel, its returns — lives entirely in
+                your system, and NCOM neither asks nor is told. Cancel an order
+                on your side and NCOM will still show the copy it sent; that
+                copy is a receipt, not a second order book.
+              </P>
             </Section>
 
             <Section id="orders" title="Orders">

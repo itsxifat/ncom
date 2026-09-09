@@ -4,9 +4,11 @@ import { getActiveOrganization } from '@/server/services/organizationService'
 import { listOrders } from '@/server/services/orderService'
 import { getOrderStatusColors } from '@/server/services/organizationSettingsService'
 import { listStores } from '@/server/services/storeService'
+import { getForwardSummary, getOrderDestinationStatus } from '@/server/orders'
 import { EmptyState } from '@/components/app/empty-state'
 import { OrderList } from '@/components/store/order-list'
 import { OrderFilters } from '@/components/store/order-filters'
+import { OrderHandoffBanner } from '@/components/store/order-handoff-banner'
 import { orderStatus } from '@/lib/order-status'
 import { Button } from '@/components/ui/button'
 import type {
@@ -70,10 +72,15 @@ export default async function OrdersPage({
 
   const { organization, role } = await getActiveOrganization()
 
-  const [stores, statusColors] = await Promise.all([
+  const [stores, statusColors, destination, forwards] = await Promise.all([
     listStores(organization.id),
     getOrderStatusColors(organization.id),
+    getOrderDestinationStatus(organization.id),
+    getForwardSummary(organization.id),
   ])
+
+  const forwarding = destination.mode === 'OWN_WEBSITE'
+  const endpointHost = hostOf(destination.endpointUrl)
 
   // A store id from the query string is only honoured if it is one of this
   // workspace's own — `listOrders` scopes by organisation regardless, but a
@@ -117,16 +124,35 @@ export default async function OrdersPage({
   // sold anything yet, which is a different screen from "no matches".
   if (total === 0 && !filtered) {
     return (
-      <EmptyState
-        icon={ShoppingBag}
-        title="No orders yet"
-        description="Orders placed on your storefront will appear here."
-      />
+      <div className="flex flex-col gap-5">
+        <OrderHandoffBanner
+          forwarding={forwarding}
+          endpointHost={endpointHost}
+          pending={forwards.pending}
+          stuck={forwards.stuck}
+        />
+        <EmptyState
+          icon={ShoppingBag}
+          title="No orders yet"
+          description={
+            forwarding
+              ? 'Orders placed on your storefront are handed to your website, and a copy appears here.'
+              : 'Orders placed on your storefront will appear here.'
+          }
+        />
+      </div>
     )
   }
 
   return (
     <div className="flex flex-col gap-5">
+      <OrderHandoffBanner
+        forwarding={forwarding}
+        endpointHost={endpointHost}
+        pending={forwards.pending}
+        stuck={forwards.stuck}
+      />
+
       <OrderFilters
         stores={stores.map((store) => ({ id: store.id, name: store.name }))}
         total={total}
@@ -202,4 +228,14 @@ export default async function OrdersPage({
       )}
     </div>
   )
+}
+
+/** The bare hostname of the order endpoint, for a sentence a merchant reads. */
+function hostOf(url: string | null): string | null {
+  if (!url) return null
+  try {
+    return new URL(url).host
+  } catch {
+    return null
+  }
 }

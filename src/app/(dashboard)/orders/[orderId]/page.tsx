@@ -8,7 +8,9 @@ import {
   trackingUrlFor,
 } from '@/server/services/courierService'
 import { listCourierConfigs } from '@/server/services/courierConfigService'
+import { getOrderForward } from '@/server/orders'
 import { CourierPanel } from '@/components/store/courier-panel'
+import { OrderHandoffPanel } from '@/components/store/order-handoff-panel'
 import { WorkflowStateBadge } from '@/components/store/fraud-badges'
 import { formatMoney } from '@/lib/money'
 import { orderStatus } from '@/lib/order-status'
@@ -73,7 +75,7 @@ export default async function OrderDetailPage({
   params,
 }: PageProps<'/orders/[orderId]'>) {
   const { orderId } = await params
-  const { organization } = await getActiveOrganization()
+  const { organization, role } = await getActiveOrganization()
 
   let order
   try {
@@ -82,9 +84,10 @@ export default async function OrderDetailPage({
     notFound()
   }
 
-  const [shipment, courierConfigs] = await Promise.all([
+  const [shipment, courierConfigs, handoff] = await Promise.all([
     getShipmentForOrder(organization.id, order.id),
     listCourierConfigs(organization.id),
+    getOrderForward(organization.id, order.id),
   ])
 
   const currency = order.currencyCode
@@ -212,55 +215,78 @@ export default async function OrderDetailPage({
               review this is the only thing on the page that needs a decision,
               and burying it under a price breakdown is how held orders sit for
               a day. */}
-          <CourierPanel
-            orderId={order.id}
-            workflowState={status}
-            cancelled={cancelled}
-            fraud={{
-              verdict: order.fraudVerdict,
-              reason: order.fraudReason,
-              checkedAt: order.fraudCheckedAt?.toISOString() ?? null,
-              delivered: order.fraudDelivered,
-              cancelled: order.fraudCancelled,
-              frauds: order.fraudReports,
-              successRateBps: order.fraudSuccessRateBps,
-            }}
-            shipment={
-              shipment
-                ? {
-                    provider: shipment.provider,
-                    status: shipment.status,
-                    statusMessage: shipment.statusMessage,
-                    consignmentId: shipment.consignmentId,
-                    trackingCode: shipment.trackingCode,
-                    trackingUrl: trackingUrlFor(
-                      shipment.provider,
-                      shipment.trackingCode ?? shipment.consignmentId
-                    ),
-                    lastError: shipment.lastError,
-                    dispatchedAt: shipment.dispatchedAt?.toISOString() ?? null,
-                    deliveredAt: shipment.deliveredAt?.toISOString() ?? null,
-                    events: shipment.events.map((event) => ({
-                      id: event.id,
-                      status: event.status,
-                      message: event.message,
-                      occurredAt: event.occurredAt.toISOString(),
-                      source: event.source,
-                    })),
-                  }
-                : null
-            }
-            providers={courierConfigs
-              .filter((config) => config.isEnabled)
-              .map((config) => ({
-                provider: config.provider,
-                label: config.displayName,
-                isDefault: config.isDefault,
-              }))}
-            outstandingCents={outstandingCents}
-            currencyCode={currency}
-            trackingToken={order.trackingToken}
-          />
+          {handoff ? (
+            /* An order another system is packing has no consignment to create
+               here, so the panel that offers to create one is not rendered —
+               not disabled, not hidden behind a warning. Offering it would let
+               a merchant book a courier for a parcel their own website has
+               already booked. */
+            <OrderHandoffPanel
+              orderId={order.id}
+              canResend={role !== 'VIEWER'}
+              handoff={{
+                status: handoff.status,
+                endpointUrl: handoff.endpointUrl,
+                attempts: handoff.attempts,
+                nextAttemptAt: handoff.nextAttemptAt?.toISOString() ?? null,
+                deliveredAt: handoff.deliveredAt?.toISOString() ?? null,
+                remoteOrderNumber: handoff.remoteOrderNumber,
+                statusCode: handoff.statusCode,
+                error: handoff.error,
+              }}
+            />
+          ) : (
+            <CourierPanel
+              orderId={order.id}
+              workflowState={status}
+              cancelled={cancelled}
+              fraud={{
+                verdict: order.fraudVerdict,
+                reason: order.fraudReason,
+                checkedAt: order.fraudCheckedAt?.toISOString() ?? null,
+                delivered: order.fraudDelivered,
+                cancelled: order.fraudCancelled,
+                frauds: order.fraudReports,
+                successRateBps: order.fraudSuccessRateBps,
+              }}
+              shipment={
+                shipment
+                  ? {
+                      provider: shipment.provider,
+                      status: shipment.status,
+                      statusMessage: shipment.statusMessage,
+                      consignmentId: shipment.consignmentId,
+                      trackingCode: shipment.trackingCode,
+                      trackingUrl: trackingUrlFor(
+                        shipment.provider,
+                        shipment.trackingCode ?? shipment.consignmentId
+                      ),
+                      lastError: shipment.lastError,
+                      dispatchedAt:
+                        shipment.dispatchedAt?.toISOString() ?? null,
+                      deliveredAt: shipment.deliveredAt?.toISOString() ?? null,
+                      events: shipment.events.map((event) => ({
+                        id: event.id,
+                        status: event.status,
+                        message: event.message,
+                        occurredAt: event.occurredAt.toISOString(),
+                        source: event.source,
+                      })),
+                    }
+                  : null
+              }
+              providers={courierConfigs
+                .filter((config) => config.isEnabled)
+                .map((config) => ({
+                  provider: config.provider,
+                  label: config.displayName,
+                  isDefault: config.isDefault,
+                }))}
+              outstandingCents={outstandingCents}
+              currencyCode={currency}
+              trackingToken={order.trackingToken}
+            />
+          )}
 
           <Card>
             <CardContent className="flex flex-col gap-4">

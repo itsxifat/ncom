@@ -25,6 +25,7 @@ import {
   Printer,
   Layers,
   PlugZap,
+  Send,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -83,6 +84,14 @@ const NAV_GROUPS: Array<{ label: string | null; items: NavItem[] }> = [
         href: '/settings/product-source',
         label: 'Product source',
         icon: PlugZap,
+      },
+      // Directly under Product source: they are two halves of the same
+      // integration — that one reads a merchant's catalogue in, this one writes
+      // their orders back out.
+      {
+        href: '/settings/order-destination',
+        label: 'Order handling',
+        icon: Send,
       },
       { href: '/settings/payments', label: 'Payments', icon: Settings },
       { href: '/settings/courier', label: 'Courier & fraud', icon: Truck },

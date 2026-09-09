@@ -11,6 +11,7 @@
  */
 
 import { revalidatePath } from 'next/cache'
+import { resendForward } from '@/server/orders'
 import { recordOrderReturn } from '@/server/services/returnService'
 import { redirect } from 'next/navigation'
 import { z } from 'zod'
@@ -1345,4 +1346,32 @@ export async function savePaymentProviderAction(
 
   revalidatePath('/settings/payments')
   return { success: 'Payment method saved.' }
+}
+
+/**
+ * Sends an order to the merchant's website again, by hand.
+ *
+ * For the two states the queue cannot resolve on its own: a website that
+ * refused the order, and one that never answered before the attempts ran out.
+ * Both leave an order that exists here and does not exist there, which is the
+ * only genuinely dangerous state this feature has — so the way out of it is a
+ * button rather than a support ticket.
+ *
+ * Safe to press twice. Every attempt carries the same idempotency key, so a
+ * receiver that did quietly file the order the first time answers with the one
+ * it already has instead of creating a second.
+ */
+export async function resendOrderAction(
+  orderId: string,
+  _prev: StoreActionState
+): Promise<StoreActionState> {
+  try {
+    await resendForward(await org(), orderId)
+  } catch (cause) {
+    return fail(cause)
+  }
+
+  revalidatePath(`/orders/${orderId}`)
+  revalidatePath('/orders')
+  return { success: 'Queued. It will be sent again in a moment.' }
 }

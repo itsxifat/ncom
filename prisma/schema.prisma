@@ -151,6 +151,11 @@ model Organization {
   stockLocks        StockLock[]
   remoteStockHolds  RemoteStockHold[]
 
+  // Where a placed order is actually processed, and the log of every handoff
+  // made under that decision. See OrderDestination.
+  orderDestination OrderDestination?
+  orderForwards    OrderForward[]
+
   // Courier automation: who ships the parcels, on what terms, and what the
   // fraud history of the phone numbers ordering them looks like.
   courierConfigs   CourierConfig[]
@@ -1813,6 +1818,165 @@ enum RemoteHoldState {
   CONFIRMED
 }
 
+// ── Where an order is processed ──────────────────────────────────────────
+//
+// A workspace that connected its website (see CatalogConnection) already runs a
+// shop with an order book, a picking process, a courier account and people who
+// know how to use them. For those merchants NCOM is the front of the shop, not
+// the back: the landing page takes the order and their own system does
+// everything after it.
+//
+// So placing an order asks one question first — whose order book is this? — and
+// there are exactly two answers. NCOM's, which is everything the dashboard
+// does today: fraud screening, courier dispatch, fulfilment, returns. Or the
+// merchant's website, in which case NCOM's job ends the moment their system has
+// the order, and the record kept here is a receipt rather than a workspace.
+//
+// The choice is per organisation, like the catalogue connection it usually
+// accompanies. A business does not process the orders from one of its landing
+// pages in one place and the rest somewhere else, and offering that would mean
+// every screen in the dashboard had to ask which kind of order it was looking
+// at.
+
+/// Whose order book a placed order belongs to.
+enum OrderRouting {
+  /// NCOM's. The default, and everything about the dashboard assumes it.
+  NCOM
+  /// The merchant's own website. NCOM hands the order over and stops.
+  OWN_WEBSITE
+}
+
+/// The website a workspace's orders are handed to, and the credentials for it.
+///
+/// Deliberately a separate row from CatalogConnection rather than three more
+/// columns on it. They are the same integration for most merchants and are
+/// meant to be configured together, but they are not the same *trust*: the
+/// catalogue connection is a read key that NCOM uses, and this is a write key
+/// that creates orders on someone else's system. A merchant rotating one must
+/// not silently rotate the other, and a merchant who wants orders delivered to
+/// a different host than their catalogue is served from — an ERP beside a shop,
+/// which is common — cannot express that with one row.
+///
+/// The row exists as soon as a merchant opens the screen, even while `mode` is
+/// still NCOM, so the health fields have somewhere to live while they test the
+/// endpoint before switching over.
+model OrderDestination {
+  id             String @id @default(cuid())
+  organizationId String @unique
+
+  mode OrderRouting @default(NCOM)
+
+  /// Exact URL an order is POSTed to. Not a base URL with a path appended:
+  /// merchants host this on everything from /api/ncom/orders to a query string
+  /// on a WordPress admin-ajax endpoint, and guessing a suffix for them is how
+  /// an integration fails with a 404 nobody can explain.
+  endpointUrl String?
+
+  /// Sent as `X-NCOM-Key`, so a receiver can tell which secret to verify with
+  /// and a rotation does not need a flag day.
+  keyId String?
+
+  /// HMAC secret, encrypted at rest (lib/crypto) — this one authenticates
+  /// requests that create orders.
+  secret String?
+
+  /// How long one handoff attempt may take.
+  ///
+  /// Far more generous than the catalogue's 4s: nobody's page render is waiting
+  /// on this, the receiver is writing an order rather than answering a read,
+  /// and a receiver that is merely slow must not be retried into creating the
+  /// same order twice.
+  timeoutMs Int @default(15000)
+
+  /// Whether NCOM tries the handoff while the buyer is still on the page.
+  ///
+  /// On by default, because it is the only way the buyer's confirmation can
+  /// mean anything: their order exists on the merchant's system before they are
+  /// told it does. Off puts every order straight on the queue, for a receiver
+  /// that is reliably slower than a shopper will wait.
+  handoffInline Boolean @default(true)
+
+  lastCheckedAt DateTime?
+  lastOkAt      DateTime?
+  lastError     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+/// One order's handoff to the merchant's website: the queue, and the receipt.
+///
+/// Written before the first attempt, exactly like WebhookDelivery, and for the
+/// same reason — a handoff that was never recorded cannot be retried and cannot
+/// be explained. The difference is what the row means. A webhook delivery is a
+/// notification that may be missed; this is the order itself changing hands, so
+/// there is exactly one row per order (`orderId` is unique) and it keeps the
+/// payload that was actually sent.
+///
+/// `payload` is that payload verbatim, not a reference to the order it was
+/// built from. An order edited in NCOM afterwards must not rewrite the history
+/// of what the merchant's system was told, and "what did you actually send us"
+/// is the first question in every integration thread.
+model OrderForward {
+  id             String @id @default(cuid())
+  organizationId String
+  orderId        String @unique
+
+  status OrderForwardStatus @default(PENDING)
+
+  /// Where it went, snapshotted. A merchant who re-points the endpoint must
+  /// still be able to read which host took last week's orders.
+  endpointUrl String
+
+  /// The idempotency key the receiver deduplicates on. Stable across every
+  /// attempt — it is the order's own id — so a retry after a timeout that the
+  /// receiver actually processed cannot create a second order there.
+  idempotencyKey String
+
+  payload Json
+
+  attempts      Int       @default(0)
+  nextAttemptAt DateTime?
+
+  /// What their system called the order it created, when it tells us. Shown on
+  /// the order so a support conversation can name the same order on both sides.
+  remoteOrderId     String?
+  remoteOrderNumber String?
+
+  statusCode   Int?
+  error        String?
+  responseBody String? @db.Text
+
+  deliveredAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  order        Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  /// Drives the retry sweep: queued rows whose backoff has elapsed.
+  @@index([status, nextAttemptAt])
+  /// Drives the dashboard's "what has not arrived" panel.
+  @@index([organizationId, status])
+}
+
+/// How a handoff ended.
+enum OrderForwardStatus {
+  /// Queued, or tried and worth trying again.
+  PENDING
+  /// Their system has it. Terminal.
+  DELIVERED
+  /// Their system answered, and said no in a way repeating will not fix — a 4xx
+  /// that is not 408 or 429. Terminal, and needs a human, because the order
+  /// exists here and does not exist there.
+  REFUSED
+  /// Out of attempts. Terminal in the same unhappy way, but for a receiver that
+  /// never answered rather than one that refused.
+  FAILED
+}
+
 model Product {
   id             String @id @default(cuid())
   organizationId String
@@ -2487,6 +2651,9 @@ model Order {
   returns      OrderReturn[]
   events       OrderEvent[]
   shipments    CourierShipment[]
+  /// The handoff to the merchant's own website, when that is where this order
+  /// is processed. Absent on every order NCOM processes itself.
+  forward      OrderForward?
 
   @@unique([organizationId, orderNumber])
   @@index([organizationId, createdAt])

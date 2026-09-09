@@ -14,6 +14,7 @@ import {
   returnRemoteStock,
 } from './inventoryService'
 import { emitOrderWebhook } from './orderService'
+import { forwardOrder, loadOrderTarget } from '@/server/orders'
 import { verifyPayment } from './paymentService'
 import { scheduleCourierEvaluation } from './courierService'
 import type { PlaceOrderInput } from '@/lib/validation/cart'
@@ -259,6 +260,15 @@ export async function placeOrder(
     (line) => resolved.get(line.variantId)?.source === 'REMOTE'
   )
 
+  // Whose order book this order belongs to. Read before anything moves,
+  // because the answer changes what "placing an order" even does.
+  //
+  // When it is the merchant's own website, this function's job shrinks to
+  // recording the sale honestly and handing it over: no reservation call, no
+  // fraud screen, no courier. Their system does all of it, starting from the
+  // order it is about to be sent.
+  const handoff = await loadOrderTarget(organizationId)
+
   // Ask the merchant's system to hold their units, before anything is written.
   //
   // Outside the transaction on purpose: this is a call across the internet to
@@ -266,11 +276,15 @@ export async function placeOrder(
   // length of it would put every checkout in the platform behind one merchant's
   // slow host. The cost is that a reservation can outlive a failed order, which
   // is what the release below is for.
-  const reservation = await reserveOrRefuse(
-    organizationId,
-    cart.id,
-    remoteLines
-  )
+  //
+  // Skipped entirely when the order is being handed over. The forwarded order
+  // *is* the reservation — their system takes the stock when it files it, the
+  // same way it does for a sale on their own storefront — and calling /reserve
+  // as well would take every unit twice. Their own checkout is the atomic step
+  // in that arrangement, exactly as /reserve is in this one.
+  const reservation = handoff
+    ? false
+    : await reserveOrRefuse(organizationId, cart.id, remoteLines)
 
   // Set when the transaction found this cart already converted — a second
   // submit that raced past the check at the top of this function. The units
@@ -501,6 +515,28 @@ export async function placeOrder(
   // showing the buyer one perfectly ordinary order.
   if (replayed && reservation) {
     await handBack(organizationId, cart.id, remoteLines)
+  }
+
+  if (handoff) {
+    // Hand it over and stop. The order stays PENDING here — nothing has been
+    // screened, nothing has been dispatched, and the record in this database is
+    // a receipt of a sale that somebody else is now packing.
+    //
+    // Queued rather than awaited past the write, and never able to throw: the
+    // order exists and the buyer has been told so, and there is no failure on
+    // the other side of this call that is improved by pretending the sale did
+    // not happen. A handoff that does not land is retried, and shows on the
+    // order until it does.
+    await forwardOrder(organizationId, placed.orderId)
+
+    // Deliberately no `order.created` webhook. That event promises "sent after
+    // stock has moved", and here it has not — the handoff is what moves it, on
+    // their side, when their system files the order. A subscriber acting on
+    // both would take every unit twice, and the reference connectors do exactly
+    // that when a shop has reservations switched off. The handoff *is* the
+    // notification that a sale happened; anything downstream of the merchant's
+    // own order book should hang off their order book.
+    return placed
   }
 
   // After the commit, so a receiver that immediately reads stock sees the
