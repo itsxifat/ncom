@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { ChevronLeft, Plus, Trash2 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, Search, Trash2 } from 'lucide-react'
 
 import { useBuilderStore } from './store'
 import { parseElementKey } from './canvasBridge'
@@ -43,11 +43,13 @@ export function ElementPanel() {
   const section = useBuilderStore((s) =>
     s.sections.find((candidate) => candidate.id === s.selectedSectionId)
   )
+  const path = useBuilderStore((s) => s.selectedPath)
   const selectElement = useBuilderStore((s) => s.selectElement)
   const addExtraElement = useBuilderStore((s) => s.addExtraElement)
   const removeExtraElement = useBuilderStore((s) => s.removeExtraElement)
 
   const [adding, setAdding] = useState(false)
+  const [filter, setFilter] = useState('')
 
   if (!section || !sectionId) {
     return (
@@ -75,6 +77,11 @@ export function ElementPanel() {
   const added = extras.map(extraDescriptor)
   const slots = definition?.slots ?? [{ key: 'content', label: 'This block' }]
 
+  const labelFor = (key: string) =>
+    builtIn.find((element) => element.key === key)?.label ??
+    added.find((element) => element.key === key)?.label ??
+    key
+
   if (elementKey) {
     const { base, index } = parseElementKey(elementKey)
     const descriptor =
@@ -86,13 +93,41 @@ export function ElementPanel() {
 
     return (
       <div className="flex flex-col gap-3">
-        <button
-          type="button"
-          onClick={() => selectElement(sectionId, null)}
-          className="text-muted-foreground hover:text-foreground flex items-center gap-1 self-start text-xs"
-        >
-          <ChevronLeft className="size-3.5" /> All elements
-        </button>
+        {/* The path back out. A click on the page lands on the innermost thing
+            under the pointer, which is right most of the time and one level too
+            deep the rest — this is how a merchant who meant the card gets to
+            the card. */}
+        <nav className="text-muted-foreground flex flex-wrap items-center gap-0.5 text-[11px]">
+          <button
+            type="button"
+            onClick={() => selectElement(sectionId, null)}
+            className="hover:text-foreground flex items-center gap-1"
+          >
+            <ChevronLeft className="size-3" /> All
+          </button>
+          {path.map((step, stepIndex) => (
+            <span key={`${step.elementKey}-${stepIndex}`} className="contents">
+              <ChevronRight className="size-3 opacity-40" />
+              <button
+                type="button"
+                onClick={() =>
+                  selectElement(
+                    sectionId,
+                    step.elementKey,
+                    path.slice(0, stepIndex)
+                  )
+                }
+                className="hover:text-foreground max-w-24 truncate"
+              >
+                {labelFor(step.elementKey)}
+              </button>
+            </span>
+          ))}
+          <ChevronRight className="size-3 opacity-40" />
+          <span className="text-foreground max-w-28 truncate font-medium">
+            {descriptor?.label ?? base}
+          </span>
+        </nav>
 
         {extra && (
           <ExtraContentFields sectionId={sectionId} extraId={extra.id} />
@@ -121,8 +156,30 @@ export function ElementPanel() {
     )
   }
 
+  const needle = filter.trim().toLowerCase()
+  const matches = (element: ElementDescriptor) =>
+    !needle ||
+    element.label.toLowerCase().includes(needle) ||
+    element.key.toLowerCase().includes(needle)
+  const visible = builtIn.filter(matches)
+
   return (
     <div className="flex flex-col gap-4">
+      {/* A block with a handful of parts is a list you read; the order form has
+          fifty, and a list that long is one you search. The box appears when it
+          starts earning its place rather than sitting on every block. */}
+      {builtIn.length > 12 && (
+        <div className="relative">
+          <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2" />
+          <Input
+            value={filter}
+            placeholder={`Find one of ${builtIn.length} parts…`}
+            onChange={(event) => setFilter(event.target.value)}
+            className="h-8 pl-8 text-xs"
+          />
+        </div>
+      )}
+
       <section className="flex flex-col gap-1.5">
         <h4 className="text-muted-foreground text-[11px] font-semibold tracking-wide uppercase">
           In this block
@@ -131,8 +188,12 @@ export function ElementPanel() {
           <p className="text-muted-foreground text-xs">
             This block has no individually styleable parts yet.
           </p>
+        ) : visible.length === 0 ? (
+          <p className="text-muted-foreground text-xs">
+            Nothing here is called “{filter.trim()}”.
+          </p>
         ) : (
-          builtIn.map((element) => (
+          visible.map((element) => (
             <ElementRow
               key={element.key}
               element={element}

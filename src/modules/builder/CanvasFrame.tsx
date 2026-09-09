@@ -10,6 +10,7 @@ import type { StorefrontCommerce } from '@/modules/sections/registry'
 import {
   elementSelector,
   type CanvasElementInfo,
+  type CanvasElementRef,
   type CanvasRect,
   type CanvasToShellMessage,
   type ShellToCanvasMessage,
@@ -56,10 +57,49 @@ export function CanvasClient({
   const selection = useRef<{ sectionId: string; elementKey: string } | null>(
     null
   )
+  /**
+   * The element currently being typed into, if any.
+   *
+   * Editing happens on the page itself rather than in a panel field, which is
+   * the whole point — a merchant retypes a headline where they can see it sit.
+   * The node keeps its own markup while this is set, and the shell stops
+   * re-rendering the canvas for the duration, because a re-render would replace
+   * the node under the caret and throw the merchant back to the start of the
+   * line on every keystroke.
+   */
+  const editing = useRef<{
+    node: HTMLElement
+    sectionId: string
+    elementKey: string
+    index?: number
+  } | null>(null)
 
   const post = useCallback((message: CanvasToShellMessage) => {
     window.parent.postMessage(message, window.location.origin)
   }, [])
+
+  /**
+   * Ends an inline edit and hands the final markup to the shell.
+   *
+   * `done: true` is what tells the shell it may start re-rendering the canvas
+   * again — while an edit is live it must not, or the node under the caret is
+   * replaced mid-sentence.
+   */
+  const stopEditing = useCallback(() => {
+    const current = editing.current
+    if (!current) return
+    editing.current = null
+    current.node.contentEditable = 'false'
+    current.node.blur()
+    post({
+      type: 'ncom:element-text',
+      sectionId: current.sectionId,
+      elementKey: current.elementKey,
+      index: current.index,
+      html: current.node.innerHTML,
+      done: true,
+    })
+  }, [post])
 
   const measure = useCallback(() => {
     const current = selection.current
@@ -113,6 +153,33 @@ export function CanvasClient({
         return
       }
 
+      if (data.type === 'ncom:edit-element') {
+        stopEditing()
+        if (!data.elementKey) return
+        const node = findElement(data.sectionId, data.elementKey)
+        if (!node) return
+
+        const ref = refFor(node)
+        editing.current = {
+          node,
+          sectionId: data.sectionId,
+          elementKey: data.elementKey,
+          index: ref.index,
+        }
+        node.contentEditable = 'true'
+        node.spellcheck = false
+        // A selected word is what a merchant expects after a double-click, and
+        // it means the first thing they type replaces the placeholder copy
+        // rather than landing beside it.
+        node.focus({ preventScroll: true })
+        const range = document.createRange()
+        range.selectNodeContents(node)
+        const selectionApi = window.getSelection()
+        selectionApi?.removeAllRanges()
+        selectionApi?.addRange(range)
+        return
+      }
+
       if (data.type === 'ncom:reveal') {
         document
           .querySelector(`[data-section-id="${cssEscape(data.sectionId)}"]`)
@@ -127,7 +194,7 @@ export function CanvasClient({
       window.location.origin
     )
     return () => window.removeEventListener('message', handleMessage)
-  }, [measure])
+  }, [measure, stopEditing])
 
   // The selected element moves whenever anything above it reflows — a style
   // edit, an image loading, the merchant scrolling. Each of these re-reports
@@ -153,6 +220,52 @@ export function CanvasClient({
     requestAnimationFrame(measure)
   }, [sections, theme, measure])
 
+  // Inline editing's own listeners, bound to the document rather than to the
+  // node: the node comes and goes with every re-render, and a listener attached
+  // to one instance would be gone the moment the shell sent an update.
+  useEffect(() => {
+    function onInput() {
+      const current = editing.current
+      if (!current) return
+      post({
+        type: 'ncom:element-text',
+        sectionId: current.sectionId,
+        elementKey: current.elementKey,
+        index: current.index,
+        html: current.node.innerHTML,
+        done: false,
+      })
+    }
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (!editing.current) return
+      // Escape and Enter both mean "done". Enter would otherwise split a
+      // headline into two paragraphs, which no block's content field can hold.
+      if (event.key === 'Escape' || event.key === 'Enter') {
+        event.preventDefault()
+        stopEditing()
+      }
+    }
+
+    function onPointerDownOutside(event: PointerEvent) {
+      const current = editing.current
+      if (!current) return
+      if (event.target instanceof Node && current.node.contains(event.target)) {
+        return
+      }
+      stopEditing()
+    }
+
+    document.addEventListener('input', onInput)
+    document.addEventListener('keydown', onKeyDown, true)
+    document.addEventListener('pointerdown', onPointerDownOutside, true)
+    return () => {
+      document.removeEventListener('input', onInput)
+      document.removeEventListener('keydown', onKeyDown, true)
+      document.removeEventListener('pointerdown', onPointerDownOutside, true)
+    }
+  }, [post, stopEditing])
+
   useEffect(() => {
     function elementAt(target: EventTarget | null): CanvasElementInfo | null {
       if (!(target instanceof Element)) return null
@@ -171,7 +284,38 @@ export function CanvasClient({
       post({ type: 'ncom:element-hover', element: null })
     }
 
+    function onMouseDown(event: MouseEvent) {
+      // Typing inside the element being edited needs its focus.
+      if (
+        editing.current &&
+        event.target instanceof Node &&
+        editing.current.node.contains(event.target)
+      ) {
+        return
+      }
+      // Everything else: refuse focus. Without this, clicking the phone field
+      // in the preview focuses a real input, and the browser scrolls it into
+      // view — so selecting a control makes the page jump under the merchant.
+      // The canvas is a picture of the page, not the page.
+      if (!(event.target instanceof Element)) return
+      if (
+        event.target.closest(
+          'input, textarea, select, button, a, [contenteditable]'
+        )
+      ) {
+        event.preventDefault()
+      }
+    }
+
     function onClick(event: MouseEvent) {
+      // A click inside the words being typed is a caret move, not a selection.
+      if (
+        editing.current &&
+        event.target instanceof Node &&
+        editing.current.node.contains(event.target)
+      ) {
+        return
+      }
       const element = elementAt(event.target)
       if (!element) return
       // A click in the canvas is a selection, not a visit. Without this, every
@@ -184,6 +328,7 @@ export function CanvasClient({
 
     document.addEventListener('pointermove', onPointerMove, { passive: true })
     document.addEventListener('pointerleave', onPointerLeave)
+    document.addEventListener('mousedown', onMouseDown, true)
     // Capture, so a block's own handler cannot swallow the click before the
     // editor sees it — the FAQ accordion and the order form both stop
     // propagation on their controls.
@@ -192,6 +337,7 @@ export function CanvasClient({
     return () => {
       document.removeEventListener('pointermove', onPointerMove)
       document.removeEventListener('pointerleave', onPointerLeave)
+      document.removeEventListener('mousedown', onMouseDown, true)
       document.removeEventListener('click', onClick, true)
     }
   }, [post])
@@ -217,19 +363,40 @@ function toRect(node: Element): CanvasRect {
   }
 }
 
-function describe(node: HTMLElement, sectionId: string): CanvasElementInfo {
+/** An element's `data-el` key and instance, as the shell addresses it. */
+function refFor(node: Element): CanvasElementRef {
   const rawIndex = node.getAttribute('data-el-i')
   const index = rawIndex === null ? undefined : Number(rawIndex)
+  return {
+    elementKey: node.getAttribute('data-el') ?? '',
+    index: Number.isInteger(index) ? index : undefined,
+  }
+}
+
+function describe(node: HTMLElement, sectionId: string): CanvasElementInfo {
   // `offsetParent` is exactly what `top`/`left` resolve against, so reporting
   // its box is what lets the shell turn a drop point into the numbers CSS will
   // actually use. It is null for a fixed-position or hidden element, where the
   // viewport is the reference instead.
   const parent = node.offsetParent ?? document.documentElement
 
+  // Walked here rather than derived in the shell: an element key says nothing
+  // about what contains it, and only the DOM knows. The walk stops at the
+  // section, because a selection never crosses a block.
+  const ancestors: CanvasElementRef[] = []
+  const section = node.closest('[data-section-id]')
+  for (
+    let cursor = node.parentElement;
+    cursor && cursor !== section;
+    cursor = cursor.parentElement
+  ) {
+    if (cursor.hasAttribute('data-el')) ancestors.unshift(refFor(cursor))
+  }
+
   return {
     sectionId,
-    elementKey: node.getAttribute('data-el') ?? '',
-    index: Number.isInteger(index) ? index : undefined,
+    ...refFor(node),
+    ancestors: ancestors.length ? ancestors : undefined,
     rect: toRect(node),
     parentRect: toRect(parent),
   }

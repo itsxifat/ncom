@@ -10,7 +10,7 @@ import {
   type UseFormRegister,
 } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Plus, RotateCcw, Trash2, GripVertical } from 'lucide-react'
+import { Plus, Trash2, GripVertical } from 'lucide-react'
 import {
   fieldIsVisible,
   optionLabel,
@@ -27,6 +27,7 @@ import { Button } from '@/components/ui/button'
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { FormSelect } from '@/components/ui/form-select'
 import { FontPicker } from '@/components/ui/font-picker'
+import { ColorField } from '@/components/ui/color-picker'
 import { RichTextEditor } from '@/components/ui/rich-text-editor'
 import { DateTimeField } from './DateTimeField'
 import { ProductPickerDialog } from '@/components/store/product-picker'
@@ -302,50 +303,18 @@ function FieldRenderer({
       <Controller
         name={name}
         control={control}
-        render={({ field: controllerField }) => {
-          const value = (controllerField.value as string) ?? ''
-          return (
-            <Field>
-              <FieldLabel>{field.label}</FieldLabel>
-              <div className="flex items-center gap-2">
-                <Input
-                  type="color"
-                  // A native colour input has no empty state, so an unset
-                  // "inherit from the theme" field has to show *something*.
-                  // Black would read as a deliberate choice; the theme accent
-                  // is what the block actually paints with when unset.
-                  value={value || '#111111'}
-                  onChange={(event) =>
-                    controllerField.onChange(event.target.value)
-                  }
-                  className="h-9 w-14 shrink-0 p-1"
-                />
-                {/* The text input is the accessible path to the value: a bare
-                    <input type="color"> can't be typed into or pasted a hex
-                    code — and it is the only way to clear one. */}
-                <Input
-                  value={value}
-                  onChange={(event) =>
-                    controllerField.onChange(event.target.value)
-                  }
-                  placeholder={field.allowEmpty ? 'Theme colour' : '#000000'}
-                />
-                {field.allowEmpty && value && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label={`Reset ${field.label.toLowerCase()}`}
-                    onClick={() => controllerField.onChange('')}
-                  >
-                    <RotateCcw className="size-3.5" />
-                  </Button>
-                )}
-              </div>
-              {hint}
-            </Field>
-          )
-        }}
+        render={({ field: controllerField }) => (
+          <Field>
+            <FieldLabel>{field.label}</FieldLabel>
+            <ColorField
+              value={(controllerField.value as string) || undefined}
+              onChange={(value) => controllerField.onChange(value ?? '')}
+              allowClear={field.allowEmpty}
+              placeholder={field.allowEmpty ? 'Theme colour' : '#000000'}
+            />
+            {hint}
+          </Field>
+        )}
       />
     )
   }

@@ -163,3 +163,31 @@ export function collectText(
 
   return parts.filter(Boolean).join(' ').replace(/\s+/g, ' ').trim()
 }
+
+/**
+ * The field declaration at a content path, if a block declares one there.
+ *
+ * Numeric segments are array indices and are skipped: `['items', 3, 'title']`
+ * is described by the `title` field inside the `items` array's `itemFields`,
+ * whichever item it happens to be.
+ *
+ * Used to answer one question — is this element's text formatted or plain? —
+ * because words typed onto the canvas have to be stored the way the block's
+ * schema expects them, not the way the browser happened to mark them up.
+ */
+export function fieldAtPath(
+  fields: FieldConfig[],
+  path: (string | number)[]
+): FieldConfig | undefined {
+  let current: FieldConfig[] | undefined = fields
+  let found: FieldConfig | undefined
+
+  for (const segment of path) {
+    if (typeof segment === 'number') continue
+    found = current?.find((field) => field.name === segment)
+    if (!found) return undefined
+    current = found.type === 'array' ? found.itemFields : undefined
+  }
+
+  return found
+}

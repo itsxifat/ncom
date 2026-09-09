@@ -16,7 +16,21 @@ import { ImagePicker } from '@/modules/builder/ImagePicker'
 import { Checkbox } from '@/components/ui/checkbox'
 import { FormSelect } from '@/components/ui/form-select'
 import { FontPicker } from '@/components/ui/font-picker'
+import { ColorField as ColorPickerField } from '@/components/ui/color-picker'
 
+/**
+ * One theme colour.
+ *
+ * The swatch used to be an `<input type="color">`, which hands the whole
+ * interaction to the operating system — and where that picker cannot open, the
+ * swatch is simply dead: no event, no fallback, no sign anything is wrong. It
+ * is the shared picker now, the same control the page editor uses.
+ *
+ * The value is posted by a hidden input rather than by the visible one, because
+ * the visible field belongs to the picker and the form is uncontrolled: keeping
+ * the posted value in React state is what makes the swatch, the hex box and
+ * what the form submits three views of one number.
+ */
 function ColorField({
   name,
   label,
@@ -26,29 +40,19 @@ function ColorField({
   label: string
   defaultValue: string
 }) {
+  const [value, setValue] = useState(defaultValue)
+
   return (
     <Field>
       <FieldLabel htmlFor={name}>{label}</FieldLabel>
-      <div className="flex items-center gap-2">
-        <input
-          type="color"
-          defaultValue={defaultValue}
-          form="theme-form"
-          onChange={(e) => {
-            const hexInput = document.getElementById(
-              `${name}-hex`
-            ) as HTMLInputElement | null
-            if (hexInput) hexInput.value = e.target.value
-          }}
-          className="size-8 shrink-0 cursor-pointer rounded border"
-        />
-        <Input
-          id={`${name}-hex`}
-          name={name}
-          defaultValue={defaultValue}
-          className="font-mono"
-        />
-      </div>
+      <ColorPickerField
+        id={name}
+        value={value}
+        onChange={(next) => setValue(next ?? defaultValue)}
+        allowClear={false}
+        allowAlpha={false}
+      />
+      <input type="hidden" name={name} value={value} form="theme-form" />
     </Field>
   )
 }

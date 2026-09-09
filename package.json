@@ -16,6 +16,7 @@
     "db:seed": "prisma db seed",
     "test:e2e": "playwright test",
     "check:connector": "tsx --conditions=react-server scripts/check-connector.mts",
+    "check:elements": "tsx scripts/check-elements.mts",
     "check:stock-queue": "tsx --conditions=react-server scripts/check-stock-queue.mts",
     "adopt:remote": "tsx --conditions=react-server scripts/adopt-remote-products.mts",
     "check:adopt-remote": "tsx --conditions=react-server scripts/check-adopt-remote.mts",
@@ -30,6 +31,9 @@
     ],
     "*.{ts,tsx,js,jsx,json,css,md}": [
       "prettier --write"
+    ],
+    "src/modules/sections/**/*.{ts,tsx}": [
+      "pnpm check:elements --"
     ]
   },
   "dependencies": {

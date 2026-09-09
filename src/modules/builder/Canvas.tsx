@@ -4,9 +4,16 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useBuilderStore, styleBreakpoint, type Breakpoint } from './store'
 import { getSectionDefinition } from '../sections/registry'
 import { sectionExtras } from '../sections/elements'
-import { extraDescriptor } from '../sections/elementDescriptors'
-import { FloatingToolbar } from './FloatingToolbar'
 import {
+  contentPath,
+  extraDescriptor,
+  writeContentPath,
+} from '../sections/elementDescriptors'
+import { sanitizeRichText, richTextToPlain } from '../sections/sanitizeHtml'
+import { fieldAtPath } from '../sections/editorFields'
+import { FloatingToolbar, duplicableAs } from './FloatingToolbar'
+import {
+  instanceKey,
   parseElementKey,
   type CanvasElementInfo,
   type CanvasToShellMessage,
@@ -43,6 +50,10 @@ const DEVICE_VIEWPORTS: Record<Breakpoint, { width: number; height: number }> =
     tablet: { width: 768, height: 1024 },
     mobile: { width: 375, height: 812 },
   }
+
+/** How far one arrow-key press moves an element, and one with Shift held. */
+const NUDGE = 1
+const NUDGE_FAST = 10
 
 /**
  * The live preview, and the primary editing surface.
@@ -87,10 +98,21 @@ export function Canvas({
   const [readyToken, setReadyToken] = useState(0)
   const [hover, setHover] = useState<CanvasElementInfo | null>(null)
   const [geometry, setGeometry] = useState<CanvasElementInfo | null>(null)
+  const [editing, setEditing] = useState(false)
   // Which instance of a repeated element was last clicked, so the toolbar can
   // offer "just this one" without making the merchant click the same card
-  // again to say which one they meant.
+  // again to say which one they meant. It cannot come from the geometry
+  // report: that is measured from the shared key, which always finds the first
+  // instance in the DOM.
   const [lastIndex, setLastIndex] = useState<number | undefined>(undefined)
+  /**
+   * True while the merchant is typing on the page.
+   *
+   * A ref as well as state because the update effect reads it: re-posting the
+   * draft mid-edit would replace the node under the caret, and an effect that
+   * re-ran when the flag changed would do exactly that on the first keystroke.
+   */
+  const editingRef = useRef(false)
 
   const breakpoint = useBuilderStore((s) => s.breakpoint)
   const sections = useBuilderStore((s) => s.sections)
@@ -98,6 +120,13 @@ export function Canvas({
   const selectedSectionId = useBuilderStore((s) => s.selectedSectionId)
   const selectedElementKey = useBuilderStore((s) => s.selectedElementKey)
   const selectElement = useBuilderStore((s) => s.selectElement)
+  const setElementStyle = useBuilderStore((s) => s.setElementStyle)
+  const updateSectionContent = useBuilderStore((s) => s.updateSectionContent)
+  const updateExtraElement = useBuilderStore((s) => s.updateExtraElement)
+  const removeExtraElement = useBuilderStore((s) => s.removeExtraElement)
+  const duplicateElement = useBuilderStore((s) => s.duplicateElement)
+  const copyElementStyle = useBuilderStore((s) => s.copyElementStyle)
+  const pasteElementStyle = useBuilderStore((s) => s.pasteElementStyle)
 
   const post = useCallback((message: ShellToCanvasMessage) => {
     iframeRef.current?.contentWindow?.postMessage(
@@ -118,6 +147,101 @@ export function Canvas({
     observer.observe(node)
     return () => observer.disconnect()
   }, [])
+
+  /**
+   * Writes words typed on the canvas back into the block that owns them.
+   *
+   * The element key alone does not say where the text lives — that is the
+   * block's business, declared as the descriptor's `contentField`. Resolving it
+   * here rather than in the canvas is what keeps the iframe ignorant of block
+   * definitions and keeps this the only place a content path is interpreted.
+   */
+  const applyText = useCallback(
+    (
+      sectionId: string,
+      elementKey: string,
+      index: number | undefined,
+      html: string
+    ) => {
+      const section = useBuilderStore
+        .getState()
+        .sections.find((candidate) => candidate.id === sectionId)
+      if (!section) return
+
+      const { base } = parseElementKey(elementKey)
+
+      if (base.startsWith('x:')) {
+        updateExtraElement(sectionId, base.slice(2), {
+          html: sanitizeRichText(html),
+        })
+        return
+      }
+
+      const definition = getSectionDefinition(section.type)
+      const descriptor = definition?.elements.find((el) => el.key === base)
+      const path = contentPath(descriptor?.contentField, index)
+      if (!definition || !path) return
+
+      // A plain `text` field holds words, not markup, and storing a `<b>` in
+      // one would either fail its schema or render as escaped angle brackets on
+      // the page. Rich-text fields keep the formatting.
+      const field = fieldAtPath(definition.editorFields, path)
+      const value =
+        field?.type === 'richtext'
+          ? sanitizeRichText(html)
+          : richTextToPlain(html)
+
+      updateSectionContent(
+        sectionId,
+        writeContentPath(section.content, path, value)
+      )
+    },
+    [updateExtraElement, updateSectionContent]
+  )
+
+  /**
+   * Opens an element's words for typing, if it has any the block can store.
+   *
+   * Refused rather than half-attempted for anything else: a caret in a total or
+   * an order number would take keystrokes nothing could save, and the merchant
+   * would only find out when the page reloaded without their edit.
+   */
+  const beginTextEdit = useCallback(
+    (sectionId: string, elementKey: string, index: number | undefined) => {
+      const { base } = parseElementKey(elementKey)
+      const section = useBuilderStore
+        .getState()
+        .sections.find((candidate) => candidate.id === sectionId)
+      const descriptor = section
+        ? getSectionDefinition(section.type)?.elements.find(
+            (el) => el.key === base
+          )
+        : undefined
+
+      // A repeated element needs a path that names the instance. Without one,
+      // every card would write over the same field — so it stays a selection
+      // rather than becoming an edit that silently damages content.
+      const addressable =
+        !descriptor?.repeated || descriptor.contentField?.includes('[]')
+      const editable = base.startsWith('x:')
+        ? true
+        : Boolean(addressable) &&
+          contentPath(descriptor?.contentField, index) !== null
+      if (!editable) return
+
+      editingRef.current = true
+      setEditing(true)
+      post({
+        type: 'ncom:edit-element',
+        sectionId,
+        elementKey:
+          descriptor?.repeated && index !== undefined
+            ? instanceKey(base, index)
+            : elementKey,
+      })
+    },
+    [post]
+  )
 
   useEffect(() => {
     function handleMessage(event: MessageEvent<CanvasToShellMessage>) {
@@ -141,20 +265,32 @@ export function Canvas({
         return
       }
 
+      if (data.type === 'ncom:element-text') {
+        applyText(data.sectionId, data.elementKey, data.index, data.html)
+        if (data.done) {
+          editingRef.current = false
+          setEditing(false)
+        }
+        return
+      }
+
       if (data.type === 'ncom:element-click') {
-        const { sectionId, elementKey, index } = data.element
+        const { sectionId, elementKey, index, ancestors } = data.element
         // A repeated element selects as "all of them" by default. Styling one
         // card out of nine is nearly always a mistake rather than a design, so
-        // the shared key is the default and the panel offers the single
+        // the shared key is the default and the toolbar offers the single
         // instance as an explicit choice.
-        selectElement(sectionId, elementKey)
+        selectElement(sectionId, elementKey, ancestors ?? [])
         setLastIndex(index)
+
+        // A double-click asks to type on the page.
+        if (data.edit) beginTextEdit(sectionId, elementKey, index)
       }
     }
 
     window.addEventListener('message', handleMessage)
     return () => window.removeEventListener('message', handleMessage)
-  }, [selectElement])
+  }, [selectElement, applyText, beginTextEdit])
 
   // Skipped on mount — the iframe has just fetched the current offers by
   // definition.
@@ -167,6 +303,10 @@ export function Canvas({
 
   useEffect(() => {
     if (readyToken === 0 || !theme) return
+    // Held back while the merchant is typing on the page: the canvas already
+    // shows what they are writing, and re-rendering it would replace the node
+    // under the caret. The edit that ends the session posts one final update.
+    if (editingRef.current) return
     post({
       type: 'ncom:builder-update',
       theme,
@@ -189,6 +329,137 @@ export function Canvas({
     })
   }, [readyToken, selectedSectionId, selectedElementKey, post])
 
+  const selectedSection = sections.find((s) => s.id === selectedSectionId)
+
+  /** Steps the selection out to whatever contains the selected element. */
+  const selectParent = useCallback(() => {
+    if (!selectedSectionId) return
+    const path = useBuilderStore.getState().selectedPath
+    const parent = path[path.length - 1]
+    // Out of the last element is out of the element layer entirely, which
+    // selects the section — the same thing Escape does in a nested tool. The
+    // path shortens by one on the way, so a second Escape keeps climbing.
+    selectElement(
+      selectedSectionId,
+      parent ? parent.elementKey : null,
+      path.slice(0, -1)
+    )
+  }, [selectedSectionId, selectElement])
+
+  // Keyboard, which is what separates a page builder from a form with a preview
+  // beside it. Everything here is scoped to a live element selection and stands
+  // down whenever the merchant is typing, so it can never eat a keystroke meant
+  // for a field.
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (editingRef.current) return
+      const target = event.target as HTMLElement | null
+      if (
+        target &&
+        (target.isContentEditable ||
+          ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
+      ) {
+        return
+      }
+      if (!selectedSectionId || !selectedElementKey) return
+
+      const bp = styleBreakpoint(useBuilderStore.getState().breakpoint)
+      const section = useBuilderStore
+        .getState()
+        .sections.find((candidate) => candidate.id === selectedSectionId)
+      const style = section?.config?.elements?.[selectedElementKey]?.[bp] ?? {}
+      const { base } = parseElementKey(selectedElementKey)
+      const modified = event.metaKey || event.ctrlKey
+
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        selectParent()
+        return
+      }
+
+      if (modified && event.key.toLowerCase() === 'd') {
+        event.preventDefault()
+        const descriptor = section
+          ? getSectionDefinition(section.type)?.elements.find(
+              (el) => el.key === base
+            )
+          : undefined
+        const type = descriptor && duplicableAs(descriptor.kind)
+        if (!type) return
+        const definition = section
+          ? getSectionDefinition(section.type)
+          : undefined
+        duplicateElement(
+          selectedSectionId,
+          selectedElementKey,
+          type,
+          definition?.slots?.[0]?.key ?? 'content'
+        )
+        return
+      }
+
+      if (modified && event.altKey && event.key.toLowerCase() === 'c') {
+        event.preventDefault()
+        copyElementStyle(selectedSectionId, selectedElementKey)
+        return
+      }
+
+      if (modified && event.altKey && event.key.toLowerCase() === 'v') {
+        event.preventDefault()
+        pasteElementStyle(selectedSectionId, selectedElementKey)
+        return
+      }
+
+      if (
+        (event.key === 'Delete' || event.key === 'Backspace') &&
+        base.startsWith('x:')
+      ) {
+        event.preventDefault()
+        removeExtraElement(selectedSectionId, base.slice(2))
+        return
+      }
+
+      const step = event.shiftKey ? NUDGE_FAST : NUDGE
+      const nudges: Record<string, [number, number]> = {
+        ArrowLeft: [-step, 0],
+        ArrowRight: [step, 0],
+        ArrowUp: [0, -step],
+        ArrowDown: [0, step],
+      }
+      const nudge = nudges[event.key]
+      if (!nudge) return
+      event.preventDefault()
+
+      const [dx, dy] = nudge
+      // Free-positioned elements move by their real coordinates; everything
+      // else is nudged with a transform, which shifts it visually without
+      // disturbing the layout around it — the same split the drag handles use.
+      if (style.position === 'absolute') {
+        setElementStyle(selectedSectionId, selectedElementKey, bp, {
+          left: `${Math.round(parseFloat(style.left ?? '0') + dx)}px`,
+          top: `${Math.round(parseFloat(style.top ?? '0') + dy)}px`,
+        })
+        return
+      }
+      setElementStyle(selectedSectionId, selectedElementKey, bp, {
+        offsetX: (style.offsetX ?? 0) + dx,
+        offsetY: (style.offsetY ?? 0) + dy,
+      })
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [
+    selectedSectionId,
+    selectedElementKey,
+    selectParent,
+    setElementStyle,
+    duplicateElement,
+    removeExtraElement,
+    copyElementStyle,
+    pasteElementStyle,
+  ])
+
   const viewport = DEVICE_VIEWPORTS[breakpoint]
 
   // Shrink to fit, never enlarge: scaling a 375px phone up to fill a wide pane
@@ -204,7 +475,6 @@ export function Canvas({
         )
       : 1
 
-  const selectedSection = sections.find((s) => s.id === selectedSectionId)
   const label = selectedElementKey
     ? elementLabel(selectedSection, selectedElementKey)
     : null
@@ -213,10 +483,15 @@ export function Canvas({
   // on the same element reads as a rendering bug, not as feedback.
   const showHover =
     hover &&
+    !editing &&
     !(
       hover.sectionId === selectedSectionId &&
       hover.elementKey === parseElementKey(selectedElementKey ?? '').base
     )
+
+  const hoverSection = hover
+    ? sections.find((s) => s.id === hover.sectionId)
+    : undefined
 
   return (
     <div ref={shellRef} className="bg-muted h-full overflow-auto p-6">
@@ -250,8 +525,15 @@ export function Canvas({
           <Box
             rect={hover.rect}
             scale={scale}
-            className="border-primary/40 border border-dashed"
-          />
+            className="border-primary/50 border border-dashed"
+          >
+            {/* Naming what is under the pointer is what turns a page of boxes
+                into a page of parts. Without it a merchant has to click things
+                to find out what they are. */}
+            <Tag placement={hover.rect.top * scale > 20 ? 'above' : 'inside'}>
+              {elementLabel(hoverSection, hover.elementKey) ?? 'Element'}
+            </Tag>
+          </Box>
         )}
 
         {geometry && selectedElementKey && (
@@ -259,19 +541,47 @@ export function Canvas({
             <Box
               rect={geometry.rect}
               scale={scale}
-              className="border-primary border-2"
-            />
-            <DragLayer
-              element={geometry}
-              elementKey={selectedElementKey}
-              scale={scale}
-            />
-            <FloatingToolbar
-              rect={geometry.rect}
-              scale={scale}
-              label={label ?? 'Element'}
-              index={lastIndex}
-            />
+              className={cn(
+                'border-2',
+                editing ? 'border-primary border-dashed' : 'border-primary'
+              )}
+            >
+              <span className="bg-primary text-primary-foreground absolute -bottom-5 left-1/2 -translate-x-1/2 rounded px-1.5 py-0.5 text-[10px] font-medium tabular-nums">
+                {Math.round(geometry.rect.width)} ×{' '}
+                {Math.round(geometry.rect.height)}
+              </span>
+            </Box>
+            {/* No drag surface while typing: the merchant is inside the text,
+                and a layer over it would swallow every click meant for the
+                caret. */}
+            {!editing && (
+              <DragLayer
+                element={geometry}
+                elementKey={selectedElementKey}
+                scale={scale}
+                // The move surface sits over the selected element, so the canvas
+                // inside the iframe never sees a second click on it — without
+                // this, double-clicking the thing you just selected would do
+                // nothing, which is exactly when a merchant tries it.
+                onOpenText={() =>
+                  selectedSectionId &&
+                  beginTextEdit(
+                    selectedSectionId,
+                    selectedElementKey,
+                    lastIndex
+                  )
+                }
+              />
+            )}
+            {!editing && (
+              <FloatingToolbar
+                element={geometry}
+                index={lastIndex}
+                scale={scale}
+                label={label ?? 'Element'}
+                onSelectParent={selectParent}
+              />
+            )}
           </>
         )}
       </div>
@@ -309,6 +619,26 @@ function Box({
   )
 }
 
+/** The small name label that rides on an outline. */
+function Tag({
+  placement,
+  children,
+}: {
+  placement: 'above' | 'inside'
+  children: React.ReactNode
+}) {
+  return (
+    <span
+      className={cn(
+        'bg-primary text-primary-foreground absolute left-0 max-w-40 truncate rounded px-1.5 py-0.5 text-[10px] font-medium',
+        placement === 'above' ? '-top-5' : 'top-0'
+      )}
+    >
+      {children}
+    </span>
+  )
+}
+
 /**
  * The handles that move and resize the selected element.
  *
@@ -326,10 +656,13 @@ function DragLayer({
   element,
   elementKey,
   scale,
+  onOpenText,
 }: {
   element: CanvasElementInfo
   elementKey: string
   scale: number
+  /** A double-click on the element itself, which means "let me type here". */
+  onOpenText?: () => void
 }) {
   const breakpoint = useBuilderStore((s) => s.breakpoint)
   const setElementStyle = useBuilderStore((s) => s.setElementStyle)
@@ -418,15 +751,22 @@ function DragLayer({
     <>
       {/* The move surface covers the element itself. It sits above the canvas,
           so a drag never reaches the page underneath and starts a text
-          selection or follows a link. */}
+          selection or follows a link. Clicks pass through to the iframe, which
+          is what keeps a double-click on the selected element able to open it
+          for editing. */}
       <div
         onPointerDown={(event) => begin(event, 'move')}
         onPointerMove={move}
         onPointerUp={end}
         onPointerCancel={end}
+        onDoubleClick={onOpenText}
         className="absolute cursor-move"
         style={{ left, top, width, height }}
-        title={free ? 'Drag to position' : 'Drag to nudge'}
+        title={
+          free
+            ? 'Drag to position · double-click to edit the text'
+            : 'Drag to nudge · double-click to edit the text'
+        }
       />
       <div
         onPointerDown={(event) => begin(event, 'resize')}

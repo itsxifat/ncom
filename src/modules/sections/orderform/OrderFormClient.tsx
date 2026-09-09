@@ -250,7 +250,11 @@ export function OrderFormClient({
     return (
       <SectionWrapper config={config} defaultPadding={false}>
         <section id="order" className="px-4 py-16 sm:px-6">
-          <div className="mx-auto max-w-lg rounded-2xl border border-black/[0.07] bg-white p-10 text-center">
+          <El
+            as="div"
+            part="successPanel"
+            className="mx-auto max-w-lg rounded-2xl border border-black/[0.07] bg-white p-10 text-center"
+          >
             <El
               as="div"
               part="successIcon"
@@ -272,21 +276,39 @@ export function OrderFormClient({
                 className="mt-2 text-[14px] leading-relaxed text-[color:var(--lp-text)]/65"
               />
             )}
-            <div className="mt-6 space-y-1.5 rounded-xl bg-black/[0.03] px-5 py-4 text-left">
-              <p className="text-[12px] text-[color:var(--lp-text)]/55">
-                Order number
-              </p>
-              <p className="font-semibold tracking-wide text-[color:var(--lp-text)]">
+            <El
+              as="div"
+              part="receipt"
+              className="mt-6 space-y-1.5 rounded-xl bg-black/[0.03] px-5 py-4 text-left"
+            >
+              <El
+                as="p"
+                part="orderNumberLabel"
+                html={content.orderNumberLabel}
+                className="text-[12px] text-[color:var(--lp-text)]/55"
+              />
+              <El
+                as="p"
+                part="orderNumber"
+                className="font-semibold tracking-wide text-[color:var(--lp-text)]"
+              >
                 {status.orderNumber}
-              </p>
-              <p className="pt-2 text-[12px] text-[color:var(--lp-text)]/55">
-                Amount payable on delivery
-              </p>
-              <p className="font-semibold text-[color:var(--lp-text)]">
+              </El>
+              <El
+                as="p"
+                part="amountLabel"
+                html={content.amountLabel}
+                className="pt-2 text-[12px] text-[color:var(--lp-text)]/55"
+              />
+              <El
+                as="p"
+                part="amountValue"
+                className="font-semibold text-[color:var(--lp-text)]"
+              >
                 {money(status.totalCents)}
-              </p>
-            </div>
-          </div>
+              </El>
+            </El>
+          </El>
         </section>
       </SectionWrapper>
     )
@@ -304,11 +326,15 @@ export function OrderFormClient({
     return (
       <SectionWrapper config={config} defaultPadding={false}>
         <section id="order" className="px-4 py-16 sm:px-6">
-          <p className="text-center text-[14px] text-[color:var(--lp-text)]/50">
+          <El
+            as="p"
+            part="emptyNote"
+            className="text-center text-[14px] text-[color:var(--lp-text)]/50"
+          >
             {commerce?.catalogUnavailable
               ? 'Ordering is unavailable for a moment. Please try again shortly.'
               : 'Add an offer in the Offers tab to see the order form.'}
-          </p>
+          </El>
         </section>
       </SectionWrapper>
     )
@@ -348,18 +374,28 @@ export function OrderFormClient({
           >
             {offers.length > 1 && (
               <div className="border-b border-black/[0.06] p-5 sm:p-6">
-                <p className={labelClass}>Choose your package</p>
-                <div className="grid gap-2.5 sm:grid-cols-2">
-                  {offers.map((candidate) => (
+                <El
+                  as="p"
+                  part="packageLabel"
+                  html={content.packageLabel}
+                  className={labelClass}
+                />
+                <El
+                  as="div"
+                  part="offers"
+                  className="grid gap-2.5 sm:grid-cols-2"
+                >
+                  {offers.map((candidate, cardIndex) => (
                     <OfferCard
                       key={candidate.key}
+                      index={cardIndex}
                       offer={candidate}
                       active={candidate.key === offer.key}
                       onSelect={() => chooseOffer(candidate.key)}
                       money={money}
                     />
                   ))}
-                </div>
+                </El>
               </div>
             )}
 
@@ -374,10 +410,15 @@ export function OrderFormClient({
                 bounds={bounds}
               />
             ) : (
-              <div className="space-y-4 border-b border-black/[0.06] p-5 sm:p-6">
+              <El
+                as="div"
+                part="items"
+                className="space-y-4 border-b border-black/[0.06] p-5 sm:p-6"
+              >
                 {offer.items.map((line, i) => (
                   <FixedLine
                     key={`${line.productId}-${i}`}
+                    index={i}
                     line={line}
                     chosen={variantChoices[i]}
                     onChoose={(variantId) =>
@@ -386,71 +427,107 @@ export function OrderFormClient({
                     money={money}
                   />
                 ))}
-              </div>
+              </El>
             )}
 
             {/* Delivery details */}
-            <div className="space-y-4 p-5 sm:p-6">
+            <El as="div" part="fields" className="space-y-4 p-5 sm:p-6">
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
-                  <label className={labelClass} htmlFor="lp-name">
-                    Full name *
-                  </label>
-                  <input
+                  <El
+                    as="label"
+                    part="nameLabel"
+                    htmlFor="lp-name"
+                    html={content.nameLabel}
+                    className={labelClass}
+                  />
+                  <El
+                    as="input"
+                    part="input"
+                    index={0}
                     id="lp-name"
                     className={fieldClass}
                     autoComplete="name"
                     required
                     value={values.name}
-                    onChange={(e) => setField('name', e.target.value)}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                      setField('name', e.target.value)
+                    }
                   />
                 </div>
                 <div>
-                  <label className={labelClass} htmlFor="lp-phone">
-                    Mobile number *
-                  </label>
-                  <input
+                  <El
+                    as="label"
+                    part="phoneLabel"
+                    htmlFor="lp-phone"
+                    html={content.phoneLabel}
+                    className={labelClass}
+                  />
+                  <El
+                    as="input"
+                    part="input"
+                    index={1}
                     id="lp-phone"
                     className={fieldClass}
                     inputMode="tel"
                     autoComplete="tel"
-                    placeholder="01XXXXXXXXX"
+                    placeholder={content.phonePlaceholder}
                     required
                     value={values.phone}
-                    onChange={(e) => setField('phone', e.target.value)}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                      setField('phone', e.target.value)
+                    }
                   />
                 </div>
               </div>
 
               {content.askEmail && (
                 <div>
-                  <label className={labelClass} htmlFor="lp-email">
-                    Email (optional)
-                  </label>
-                  <input
+                  <El
+                    as="label"
+                    part="emailLabel"
+                    htmlFor="lp-email"
+                    html={content.emailLabel}
+                    className={labelClass}
+                  />
+                  <El
+                    as="input"
+                    part="input"
+                    index={2}
                     id="lp-email"
                     type="email"
                     className={fieldClass}
                     autoComplete="email"
                     value={values.email}
-                    onChange={(e) => setField('email', e.target.value)}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                      setField('email', e.target.value)
+                    }
                   />
                 </div>
               )}
 
               <div>
-                <label className={labelClass} htmlFor="lp-street">
-                  Full delivery address *
-                </label>
-                <textarea
+                <El
+                  as="label"
+                  part="addressLabel"
+                  htmlFor="lp-street"
+                  html={content.addressLabel}
+                  className={labelClass}
+                />
+                <El
+                  as="textarea"
+                  part="input"
+                  index={3}
                   id="lp-street"
                   rows={2}
                   className={cn(fieldClass, 'resize-none')}
                   autoComplete="street-address"
                   required
-                  placeholder="House, road, area"
+                  placeholder={content.addressPlaceholder}
                   value={values.street}
-                  onChange={(e) => setField('street', e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                    setField('street', e.target.value)
+                  }
                 />
               </div>
 
@@ -462,26 +539,43 @@ export function OrderFormClient({
                 }
               >
                 <div>
-                  <label className={labelClass} htmlFor="lp-city">
-                    City / District *
-                  </label>
-                  <input
+                  <El
+                    as="label"
+                    part="cityLabel"
+                    htmlFor="lp-city"
+                    html={content.cityLabel}
+                    className={labelClass}
+                  />
+                  <El
+                    as="input"
+                    part="input"
+                    index={4}
                     id="lp-city"
                     className={fieldClass}
                     autoComplete="address-level2"
                     required
                     value={values.city}
-                    onChange={(e) => setField('city', e.target.value)}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                      setField('city', e.target.value)
+                    }
                   />
                 </div>
                 {shipping.askZone && shipping.rates.length > 1 && (
                   <div>
-                    <p className={labelClass}>Delivery area</p>
+                    <El
+                      as="p"
+                      part="zoneLabel"
+                      html={content.zoneLabel}
+                      className={labelClass}
+                    />
                     <div className="grid grid-cols-3 gap-1.5">
-                      {shipping.rates.map((choice) => {
+                      {shipping.rates.map((choice, zoneIndex) => {
                         const active = rateId === choice.id
                         return (
-                          <button
+                          <El
+                            as="button"
+                            part="zoneOption"
+                            index={zoneIndex}
                             type="button"
                             key={choice.id}
                             onClick={() => setRateId(choice.id)}
@@ -500,7 +594,7 @@ export function OrderFormClient({
                             <span className="block text-[10px] opacity-60">
                               {money(choice.priceCents)}
                             </span>
-                          </button>
+                          </El>
                         )
                       })}
                     </div>
@@ -510,46 +604,76 @@ export function OrderFormClient({
 
               {content.askNote && (
                 <div>
-                  <label className={labelClass} htmlFor="lp-note">
-                    {content.noteLabel}
-                  </label>
-                  <textarea
+                  <El
+                    as="label"
+                    part="noteLabel"
+                    htmlFor="lp-note"
+                    html={content.noteLabel}
+                    className={labelClass}
+                  />
+                  <El
+                    as="textarea"
+                    part="input"
+                    index={5}
                     id="lp-note"
                     rows={2}
                     className={cn(fieldClass, 'resize-none')}
                     value={values.note}
-                    onChange={(e) => setField('note', e.target.value)}
+                    onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                      setField('note', e.target.value)
+                    }
                   />
                 </div>
               )}
-            </div>
+            </El>
 
             {/* Discount code. Below the address rather than beside the total,
                 because a buyer who has one already knows it and a buyer who
                 does not should not be shown a field that reads as "you are
                 paying too much" while they are deciding. */}
             <div className="border-t border-black/[0.06] px-5 pt-4 pb-5 sm:px-6">
-              <label className={labelClass} htmlFor="lp-coupon">
-                Discount code (optional)
-              </label>
-              <input
+              <El
+                as="label"
+                part="couponLabel"
+                htmlFor="lp-coupon"
+                html={content.couponLabel}
+                className={labelClass}
+              />
+              <El
+                as="input"
+                part="input"
+                index={6}
                 id="lp-coupon"
                 className={cn(fieldClass, 'uppercase')}
                 autoComplete="off"
                 autoCapitalize="characters"
                 spellCheck={false}
-                placeholder="SAVE10"
+                placeholder={content.couponPlaceholder}
                 value={couponCode}
-                onChange={(e) => setCouponCode(e.target.value)}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  setCouponCode(e.target.value)
+                }
               />
-              <p className="mt-1.5 text-[11px] text-[color:var(--lp-text)]/45">
-                Applied when you place the order.
-              </p>
+              <El
+                as="p"
+                part="couponHint"
+                html={content.couponHint}
+                className="mt-1.5 text-[11px] text-[color:var(--lp-text)]/45"
+              />
             </div>
 
             {/* Summary + submit */}
-            <div className="space-y-2 border-t border-black/[0.06] bg-black/[0.02] px-5 py-5 sm:px-6">
-              <div className="flex justify-between text-[13px] text-[color:var(--lp-text)]/70">
+            <El
+              as="div"
+              part="summary"
+              className="space-y-2 border-t border-black/[0.06] bg-black/[0.02] px-5 py-5 sm:px-6"
+            >
+              <El
+                as="div"
+                part="summaryRow"
+                index={0}
+                className="flex justify-between text-[13px] text-[color:var(--lp-text)]/70"
+              >
                 <span>
                   {offer.label}
                   {isPool && (quote?.quantity ?? 0) > 0 && (
@@ -560,7 +684,7 @@ export function OrderFormClient({
                   )}
                 </span>
                 <span>{priced ? money(goodsCents) : '—'}</span>
-              </div>
+              </El>
 
               {offerSavings > 0 && priced && (
                 <div
@@ -610,8 +734,17 @@ export function OrderFormClient({
                 </div>
               )}
 
-              <div className="flex justify-between text-[13px] text-[color:var(--lp-text)]/70">
-                <span>Delivery</span>
+              <El
+                as="div"
+                part="summaryRow"
+                index={1}
+                className="flex justify-between text-[13px] text-[color:var(--lp-text)]/70"
+              >
+                <El
+                  as="span"
+                  part="deliveryLabel"
+                  html={content.deliveryLabel}
+                />
                 <span>
                   {promo?.freeShipping && baseShipping > 0 ? (
                     <>
@@ -626,7 +759,7 @@ export function OrderFormClient({
                     money(shippingCents)
                   )}
                 </span>
-              </div>
+              </El>
 
               {/* Promotion nudges */}
               {priced && hints && (hints.freeShipping || hints.discount) && (
@@ -656,10 +789,16 @@ export function OrderFormClient({
                 </div>
               )}
 
-              <div className="mt-1 flex justify-between border-t border-black/[0.07] pt-2 text-[15px] font-bold text-[color:var(--lp-text)]">
-                <span>Total payable</span>
-                <span>{priced ? money(total) : '—'}</span>
-              </div>
+              <El
+                as="div"
+                part="totalRow"
+                className="mt-1 flex justify-between border-t border-black/[0.07] pt-2 text-[15px] font-bold text-[color:var(--lp-text)]"
+              >
+                <El as="span" part="totalLabel" html={content.totalLabel} />
+                <El as="span" part="totalValue">
+                  {priced ? money(total) : '—'}
+                </El>
+              </El>
 
               {quote?.error && (
                 <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
@@ -687,15 +826,29 @@ export function OrderFormClient({
                 {sending ? 'Placing your order…' : content.submitText}
               </El>
 
-              <div className="flex items-center justify-center gap-5 pt-2 text-[11px] text-[color:var(--lp-text)]/50">
+              <El
+                as="div"
+                part="trust"
+                className="flex items-center justify-center gap-5 pt-2 text-[11px] text-[color:var(--lp-text)]/50"
+              >
                 <span className="flex items-center gap-1.5">
-                  <Truck size={13} /> Cash on delivery
+                  <Truck size={13} />
+                  <El
+                    as="span"
+                    part="trustPrimary"
+                    html={content.trustPrimary}
+                  />
                 </span>
                 <span className="flex items-center gap-1.5">
-                  <ShieldCheck size={13} /> No advance payment
+                  <ShieldCheck size={13} />
+                  <El
+                    as="span"
+                    part="trustSecondary"
+                    html={content.trustSecondary}
+                  />
                 </span>
-              </div>
-            </div>
+              </El>
+            </El>
           </El>
         </div>
       </section>
@@ -719,11 +872,14 @@ export function OrderFormClient({
  */
 function OfferCard({
   offer,
+  index,
   active,
   onSelect,
   money,
 }: {
   offer: PublicOffer
+  /** Which card this is, so a merchant can style one and not the rest. */
+  index: number
   active: boolean
   onSelect: () => void
   money: (cents: number) => string
@@ -733,7 +889,10 @@ function OfferCard({
   const savings = Math.max(0, offer.compareAtCents - offer.headlinePriceCents)
 
   return (
-    <button
+    <El
+      as="button"
+      part="offerCard"
+      index={index}
       type="button"
       onClick={onSelect}
       className="relative flex items-center gap-3 rounded-xl border-2 p-3 text-left transition-colors"
@@ -745,19 +904,37 @@ function OfferCard({
       }}
     >
       {offer.imageUrl && (
-        <ProductThumb url={offer.imageUrl} className="h-20 w-16" />
+        <ProductThumb
+          url={offer.imageUrl}
+          part="offerImage"
+          index={index}
+          className="h-20 w-16"
+        />
       )}
       <div className="min-w-0 flex-1">
-        <p className="truncate text-[13px] font-semibold text-[color:var(--lp-text)]">
+        <El
+          as="p"
+          part="offerName"
+          index={index}
+          className="truncate text-[13px] font-semibold text-[color:var(--lp-text)]"
+        >
           {offer.label}
-        </p>
+        </El>
         {offer.description && (
-          <p className="truncate text-[11px] text-[color:var(--lp-text)]/55">
+          <El
+            as="p"
+            part="offerDescription"
+            index={index}
+            className="truncate text-[11px] text-[color:var(--lp-text)]/55"
+          >
             {offer.description}
-          </p>
+          </El>
         )}
         {hasPrice && (
-          <p
+          <El
+            as="p"
+            part="offerPrice"
+            index={index}
             className="mt-0.5 text-[13px] font-bold"
             style={{ color: 'var(--lp-accent)' }}
           >
@@ -775,21 +952,29 @@ function OfferCard({
                 {money(offer.compareAtCents)}
               </span>
             )}
-          </p>
+          </El>
         )}
         {offer.gift && (
-          <p className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-[color:var(--lp-text)]/60">
+          <El
+            as="p"
+            part="offerGift"
+            index={index}
+            className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-[color:var(--lp-text)]/60"
+          >
             <Gift size={11} /> Free {offer.gift.title}
-          </p>
+          </El>
         )}
       </div>
       {offer.badge && (
-        <span
+        <El
+          as="span"
+          part="offerBadge"
+          index={index}
           className="absolute -top-2 right-3 rounded-full px-2 py-0.5 text-[9px] font-bold tracking-wide text-white uppercase"
           style={{ background: 'var(--lp-accent)' }}
         >
           {offer.badge}
-        </span>
+        </El>
       )}
       {active && (
         <span
@@ -799,7 +984,7 @@ function OfferCard({
           <Check size={12} strokeWidth={3} className="text-white" />
         </span>
       )}
-    </button>
+    </El>
   )
 }
 
@@ -813,13 +998,21 @@ function OfferCard({
  */
 function ProductThumb({
   url,
+  part,
+  index,
   className,
 }: {
   url: string | null
+  /** The element key this photo answers to. Every caller declares one. */
+  part: string
+  index?: number
   className?: string
 }) {
   return (
-    <div
+    <El
+      as="div"
+      part={part}
+      index={index}
       className={cn(
         'relative flex-shrink-0 overflow-hidden rounded-lg bg-black/5',
         className ?? 'h-24 w-20 sm:h-28 sm:w-24'
@@ -834,7 +1027,7 @@ function ProductThumb({
           className="absolute inset-0 h-full w-full object-cover"
         />
       )}
-    </div>
+    </El>
   )
 }
 
@@ -891,11 +1084,14 @@ function OfferScopeNote({
 /** One line of a FIXED offer: the product, and its options as chips. */
 function FixedLine({
   line,
+  index,
   chosen,
   onChoose,
   money,
 }: {
   line: OfferLine
+  /** Which row this is, so one row can be styled apart from the rest. */
+  index: number
   chosen: string | undefined
   onChoose: (variantId: string) => void
   money: (cents: number) => string
@@ -912,10 +1108,13 @@ function FixedLine({
   const soldOut = !line.variants.some((variant) => variant.available)
 
   return (
-    <div className="flex items-center gap-3">
-      <ProductThumb url={line.imageUrl} />
+    <El as="div" part="line" index={index} className="flex items-center gap-3">
+      <ProductThumb url={line.imageUrl} part="lineImage" index={index} />
       <div className="min-w-0 flex-1">
-        <p
+        <El
+          as="p"
+          part="lineName"
+          index={index}
           className={cn(
             'line-clamp-2 text-[13.5px] leading-snug font-medium text-[color:var(--lp-text)]',
             soldOut && 'opacity-55'
@@ -933,7 +1132,7 @@ function FixedLine({
               Out of stock
             </span>
           )}
-        </p>
+        </El>
         {pinned ? (
           <p className="mt-0.5 text-[11px] text-[color:var(--lp-text)]/50">
             {pinned.title}
@@ -951,11 +1150,19 @@ function FixedLine({
                 Select an option
               </p>
             )}
-            <div className="mt-1.5 flex flex-wrap gap-1.5">
-              {line.variants.map((variant) => {
+            <El
+              as="div"
+              part="lineOptions"
+              index={index}
+              className="mt-1.5 flex flex-wrap gap-1.5"
+            >
+              {line.variants.map((variant, optionIndex) => {
                 const active = chosen === variant.id
                 return (
-                  <button
+                  <El
+                    as="button"
+                    part="option"
+                    index={optionIndex}
                     type="button"
                     key={variant.id}
                     disabled={!variant.available}
@@ -990,10 +1197,10 @@ function FixedLine({
                   >
                     {variant.title}
                     {varies ? ` · ${money(variant.priceCents)}` : ''}
-                  </button>
+                  </El>
                 )
               })}
-            </div>
+            </El>
             {/* One gone size among several is legible from the chips alone;
                 naming them only repeats the row. This is for the case where
                 the buyer has options but the specific one they came for is
@@ -1016,7 +1223,7 @@ function FixedLine({
           money={money}
         />
       </div>
-    </div>
+    </El>
   )
 }
 
@@ -1081,19 +1288,22 @@ function PoolPicker({
       : `${bounds.min || 1}${bounds.max ? `–${bounds.max}` : '+'}`
 
   return (
-    <div className="border-b border-black/[0.06]">
+    <El as="div" part="items" className="border-b border-black/[0.06]">
       {isCollection ? (
         <div className="px-5 pt-5 sm:px-6">
-          <p className={labelClass}>
+          <El as="p" part="poolHint" className={labelClass}>
             {offer.tierMode === 'THRESHOLD'
               ? `Pick ${bounds.min || 1} or more — price drops as you add`
               : `Pick any ${rangeLabel} — price drops as you add`}
-          </p>
-          <div className="flex flex-wrap gap-1.5">
-            {offer.tiers.map((t) => {
+          </El>
+          <El as="div" part="tierChips" className="flex flex-wrap gap-1.5">
+            {offer.tiers.map((t, tierIndex) => {
               const active = t.quantity === activeTierQty
               return (
-                <span
+                <El
+                  as="span"
+                  part="tier"
+                  index={tierIndex}
                   key={t.quantity}
                   className="rounded-lg border px-2.5 py-1 text-[11.5px] font-medium transition-colors"
                   style={{
@@ -1110,17 +1320,17 @@ function PoolPicker({
                   {t.reward === 'PERCENT'
                     ? `${t.discountBps / 100}% off`
                     : money(t.priceCents)}
-                </span>
+                </El>
               )
             })}
-          </div>
+          </El>
         </div>
       ) : (
         <div className="px-5 pt-5 sm:px-6">
-          <p className={labelClass}>
+          <El as="p" part="poolHint" className={labelClass}>
             Pick what you want
             {bounds.min > 1 || bounds.max ? ` (${rangeLabel} items)` : ''}
-          </p>
+          </El>
         </div>
       )}
 
@@ -1128,6 +1338,7 @@ function PoolPicker({
         {offer.pool.map((line, index) => (
           <PoolRow
             key={`${line.productId}-${index}`}
+            index={index}
             line={line}
             picks={picks}
             onPicks={onPicks}
@@ -1137,7 +1348,9 @@ function PoolPicker({
           />
         ))}
 
-        <p
+        <El
+          as="p"
+          part="poolCount"
           className="pt-1 text-center text-[12px]"
           style={{ color: atMax ? 'var(--lp-accent)' : 'var(--lp-text)' }}
         >
@@ -1152,9 +1365,9 @@ function PoolPicker({
                     ? ` — add ${(bounds.min || 1) - offerQty} more`
                     : ''
                 }${extraQty > 0 ? ` · ${extraQty} at the regular price` : ''}`}
-        </p>
+        </El>
       </div>
-    </div>
+    </El>
   )
 }
 
@@ -1174,6 +1387,7 @@ function PoolPicker({
  */
 function PoolRow({
   line,
+  index,
   picks,
   onPicks,
   money,
@@ -1181,6 +1395,8 @@ function PoolRow({
   atMax,
 }: {
   line: OfferLine
+  /** Which row this is, so one row can be styled apart from the rest. */
+  index: number
   picks: Record<string, number>
   onPicks: (next: Record<string, number>) => void
   money: (cents: number) => string
@@ -1202,23 +1418,31 @@ function PoolRow({
   // than advertised to the buyer who came for it.
   if (sellable.length === 0) {
     return (
-      <div
+      <El
+        as="div"
+        part="line"
+        index={index}
         aria-disabled
         className="flex gap-3 rounded-xl border-2 p-3 select-none"
         style={{ borderColor: 'rgba(0,0,0,0.08)', background: 'white' }}
       >
         <div className="opacity-45">
-          <ProductThumb url={line.imageUrl} />
+          <ProductThumb url={line.imageUrl} part="lineImage" index={index} />
         </div>
         <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
-          <p className="line-clamp-2 text-[13.5px] leading-snug font-medium text-[color:var(--lp-text)] opacity-55">
+          <El
+            as="p"
+            part="lineName"
+            index={index}
+            className="line-clamp-2 text-[13.5px] leading-snug font-medium text-[color:var(--lp-text)] opacity-55"
+          >
             {line.title}
-          </p>
+          </El>
           <span className="flex-shrink-0 text-[11px] font-semibold tracking-wide text-amber-700 uppercase">
             Out of stock
           </span>
         </div>
-      </div>
+      </El>
     )
   }
 
@@ -1271,7 +1495,10 @@ function PoolRow({
   }
 
   return (
-    <div
+    <El
+      as="div"
+      part="line"
+      index={index}
       onClick={toggle}
       className="flex cursor-pointer gap-3 rounded-xl border-2 p-3 transition-colors select-none"
       style={{
@@ -1281,14 +1508,24 @@ function PoolRow({
           : 'white',
       }}
     >
-      <ProductThumb url={line.imageUrl} />
+      <ProductThumb url={line.imageUrl} part="lineImage" index={index} />
       <div className="flex min-w-0 flex-1 flex-col justify-between gap-2">
         <div className="min-w-0">
-          <p className="line-clamp-2 text-[13.5px] leading-snug font-medium text-[color:var(--lp-text)]">
+          <El
+            as="p"
+            part="lineName"
+            index={index}
+            className="line-clamp-2 text-[13.5px] leading-snug font-medium text-[color:var(--lp-text)]"
+          >
             {line.title}
-          </p>
+          </El>
           {priced && (
-            <p className="mt-0.5 text-[12.5px] font-semibold text-[color:var(--lp-text)]/70">
+            <El
+              as="p"
+              part="linePrice"
+              index={index}
+              className="mt-0.5 text-[12.5px] font-semibold text-[color:var(--lp-text)]/70"
+            >
               {!variant && varies && (
                 <span className="font-normal opacity-70">from </span>
               )}
@@ -1302,7 +1539,7 @@ function PoolRow({
                   · {variant.excluded ? 'not in this offer' : 'no offer'}
                 </span>
               )}
-            </p>
+            </El>
           )}
           {sellable.length > 1 && !variant && (
             <p
@@ -1330,15 +1567,21 @@ function PoolRow({
             comfortable rows instead of four ragged ones. */}
         <div className="flex flex-wrap items-end justify-between gap-2">
           {sellable.length > 1 && (
-            <div
+            <El
+              as="div"
+              part="lineOptions"
+              index={index}
               className="flex min-w-[150px] flex-1 flex-wrap gap-1.5"
-              onClick={(e) => e.stopPropagation()}
+              onClick={(e: React.MouseEvent) => e.stopPropagation()}
             >
-              {sellable.map((choice) => {
+              {sellable.map((choice, optionIndex) => {
                 const active = variant?.id === choice.id
                 const chosenQty = picks[choice.id] ?? 0
                 return (
-                  <button
+                  <El
+                    as="button"
+                    part="option"
+                    index={optionIndex}
                     type="button"
                     key={choice.id}
                     aria-pressed={active}
@@ -1374,15 +1617,18 @@ function PoolRow({
                   >
                     {choice.title}
                     {chosenQty > 0 ? ` ×${chosenQty}` : ''}
-                  </button>
+                  </El>
                 )
               })}
-            </div>
+            </El>
           )}
           {/* Covers the buttons, the count and the gaps between them. */}
-          <div
+          <El
+            as="div"
+            part="stepper"
+            index={index}
             className="ml-auto flex flex-shrink-0 items-center gap-1"
-            onClick={(e) => e.stopPropagation()}
+            onClick={(e: React.MouseEvent) => e.stopPropagation()}
           >
             <button
               type="button"
@@ -1408,10 +1654,10 @@ function PoolRow({
             >
               <Plus size={15} />
             </button>
-          </div>
+          </El>
         </div>
       </div>
-    </div>
+    </El>
   )
 }
 

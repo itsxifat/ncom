@@ -7,6 +7,7 @@ import { Switch } from '@/components/ui/switch'
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { FormSelect } from '@/components/ui/form-select'
 import { FontPicker } from '@/components/ui/font-picker'
+import { ColorField } from '@/components/ui/color-picker'
 
 /**
  * Design controls shared by every section.
@@ -402,6 +403,13 @@ function Select({
   )
 }
 
+/**
+ * A section colour.
+ *
+ * The shared picker, with the section's own value mapped to and from the empty
+ * string this panel stores — `''` means "inherit the page theme" here, the same
+ * thing `undefined` means one layer down in the element design.
+ */
 function ColorInput({
   value,
   onChange,
@@ -412,29 +420,11 @@ function ColorInput({
   allowClear?: boolean
 }) {
   return (
-    <div className="flex items-center gap-2">
-      <Input
-        type="color"
-        value={value || '#000000'}
-        onChange={(event) => onChange(event.target.value)}
-        className="h-9 w-12 p-1"
-      />
-      {/* The text field is the accessible path: a bare colour input cannot be
-          typed into, pasted into, or read by a screen reader. */}
-      <Input
-        value={value}
-        placeholder={allowClear ? 'Theme' : '#000000'}
-        onChange={(event) => onChange(event.target.value)}
-      />
-      {allowClear && value && (
-        <button
-          type="button"
-          onClick={() => onChange('')}
-          className="text-muted-foreground hover:text-foreground text-xs underline"
-        >
-          Clear
-        </button>
-      )}
-    </div>
+    <ColorField
+      value={value || undefined}
+      onChange={(next) => onChange(next ?? '')}
+      allowClear={allowClear}
+      placeholder={allowClear ? 'Theme' : '#000000'}
+    />
   )
 }

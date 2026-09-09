@@ -58,11 +58,31 @@ export interface CanvasRevealMessage {
   sectionId: string
 }
 
+/**
+ * Turns inline text editing on or off for one element.
+ *
+ * `elementKey: null` ends it. The shell decides *whether* an element's words
+ * can be edited — that depends on the block definition, which lives on its side
+ * — and the canvas only carries out the instruction, so a block whose element
+ * declares no content field never becomes editable by accident.
+ */
+export interface CanvasEditMessage {
+  type: 'ncom:edit-element'
+  /**
+   * Carried rather than read from the canvas's own selection, because the
+   * selection is posted from an effect and this from an event handler — on a
+   * double-click that selects and edits in one go, this arrives first.
+   */
+  sectionId: string
+  elementKey: string | null
+}
+
 export type ShellToCanvasMessage =
   | CanvasUpdateMessage
   | CanvasSelectMessage
   | CanvasMeasureMessage
   | CanvasRevealMessage
+  | CanvasEditMessage
 
 // ── Canvas → shell ────────────────────────────────────────────────────
 
@@ -81,6 +101,14 @@ export interface CanvasRect {
   height: number
 }
 
+/** One rung of the element path — an ancestor, or the element itself. */
+export interface CanvasElementRef {
+  /** The shared element key, without an instance suffix. */
+  elementKey: string
+  /** Which instance, for a repeated element. */
+  index?: number
+}
+
 /** What the shell needs to know about one element to draw and drag it. */
 export interface CanvasElementInfo {
   sectionId: string
@@ -88,6 +116,16 @@ export interface CanvasElementInfo {
   elementKey: string
   /** Which instance was pointed at, for a repeated element. */
   index?: number
+  /**
+   * The styleable elements this one sits inside, outermost first.
+   *
+   * Reported so the shell can offer "select what contains this" without a
+   * second round trip. A click lands on the innermost thing under the pointer,
+   * which is usually right and occasionally one level too deep — a merchant
+   * aiming at a card and hitting its heading. Walking back out is the fix, and
+   * only the canvas knows the chain, because only the canvas has the DOM.
+   */
+  ancestors?: CanvasElementRef[]
   rect: CanvasRect
   /**
    * The box this element is positioned inside — its offset parent.
@@ -122,11 +160,24 @@ export interface CanvasGeometryMessage {
   element: CanvasElementInfo | null
 }
 
+/** Words typed straight onto the page, on their way to the block's content. */
+export interface CanvasTextMessage {
+  type: 'ncom:element-text'
+  sectionId: string
+  elementKey: string
+  index?: number
+  /** The element's markup, unsanitised — the shell cleans it before storing. */
+  html: string
+  /** True on the last message of an edit, when the merchant clicked away. */
+  done: boolean
+}
+
 export type CanvasToShellMessage =
   | CanvasReadyMessage
   | CanvasHoverMessage
   | CanvasClickMessage
   | CanvasGeometryMessage
+  | CanvasTextMessage
 
 // ── Element keys ──────────────────────────────────────────────────────
 

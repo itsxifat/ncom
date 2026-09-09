@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { Bookmark, RotateCcw, Trash2 } from 'lucide-react'
 
 import { useBuilderStore, styleBreakpoint } from './store'
+import { useThemeSwatches } from './themeSwatches'
 import {
   ColorControl,
   CornersControl,
@@ -29,6 +30,7 @@ import {
 } from '../sections/elementStyle'
 import type { ElementKind } from '../sections/elementDescriptors'
 import { FONT_GROUPS } from '@/lib/fonts'
+import { FormSelect } from '@/components/ui/form-select'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
@@ -79,6 +81,7 @@ export function ElementStylePanel({
   const setElementDesign = useBuilderStore((s) => s.setElementDesign)
   const resetElementProperty = useBuilderStore((s) => s.resetElementProperty)
   const resetElement = useBuilderStore((s) => s.resetElement)
+  const swatches = useThemeSwatches()
 
   const [target, setTarget] = useState<'normal' | 'hover'>('normal')
   const [linkPadding, setLinkPadding] = useState(true)
@@ -181,12 +184,17 @@ export function ElementStylePanel({
             set={has('fontFamily')}
             onReset={() => reset('fontFamily')}
           >
-            <select
+            {/* Not a native `<select>`: its option list is drawn by the
+                operating system, which never sees this page's theme and paints
+                a dark-mode dropdown as white text on a white sheet. */}
+            <FormSelect
+              aria-label="Font"
+              size="sm"
               value={style.fontFamily ?? ''}
               onChange={(event) =>
                 set({ fontFamily: event.target.value || undefined })
               }
-              className="border-input bg-card h-8 rounded-[0.625rem] border px-2 text-xs"
+              className="border-input bg-card h-8 w-full rounded-[0.625rem] border px-2 text-xs"
             >
               <option value="">Theme font</option>
               {FONT_GROUPS.map((group) => (
@@ -198,7 +206,7 @@ export function ElementStylePanel({
                   ))}
                 </optgroup>
               ))}
-            </select>
+            </FormSelect>
           </Row>
 
           <div className="grid grid-cols-2 gap-2">
@@ -264,6 +272,7 @@ export function ElementStylePanel({
           <Row label="Colour" set={has('color')} onReset={() => reset('color')}>
             <ColorControl
               value={style.color}
+              swatches={swatches}
               onChange={(value) => set({ color: value })}
             />
           </Row>
@@ -358,6 +367,7 @@ export function ElementStylePanel({
         >
           <ColorControl
             value={style.backgroundColor}
+            swatches={swatches}
             onChange={(value) => set({ backgroundColor: value })}
           />
         </Row>
@@ -372,6 +382,7 @@ export function ElementStylePanel({
             <div className="grid grid-cols-2 gap-1.5">
               <ColorControl
                 value={style.gradient?.from}
+                swatches={swatches}
                 onChange={(from) =>
                   set({ gradient: { ...style.gradient, from } })
                 }
@@ -379,6 +390,7 @@ export function ElementStylePanel({
               />
               <ColorControl
                 value={style.gradient?.to}
+                swatches={swatches}
                 onChange={(to) => set({ gradient: { ...style.gradient, to } })}
                 placeholder="To"
               />
@@ -530,6 +542,7 @@ export function ElementStylePanel({
             >
               <ColorControl
                 value={style.borderColor}
+                swatches={swatches}
                 onChange={(value) => set({ borderColor: value })}
                 placeholder="Text colour"
               />

@@ -43,9 +43,17 @@ export interface ElementDescriptor {
    */
   repeated?: boolean
   /**
-   * Which content field carries this element's words, when it has any. Lets the
-   * canvas send a double-click straight into the right rich-text editor rather
-   * than making the merchant find the field in the panel.
+   * Which content field carries this element's words, when it has any.
+   *
+   * A path into the block's content, not just a key, so an element the block
+   * repeats can name where *its* words live: `items[].title` addresses
+   * `content.items[3].title` for the fourth card. `[]` is filled in with the
+   * instance index the canvas reports.
+   *
+   * This is what makes a double-click on the canvas edit the right words. An
+   * element without it can be styled but not typed into, so a block that leaves
+   * it off on something the merchant can read is a block with text they cannot
+   * reach from the page.
    */
   contentField?: string
   /** Extras dropped into this element land inside it. */
@@ -199,3 +207,90 @@ export const ICON_NAMES = [
 ] as const
 
 export type IconName = (typeof ICON_NAMES)[number]
+
+// ── Content paths ─────────────────────────────────────────────────────
+
+/**
+ * A descriptor's `contentField` as concrete path segments.
+ *
+ * `items[].title` with index 3 becomes `['items', 3, 'title']`. Returns null
+ * when the element carries no words, or when it is repeated and nobody said
+ * which instance — writing to `items[].title` with no index would have to
+ * guess, and the guess would silently retitle the first card.
+ */
+export function contentPath(
+  field: string | undefined,
+  index?: number
+): (string | number)[] | null {
+  if (!field) return null
+  const segments: (string | number)[] = []
+  for (const raw of field.split('.')) {
+    const match = /^([A-Za-z0-9_]+)(\[\])?$/.exec(raw)
+    if (!match) return null
+    segments.push(match[1]!)
+    if (match[2]) {
+      if (index === undefined || !Number.isInteger(index)) return null
+      segments.push(index)
+    }
+  }
+  return segments.length ? segments : null
+}
+
+/** Reads a path out of a content object, or undefined if it does not lead anywhere. */
+export function readContentPath(
+  content: unknown,
+  path: (string | number)[]
+): unknown {
+  let cursor: unknown = content
+  for (const segment of path) {
+    if (cursor === null || typeof cursor !== 'object') return undefined
+    cursor = (cursor as Record<string | number, unknown>)[segment]
+  }
+  return cursor
+}
+
+/**
+ * A copy of `content` with one path rewritten.
+ *
+ * Copies every container on the way down rather than mutating, because the
+ * builder store compares by reference to decide what changed — a mutation in
+ * place would update the page and leave the canvas showing the old words.
+ */
+export function writeContentPath(
+  content: Record<string, unknown>,
+  path: (string | number)[],
+  value: unknown
+): Record<string, unknown> {
+  if (!path.length) return content
+  const [head, ...rest] = path
+  const key = head!
+  const child = (content as Record<string | number, unknown>)[key]
+
+  if (!rest.length) {
+    return replaceAt(content, key, value)
+  }
+
+  const nextChild =
+    child && typeof child === 'object'
+      ? writeContentPath(child as Record<string, unknown>, rest, value)
+      : // A path into something that is not there cannot be written without
+        // inventing a shape the block's schema may not accept, so it is left
+        // alone. The merchant's edit is dropped rather than corrupting content.
+        undefined
+
+  if (nextChild === undefined) return content
+  return replaceAt(content, key, nextChild)
+}
+
+function replaceAt(
+  container: Record<string, unknown>,
+  key: string | number,
+  value: unknown
+): Record<string, unknown> {
+  if (Array.isArray(container)) {
+    const next = [...container]
+    next[key as number] = value
+    return next as unknown as Record<string, unknown>
+  }
+  return { ...container, [key]: value }
+}

@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { FormSelect } from '@/components/ui/form-select'
+import { ColorField } from '@/components/ui/color-picker'
 import type { Corners, Sides, Shadow } from '../sections/elementStyle'
 
 /**
@@ -190,51 +191,32 @@ export function LengthControl({
   )
 }
 
+/**
+ * A colour, or nothing.
+ *
+ * Delegates to the shared picker rather than owning any colour UI of its own,
+ * so the swatch a merchant clicks in this panel, in the floating toolbar and in
+ * the rich-text bar are one control with one behaviour.
+ */
 export function ColorControl({
   value,
   onChange,
   placeholder = 'Theme',
+  swatches,
 }: {
   value: string | undefined
   onChange: (value: string | undefined) => void
   placeholder?: string
+  /** Colours worth one click — the page theme's. */
+  swatches?: string[]
 }) {
   return (
-    <div className="flex items-center gap-1.5">
-      <label className="border-input relative size-8 shrink-0 overflow-hidden rounded-lg border">
-        <span
-          className="block size-full"
-          // `backgroundColor` rather than the `background` shorthand: React
-          // warns when a shorthand and its longhands are updated in the same
-          // style object, because whichever is applied second silently wins.
-          style={{
-            backgroundColor: value || 'transparent',
-            // A checkerboard behind the swatch, so "no colour set" is visibly
-            // different from "set to white".
-            backgroundImage: value
-              ? undefined
-              : 'linear-gradient(45deg,#ccc 25%,transparent 25%,transparent 75%,#ccc 75%),linear-gradient(45deg,#ccc 25%,transparent 25%,transparent 75%,#ccc 75%)',
-            backgroundSize: '8px 8px',
-            backgroundPosition: '0 0, 4px 4px',
-          }}
-        />
-        <input
-          type="color"
-          aria-label="Colour"
-          value={value ?? '#000000'}
-          onChange={(event) => onChange(event.target.value)}
-          className="absolute inset-0 cursor-pointer opacity-0"
-        />
-      </label>
-      {/* The text field is the accessible path: a bare colour input cannot be
-          typed into, pasted into, or read by a screen reader. */}
-      <Input
-        value={value ?? ''}
-        placeholder={placeholder}
-        onChange={(event) => onChange(event.target.value || undefined)}
-        className="h-8 text-xs"
-      />
-    </div>
+    <ColorField
+      value={value}
+      onChange={onChange}
+      placeholder={placeholder}
+      swatches={swatches}
+    />
   )
 }
 

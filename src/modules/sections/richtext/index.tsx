@@ -75,13 +75,11 @@ export const richtextSection: SectionDefinition<RichtextContent> = {
   elements: [
     { key: 'column', label: 'Text column', kind: 'container', slot: true },
     { key: 'title', label: 'Heading', kind: 'heading', contentField: 'title' },
-    {
-      key: 'body',
-      label: 'Paragraph',
-      kind: 'text',
-      repeated: true,
-      contentField: 'body',
-    },
+    // No `contentField`. The paragraphs are a split of one body field on
+    // blank lines, so there is no path that addresses the third one — writing
+    // to `body` from a paragraph would replace the whole block's copy with
+    // that paragraph. The body is edited as a whole, in the Content tab.
+    { key: 'body', label: 'Paragraph', kind: 'text', repeated: true },
   ],
   slots: [{ key: 'content', label: 'Text column' }],
   Renderer: RichtextRenderer,

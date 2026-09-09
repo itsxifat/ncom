@@ -60,6 +60,18 @@ interface BuilderState {
    * editing a block the merchant is not looking at.
    */
   selectedElementKey: string | null
+  /**
+   * The elements the selected one sits inside, outermost first.
+   *
+   * Reported by the canvas on a click, because only the DOM knows what contains
+   * what. It is the breadcrumb in the panel and the target of Escape — without
+   * it a merchant who clicks a heading inside a card has no way back out to the
+   * card except by hunting for it in the element list.
+   *
+   * Empty when the selection came from the list rather than from the page,
+   * where there is no path to report.
+   */
+  selectedPath: { elementKey: string; index?: number }[]
   breakpoint: Breakpoint
   isDirty: boolean
   theme: PageTheme | null
@@ -82,7 +94,11 @@ interface BuilderState {
   updateSectionConfig: (id: string, config: SectionConfig) => void
   toggleSectionVisibility: (id: string) => void
 
-  selectElement: (sectionId: string | null, elementKey: string | null) => void
+  selectElement: (
+    sectionId: string | null,
+    elementKey: string | null,
+    path?: { elementKey: string; index?: number }[]
+  ) => void
   /** Merges a patch into one element's style at one breakpoint. */
   setElementStyle: (
     sectionId: string,
@@ -186,6 +202,7 @@ export const useBuilderStore = create<BuilderState>()(
       sections: [],
       selectedSectionId: null,
       selectedElementKey: null,
+      selectedPath: [],
       breakpoint: 'desktop',
       isDirty: false,
       theme: null,
@@ -204,12 +221,15 @@ export const useBuilderStore = create<BuilderState>()(
           // section that has no such element.
           selectedElementKey:
             state.selectedSectionId === id ? state.selectedElementKey : null,
+          selectedPath:
+            state.selectedSectionId === id ? state.selectedPath : [],
         })),
 
-      selectElement: (sectionId, elementKey) =>
+      selectElement: (sectionId, elementKey, path) =>
         set({
           selectedSectionId: sectionId,
           selectedElementKey: elementKey,
+          selectedPath: path ?? [],
         }),
 
       addSection: (section) =>

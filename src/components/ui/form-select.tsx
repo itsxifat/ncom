@@ -4,7 +4,9 @@ import * as React from 'react'
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
@@ -50,6 +52,14 @@ export interface FormSelectProps {
   'aria-invalid'?: boolean
   /** `page` borrows the surrounding colours, for merchant storefronts. */
   tone?: ControlTone
+  /**
+   * Trigger height, matching the shared `SelectTrigger` sizes.
+   *
+   * `lg` stretches to fill its container, which is right in a form and wrong in
+   * a toolbar — so a compact control has to be able to ask for `sm`, or its
+   * width class loses to the variant that makes `lg` full width.
+   */
+  size?: 'sm' | 'default' | 'lg'
   children?: React.ReactNode
 }
 
@@ -62,6 +72,8 @@ interface ParsedOption {
   value: string
   label: React.ReactNode
   disabled?: boolean
+  /** The `<optgroup>` this option was declared under, if any. */
+  group?: string
 }
 
 /**
@@ -72,14 +84,27 @@ interface ParsedOption {
  * inside a fragment — so a group of options wrapped in `<>…</>` needs the
  * recursion.
  */
-function parseOptions(children: React.ReactNode): ParsedOption[] {
+function parseOptions(
+  children: React.ReactNode,
+  group?: string
+): ParsedOption[] {
   const options: ParsedOption[] = []
   for (const child of React.Children.toArray(children)) {
     if (!React.isValidElement(child)) continue
 
     if (child.type === React.Fragment) {
       const props = child.props as { children?: React.ReactNode }
-      options.push(...parseOptions(props.children))
+      options.push(...parseOptions(props.children, group))
+      continue
+    }
+    // A group's options are flattened into the same list carrying their
+    // heading, rather than nested. The list is rendered by walking it once and
+    // opening a new group whenever the heading changes, which keeps grouped and
+    // ungrouped selects on a single code path — and means an `<optgroup>` that
+    // arrives inside a fragment or a `.map()` still groups.
+    if (child.type === 'optgroup') {
+      const props = child.props as React.ComponentProps<'optgroup'>
+      options.push(...parseOptions(props.children, props.label ?? group))
       continue
     }
     if (child.type !== 'option') continue
@@ -96,9 +121,23 @@ function parseOptions(children: React.ReactNode): ParsedOption[] {
       value,
       label: props.children ?? value,
       disabled: props.disabled,
+      group,
     })
   }
   return options
+}
+
+/** The options in source order, cut into the groups they were declared in. */
+function groupOptions(
+  options: ParsedOption[]
+): { group?: string; options: ParsedOption[] }[] {
+  const sections: { group?: string; options: ParsedOption[] }[] = []
+  for (const option of options) {
+    const last = sections[sections.length - 1]
+    if (last && last.group === option.group) last.options.push(option)
+    else sections.push({ group: option.group, options: [option] })
+  }
+  return sections
 }
 
 export function FormSelect({
@@ -112,11 +151,17 @@ export function FormSelect({
   className,
   placeholder,
   tone = 'app',
+  size = 'lg',
   children,
   'aria-label': ariaLabel,
   'aria-invalid': ariaInvalid,
 }: FormSelectProps) {
   const options = React.useMemo(() => parseOptions(children), [children])
+
+  const grouped = React.useMemo(
+    () => options.some((option) => option.group !== undefined),
+    [options]
+  )
 
   // Lets the trigger render the selected option's label rather than its value.
   const items = React.useMemo(() => {
@@ -149,7 +194,7 @@ export function FormSelect({
     >
       <SelectTrigger
         id={id}
-        size="lg"
+        size={size}
         aria-label={ariaLabel}
         aria-invalid={ariaInvalid}
         className={cn('min-w-0 text-sm', TRIGGER_TONE[tone], className)}
@@ -157,15 +202,33 @@ export function FormSelect({
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent>
-        {options.map((option) => (
-          <SelectItem
-            key={option.value}
-            value={option.value}
-            disabled={option.disabled}
-          >
-            {option.label}
-          </SelectItem>
-        ))}
+        {/* Ungrouped lists stay flat rather than being wrapped in a group of
+            one: the wrapper adds padding and a heading slot, and a plain
+            dropdown should not pay for a feature it is not using. */}
+        {grouped
+          ? groupOptions(options).map((section, index) => (
+              <SelectGroup key={`${section.group ?? ''}-${index}`}>
+                {section.group && <SelectLabel>{section.group}</SelectLabel>}
+                {section.options.map((option) => (
+                  <SelectItem
+                    key={option.value}
+                    value={option.value}
+                    disabled={option.disabled}
+                  >
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            ))
+          : options.map((option) => (
+              <SelectItem
+                key={option.value}
+                value={option.value}
+                disabled={option.disabled}
+              >
+                {option.label}
+              </SelectItem>
+            ))}
       </SelectContent>
     </Select>
   )
