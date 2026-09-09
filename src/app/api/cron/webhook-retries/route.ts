@@ -1,7 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { timingSafeEqual } from 'node:crypto'
 import { retryPendingDeliveries } from '@/server/services/webhookService'
-import { retryPendingForwards } from '@/server/orders'
 
 /**
  * Scheduled sweep that retries webhook deliveries whose backoff has elapsed.
@@ -24,14 +23,11 @@ import { retryPendingForwards } from '@/server/orders'
  * one causes outbound HTTP to merchant-supplied URLs, so an open endpoint would
  * be a way to make the platform generate traffic on demand.
  *
- * It also drains the order handoff queue, which has the same shape and the same
- * schedule. Deliberately the same route rather than a second one: this is the
- * job that has to be installed in a crontab on a box somebody administers by
- * hand, and a feature whose reliability depends on an operator remembering to
- * add a second line is a feature that is reliable on the machines where they
- * did. The stakes are not the same, though — a missed webhook is a
- * notification, a missed handoff is a sale nobody is packing — so the two are
- * swept independently and one failing cannot stop the other.
+ * Order handoffs are swept by `cron/order-forwards`, not here. They have the
+ * same shape and the same schedule and were briefly drained by this route, but
+ * the two must be switchable independently: a deployment that has never run
+ * this job accumulates deliveries indefinitely, and turning it on to get order
+ * retries would replay every one of them at the merchant as a side effect.
  */
 
 function isAuthorized(request: NextRequest): boolean {
@@ -52,17 +48,8 @@ async function run(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const [webhooks, forwards] = await Promise.allSettled([
-    retryPendingDeliveries(),
-    retryPendingForwards(),
-  ])
-
-  return NextResponse.json({
-    // `attempted` keeps its old meaning and its old name: something may already
-    // be reading it.
-    attempted: settled(webhooks),
-    orderForwards: settled(forwards),
-  })
+  const attempted = await retryPendingDeliveries()
+  return NextResponse.json({ attempted })
 }
 
 export async function POST(request: NextRequest) {
@@ -72,13 +59,6 @@ export async function POST(request: NextRequest) {
 /** GET behaves identically, for schedulers that can only issue one. */
 export async function GET(request: NextRequest) {
   return run(request)
-}
-
-/** A sweep that threw is reported as null rather than failing the whole run. */
-function settled(result: PromiseSettledResult<number>): number | null {
-  if (result.status === 'fulfilled') return result.value
-  console.error('[cron] retry sweep failed', result.reason)
-  return null
 }
 
 export const runtime = 'nodejs'
