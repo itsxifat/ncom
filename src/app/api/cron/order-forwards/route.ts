@@ -1,9 +1,10 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { timingSafeEqual } from 'node:crypto'
-import { retryPendingForwards } from '@/server/orders'
+import { retryPendingForwards, retryPendingSyncs } from '@/server/orders'
 
 /**
- * Scheduled sweep that retries order handoffs whose backoff has elapsed.
+ * Scheduled sweep that retries order handoffs, and the changes that follow
+ * them, whose backoff has elapsed.
  *
  * The first attempt at handing an order to a merchant's website happens inline,
  * right after the response that created it. Every attempt after that has to
@@ -51,8 +52,21 @@ async function run(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const attempted = await retryPendingForwards()
-  return NextResponse.json({ attempted })
+  // Handoffs first, then the changes that follow them. A change to an order
+  // whose original handoff has not landed would be refused for an unknown
+  // order, and draining the two in this order means the common case — a site
+  // that was briefly down — heals in one sweep instead of two.
+  //
+  // Settled independently so one throwing cannot stop the other.
+  const [placed, changed] = await Promise.allSettled([
+    retryPendingForwards(),
+    retryPendingSyncs(),
+  ])
+
+  return NextResponse.json({
+    attempted: settled(placed),
+    changes: settled(changed),
+  })
 }
 
 export async function POST(request: NextRequest) {
@@ -62,6 +76,13 @@ export async function POST(request: NextRequest) {
 /** GET behaves identically, for schedulers that can only issue one. */
 export async function GET(request: NextRequest) {
   return run(request)
+}
+
+/** A sweep that threw is reported as null rather than failing the whole run. */
+function settled(result: PromiseSettledResult<number>): number | null {
+  if (result.status === 'fulfilled') return result.value
+  console.error('[cron] order sweep failed', result.reason)
+  return null
 }
 
 export const runtime = 'nodejs'

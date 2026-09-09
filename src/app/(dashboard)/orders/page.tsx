@@ -130,6 +130,7 @@ export default async function OrdersPage({
           endpointHost={endpointHost}
           pending={forwards.pending}
           stuck={forwards.stuck}
+          conflicted={forwards.conflicted}
         />
         <EmptyState
           icon={ShoppingBag}
@@ -151,6 +152,7 @@ export default async function OrdersPage({
         endpointHost={endpointHost}
         pending={forwards.pending}
         stuck={forwards.stuck}
+        conflicted={forwards.conflicted}
       />
 
       <OrderFilters

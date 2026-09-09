@@ -167,7 +167,13 @@ export interface HandoffOrder {
  * one junk order to delete, which is why the sample is unmistakable: its
  * `orderNumber` starts `TEST-` and its lines say so.
  */
-export type HandoffTopic = 'order.placed' | 'order.test'
+export type HandoffTopic =
+  | 'order.placed'
+  | 'order.test'
+  /** The order changed here. Carries the whole order, not a diff. */
+  | 'order.updated'
+  /** Cancelled here. Release whatever you are holding for it. */
+  | 'order.cancelled'
 
 /** The full request body. Versioned so a v2 can be told apart on arrival. */
 export interface HandoffEnvelope {
@@ -179,6 +185,32 @@ export interface HandoffEnvelope {
   sentAt: string
   organizationId: string
   order: HandoffOrder
+
+  /**
+   * What this message believes the receiver currently holds, and what applying
+   * it will produce. Absent on `order.placed` and `order.test` — there is
+   * nothing yet to have a revision.
+   *
+   * A receiver **must** refuse a message whose `baseRevision` is not the
+   * revision it holds, with 409 and its own current revision. That refusal is
+   * the entire defence against two people editing the same order in two
+   * systems and one of the edits vanishing. Applying it anyway, or merging,
+   * produces an order that neither person asked for.
+   *
+   * A message whose `revision` the receiver has already applied is a retry:
+   * answer 200, change nothing.
+   */
+  baseRevision?: number
+  revision?: number
+
+  /** Why, on `order.cancelled`. Free text, for the record. */
+  reason?: string | null
+}
+
+/** What a receiver answers a sync message with. */
+export interface SyncAck extends HandoffAck {
+  /** The revision the receiver now holds. Lets both sides confirm they agree. */
+  revision?: number
 }
 
 /**

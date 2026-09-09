@@ -2,6 +2,7 @@ import 'server-only'
 import { prisma } from '@/server/db/client'
 import { requireHumanOrgAccess } from '@/server/auth/rbac'
 import { holdForOrder, returnToStock } from './inventoryService'
+import { isForwardedOrder, syncOrderChange } from '@/server/orders'
 import { resolveVariants, type ResolvedVariant } from '@/server/catalog'
 import { emitOrderWebhook } from './orderService'
 import { loadTaxRates, parseAddress } from './pricingService'
@@ -462,11 +463,39 @@ export async function editOrder(
     }
   }
 
+  // Whose units these are.
+  //
+  // When the order is being processed on the merchant's own website, their
+  // system already took their units when it filed the order — the same way it
+  // does for a sale on their own storefront — and it will move them again when
+  // this edit reaches it. Asking their connector to reserve here as well takes
+  // every unit twice, and the second take is invisible until someone counts
+  // the shelf. So a forwarded order moves only NCOM's own stock here, and the
+  // merchant's half moves once, on their side, driven by the sync message
+  // queued at the end of this function.
+  //
+  // For an order NCOM processes itself nothing changes: both halves move here,
+  // which is what `holdForOrder` has always done.
+  const forwarded = await isForwardedOrder(organizationId, orderId)
+  const ourVariants = forwarded
+    ? new Set(
+        (
+          await prisma.productVariant.findMany({
+            where: { id: { in: [...movements.keys()] } },
+            select: { id: true },
+          })
+        ).map((variant) => variant.id)
+      )
+    : null
+
+  const mine = (variantId: string) =>
+    ourVariants === null || ourVariants.has(variantId)
+
   const takes = [...movements]
-    .filter(([, delta]) => delta > 0)
+    .filter(([variantId, delta]) => delta > 0 && mine(variantId))
     .map(([variantId, delta]) => ({ variantId, quantity: delta }))
   const gives = [...movements]
-    .filter(([, delta]) => delta < 0)
+    .filter(([variantId, delta]) => delta < 0 && mine(variantId))
     .map(([variantId, delta]) => ({ variantId, quantity: -delta }))
 
   // Asked for before anything is written, so an edit the merchant's stock
@@ -705,6 +734,11 @@ export async function editOrder(
         manualDiscountReason:
           input.manualDiscountReason?.trim() ||
           (quote.manualDiscountCents > 0 ? order.manualDiscountReason : null),
+        // Bumped inside the transaction that makes the change, so a revision
+        // can never describe a state that was not written. Bumped for every
+        // order, not only forwarded ones: a workspace that connects a website
+        // later must not find its existing orders all claiming revision 0.
+        syncRevision: { increment: 1 },
       },
     })
 
@@ -733,6 +767,13 @@ export async function editOrder(
   await returnToStock(organizationId, orderId, gives, { orderId })
 
   await emitOrderWebhook(organizationId, orderId, 'ORDER_UPDATED')
+
+  // Tell the website that is processing it. Queued after the commit — a message
+  // describing a state the database does not hold is worse than a late one —
+  // and it never throws: the edit has happened, and turning a delivery problem
+  // into a failed edit would be strictly worse than a notification the merchant
+  // can see is late. Does nothing for an order NCOM processes itself.
+  await syncOrderChange(organizationId, orderId, 'ORDER_UPDATED')
 
   return { orderId, changed: true as const, order: updated, quote }
 }

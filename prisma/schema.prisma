@@ -153,8 +153,9 @@ model Organization {
 
   // Where a placed order is actually processed, and the log of every handoff
   // made under that decision. See OrderDestination.
-  orderDestination OrderDestination?
-  orderForwards    OrderForward[]
+  orderDestination  OrderDestination?
+  orderForwards     OrderForward[]
+  orderSyncMessages OrderSyncMessage[]
 
   // Courier automation: who ships the parcels, on what terms, and what the
   // fraud history of the phone numbers ordering them looks like.
@@ -1949,6 +1950,44 @@ model OrderForward {
   error        String?
   responseBody String? @db.Text
 
+  /// The revision both sides last agreed on.
+  ///
+  /// Set when a sync message is accepted, in either direction. A message
+  /// quoting a different base is refused — see `Order.syncRevision`.
+  syncedRevision Int @default(0)
+
+  /// Raised when the two sides disagreed and neither could safely win: the
+  /// merchant's site refused a change NCOM had already made, or reported one
+  /// NCOM could not apply. Blocks further automatic syncing for this order
+  /// until a human looks, because syncing past a known divergence is how one
+  /// wrong number becomes two.
+  conflictAt     DateTime?
+  conflictReason String?
+
+  /// The idempotency key of the last change accepted *from* the merchant.
+  ///
+  /// Distinguishes their retry from their stale change, which a revision
+  /// comparison cannot: both arrive quoting a base lower than NCOM holds, and
+  /// treating either as the other is a silent data loss. A repeat of this exact
+  /// key is a retry and is answered with what NCOM already has; anything else
+  /// quoting the wrong base is a real divergence and is refused.
+  ///
+  /// Revisions are per-side counters and they drift apart the moment the two
+  /// systems each apply a change the other has not seen — so "their revision is
+  /// lower than mine, must be old news" is exactly the reasoning that loses
+  /// somebody's edit.
+  lastInboundKey String?
+
+  /// The revision the merchant's site said it held when the two diverged.
+  ///
+  /// Kept because it is what makes the way out of a conflict expressible in
+  /// the ordinary contract rather than as a "force" flag. A merchant who has
+  /// compared the two copies and decided NCOM's is right resends, and that
+  /// message quotes *their* revision as its base — "I have seen your version
+  /// and I am replacing it", which is exactly the decision the human made, and
+  /// which their own revision check will accept without a special case.
+  remoteRevision Int?
+
   deliveredAt DateTime?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
@@ -1960,6 +1999,68 @@ model OrderForward {
   @@index([status, nextAttemptAt])
   /// Drives the dashboard's "what has not arrived" panel.
   @@index([organizationId, status])
+}
+
+/// One change to an already-handed-over order, on its way to the merchant.
+///
+/// `OrderForward` is the order changing hands and there is exactly one per
+/// order. This is everything that happens to it afterwards, and there are many
+/// — so it is a second table rather than more columns on the first.
+///
+/// Deliberately ordered. Messages for one order are sent oldest-first and a
+/// failed one blocks the ones behind it, because they are not independent
+/// facts: "quantity is now 3" applied after "quantity is now 5" leaves the
+/// merchant holding a number nobody chose. Different orders never block each
+/// other.
+model OrderSyncMessage {
+  id             String @id @default(cuid())
+  organizationId String
+  orderId        String
+
+  kind OrderSyncKind
+
+  /// Deduplication key, stable across every retry. Carries the revision, so a
+  /// receiver that has already applied revision 4 recognises a repeat of it.
+  idempotencyKey String @unique
+
+  /// The revision this change was built from, and the one it produces. The
+  /// receiver applies only if `baseRevision` matches what it holds.
+  baseRevision Int
+  revision     Int
+
+  payload Json
+
+  status        OrderForwardStatus @default(PENDING)
+  attempts      Int                @default(0)
+  nextAttemptAt DateTime?
+
+  statusCode   Int?
+  error        String?
+  responseBody String? @db.Text
+
+  deliveredAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  order        Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  /// The retry sweep: queued messages whose backoff has elapsed.
+  @@index([status, nextAttemptAt])
+  /// Sending one order's messages in order, and finding what is stuck.
+  @@index([orderId, createdAt])
+  @@index([organizationId, status])
+}
+
+/// What changed about an order that has already been handed over.
+enum OrderSyncKind {
+  /// Lines, quantities, prices, address or totals. Carries the whole order,
+  /// not a diff: a diff applied to an unexpected base is exactly the silent
+  /// corruption the revision check exists to prevent, and the whole order is
+  /// small.
+  ORDER_UPDATED
+  /// Cancelled here. The receiver releases whatever it is holding.
+  ORDER_CANCELLED
 }
 
 /// How a handoff ended.
@@ -2633,6 +2734,20 @@ model Order {
   landingSite   String?
   referringSite String?
 
+  /// How many times this order has changed in a way the other side must know
+  /// about, when it is shared with a merchant's website.
+  ///
+  /// The whole defence against a silent data mismatch. Every sync message —
+  /// in either direction — quotes the revision it was built from, and a
+  /// receiver applies it only if that matches what it currently holds.
+  /// Anything else is a conflict raised for a human, never a merge: two people
+  /// editing the same order in two systems is a real thing that happens, and
+  /// last-writer-wins loses one of their edits without telling anybody.
+  ///
+  /// Bumped by the mutation itself, inside the same transaction, so a revision
+  /// can never describe a state that was not written.
+  syncRevision Int @default(0)
+
   cancelledAt  DateTime?
   cancelReason CancelReason?
   closedAt     DateTime?
@@ -2640,11 +2755,11 @@ model Order {
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
-  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  store        Store?            @relation(fields: [storeId], references: [id], onDelete: SetNull)
-  page         Page?             @relation(fields: [pageId], references: [id], onDelete: SetNull)
-  customer     Customer?         @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  cart         Cart?             @relation(fields: [cartId], references: [id], onDelete: SetNull)
+  organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  store        Store?             @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  page         Page?              @relation(fields: [pageId], references: [id], onDelete: SetNull)
+  customer     Customer?          @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  cart         Cart?              @relation(fields: [cartId], references: [id], onDelete: SetNull)
   lines        OrderLine[]
   transactions Transaction[]
   refunds      Refund[]
@@ -2654,6 +2769,7 @@ model Order {
   /// The handoff to the merchant's own website, when that is where this order
   /// is processed. Absent on every order NCOM processes itself.
   forward      OrderForward?
+  syncMessages OrderSyncMessage[]
 
   @@unique([organizationId, orderNumber])
   @@index([organizationId, createdAt])

@@ -20,6 +20,12 @@ export interface OrderHandoffView {
   remoteOrderNumber: string | null
   statusCode: number | null
   error: string | null
+  conflictAt: string | null
+  conflictReason: string | null
+  syncedRevision: number
+  revision: number
+  pendingChanges: number
+  failedChanges: number
 }
 
 /**
@@ -52,9 +58,13 @@ export function OrderHandoffPanel({
   const host = hostOf(handoff.endpointUrl)
   const delivered = handoff.status === 'DELIVERED'
   const waiting = handoff.status === 'PENDING'
+  const conflicted = Boolean(handoff.conflictAt)
+  const behind = handoff.revision > handoff.syncedRevision
 
   return (
-    <Card className={delivered ? undefined : 'border-destructive/50'}>
+    <Card
+      className={delivered && !conflicted ? undefined : 'border-destructive/50'}
+    >
       <CardContent className="flex flex-col gap-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-display text-lg font-semibold tracking-tight">
@@ -118,6 +128,38 @@ export function OrderHandoffPanel({
           </p>
         )}
 
+        {/* A disagreement outranks everything else on this panel. The order
+            arrived, so the delivery section above reads as fine — and it is;
+            what is wrong is that the two copies have since stopped matching,
+            which nothing else here would say. */}
+        {conflicted && (
+          <div className="border-destructive/40 bg-destructive/5 flex flex-col gap-2 rounded-md border p-3">
+            <p className="text-destructive flex items-start gap-2 text-sm font-medium">
+              <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+              This order says different things here and on {host}
+            </p>
+            <p className="text-muted-foreground text-sm">
+              {handoff.conflictReason ??
+                'Somebody changed it in both places at once.'}
+            </p>
+            <p className="text-muted-foreground text-sm">
+              Nothing further is being sent for this order. Compare the two
+              copies, make them match by hand, and send it again — whichever
+              version you keep, keep it deliberately.
+            </p>
+          </div>
+        )}
+
+        {!conflicted && behind && (
+          <p className="text-muted-foreground text-sm">
+            {handoff.pendingChanges > 0
+              ? `${handoff.pendingChanges} later ${handoff.pendingChanges === 1 ? 'change is' : 'changes are'} still on the way to ${host}.`
+              : handoff.failedChanges > 0
+                ? `${handoff.failedChanges} later ${handoff.failedChanges === 1 ? 'change' : 'changes'} could not be delivered to ${host}. Send it again.`
+                : `${host} has not been told about the latest change to this order yet.`}
+          </p>
+        )}
+
         {handoff.error && !delivered && (
           <p className="text-destructive bg-destructive/5 rounded-md p-3 text-xs">
             {handoff.statusCode ? `${handoff.statusCode} — ` : ''}
@@ -132,19 +174,20 @@ export function OrderHandoffPanel({
           <p className="text-sm text-emerald-600">{state.success}</p>
         )}
 
-        {!delivered && canResend && (
-          <form action={submit}>
-            <Button
-              variant="outline"
-              size="sm"
-              type="submit"
-              disabled={pending}
-            >
-              <RefreshCw className={pending ? 'animate-spin' : undefined} />
-              Send it again
-            </Button>
-          </form>
-        )}
+        {(!delivered || conflicted || handoff.failedChanges > 0) &&
+          canResend && (
+            <form action={submit}>
+              <Button
+                variant="outline"
+                size="sm"
+                type="submit"
+                disabled={pending}
+              >
+                <RefreshCw className={pending ? 'animate-spin' : undefined} />
+                Send it again
+              </Button>
+            </form>
+          )}
       </CardContent>
     </Card>
   )

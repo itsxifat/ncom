@@ -2,6 +2,7 @@ import 'server-only'
 import { prisma } from '@/server/db/client'
 import { requireOrgAccess, requireHumanOrgAccess } from '@/server/auth/rbac'
 import { returnToStock } from './inventoryService'
+import { isForwardedOrder, syncOrderChange } from '@/server/orders'
 import { legacyFulfillmentStatus } from '@/server/courier/statusMap'
 import { emitWebhook } from './webhookService'
 import { clampNonNegative, formatMoney } from '@/lib/money'
@@ -279,21 +280,44 @@ export async function cancelOrder(
   // own website, and a Postgres transaction must never be held open across one.
   // A cancellation that saves after the stock went back is the safe order of
   // the two — the alternative leaves units held for an order nobody can see.
+  // When the order is being processed on the merchant's own website, their
+  // units are theirs to release and the cancellation message below is what
+  // releases them. Handing them back from here as well — through the same
+  // connector their own cancellation will also call — credits the shelf twice,
+  // and a shop that over-counts stock oversells. NCOM returns only the units of
+  // products it stores itself, which is the half their system cannot see.
+  const forwarded = await isForwardedOrder(organizationId, orderId)
+
   if (input.restock !== false && !order.stockConsumedAt) {
     // Only units that never shipped come back here. Goods a courier already
     // collected are gone until physically returned, which is handled by the
     // return flow instead.
-    await returnToStock(
-      organizationId,
-      orderId,
-      order.lines
-        .filter((line) => line.variantId !== null)
-        .map((line) => ({
-          variantId: line.variantId!,
-          quantity: line.quantity,
-        })),
-      { orderId }
-    )
+    const returnable = order.lines
+      .filter((line) => line.variantId !== null)
+      .map((line) => ({
+        variantId: line.variantId!,
+        quantity: line.quantity,
+      }))
+
+    const ours = forwarded
+      ? new Set(
+          (
+            await prisma.productVariant.findMany({
+              where: { id: { in: returnable.map((line) => line.variantId) } },
+              select: { id: true },
+            })
+          ).map((variant) => variant.id)
+        )
+      : null
+
+    const gives =
+      ours === null
+        ? returnable
+        : returnable.filter((line) => ours.has(line.variantId))
+
+    if (gives.length > 0) {
+      await returnToStock(organizationId, orderId, gives, { orderId })
+    }
   }
 
   const cancelled = await prisma.$transaction(async (tx) => {
@@ -317,6 +341,9 @@ export async function cancelOrder(
         // one status now; `cancelledAt` says when and why it got there.
         workflowState: 'CANCELLED',
         workflowUpdatedAt: now,
+        // Inside the transaction that cancels it, so a revision can never
+        // describe a state that was not written.
+        syncRevision: { increment: 1 },
         ...(input.restock !== false && !order.stockConsumedAt
           ? { stockRestoredAt: now }
           : {}),
@@ -325,6 +352,14 @@ export async function cancelOrder(
   })
 
   await emitOrderWebhook(organizationId, orderId, 'ORDER_CANCELLED')
+
+  // Tell the website processing it, so their copy is cancelled and their units
+  // go back. Queued after the commit and never able to throw — the order is
+  // cancelled here either way, and a merchant can see a message that has not
+  // landed. Does nothing for an order NCOM processes itself.
+  await syncOrderChange(organizationId, orderId, 'ORDER_CANCELLED', {
+    reason: input.reason,
+  })
 
   return cancelled
 }

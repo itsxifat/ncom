@@ -36,6 +36,8 @@ import { prisma } from '@/server/db/client'
 import { encryptSecret } from '@/lib/crypto'
 import { absoluteImageUrl, buildHandoffEnvelope } from '@/server/orders/payload'
 import { attemptForward, retryPendingForwards } from '@/server/orders/forward'
+import { attemptSync, drainOrder, syncOrderChange } from '@/server/orders/sync'
+import { applyInboundChange, ncomOwnedUnits } from '@/server/orders/inbound'
 import type { HandoffEnvelope } from '@/server/orders/types'
 
 // ── Reporting ────────────────────────────────────────────────────────────
@@ -70,6 +72,14 @@ interface Receiver {
   secret: string
   /** Orders the shop actually filed, keyed by idempotency key. */
   filed: Map<string, HandoffEnvelope>
+  /** The revision the shop believes it holds, per order. */
+  revisions: Map<string, number>
+  /** Change keys it has applied, so a retry is not mistaken for a fork. */
+  seen: Set<string>
+  /** Every change it accepted, in the order it accepted them. */
+  applied: { orderId: string; topic: string; revision: number }[]
+  /** Changes it refused because the base did not match what it holds. */
+  conflicts: number
   /** Every request that arrived, including the ones deduplicated away. */
   requests: number
   /** Requests refused before parsing, because the signature did not verify. */
@@ -89,10 +99,15 @@ async function startReceiver(): Promise<Receiver> {
   const keyId = `ncomord_${randomUUID().slice(0, 12)}`
   const secret = `ncomsec_${randomUUID()}`
   const filed = new Map<string, HandoffEnvelope>()
+  const revisions = new Map<string, number>()
+  /** Every change key this shop has applied, for telling a retry from a fork. */
+  const seen = new Set<string>()
+  const applied: { orderId: string; topic: string; revision: number }[] = []
 
   const state = {
     requests: 0,
     unauthorized: 0,
+    conflicts: 0,
     behaviour: 'accept' as Behaviour,
   }
 
@@ -150,6 +165,49 @@ async function startReceiver(): Promise<Receiver> {
       const envelope = JSON.parse(raw) as HandoffEnvelope
       const key = String(request.headers['x-ncom-idempotency-key'] ?? '')
 
+      // A change to an order we already have. The revision check written the
+      // way the contract tells merchants to write it: recognise a retry by its
+      // key, apply only against the base we hold, and refuse anything else with
+      // 409 and our own revision rather than merging.
+      //
+      // Deliberately keyed, not "revision <= mine". Revisions are per-side
+      // counters and drift apart the moment each system applies something the
+      // other has not seen, so a number comparison cannot tell a retry from a
+      // genuinely stale change — and swallowing the second as the first is a
+      // silently lost edit.
+      if (
+        envelope.topic === 'order.updated' ||
+        envelope.topic === 'order.cancelled'
+      ) {
+        const orderId = envelope.order.id
+        const held = revisions.get(orderId) ?? 0
+        const base = Number(envelope.baseRevision)
+        const next = Number(envelope.revision)
+
+        if (seen.has(key)) {
+          response
+            .writeHead(200, { 'content-type': 'application/json' })
+            .end(JSON.stringify({ ok: true, deduped: true, revision: held }))
+          return
+        }
+
+        if (base !== held) {
+          state.conflicts += 1
+          response
+            .writeHead(409, { 'content-type': 'application/json' })
+            .end(JSON.stringify({ error: 'version mismatch', revision: held }))
+          return
+        }
+
+        revisions.set(orderId, next)
+        seen.add(key)
+        applied.push({ orderId, topic: envelope.topic, revision: next })
+        response
+          .writeHead(200, { 'content-type': 'application/json' })
+          .end(JSON.stringify({ ok: true, revision: next }))
+        return
+      }
+
       // A test is answered like a real order and filed like nothing.
       if (envelope.topic === 'order.test') {
         response
@@ -160,16 +218,17 @@ async function startReceiver(): Promise<Receiver> {
 
       // The line every integration lives or dies on: a key already seen is
       // answered with what we already have, never filed twice.
-      if (!filed.has(key)) filed.set(key, envelope)
+      if (!filed.has(key)) {
+        filed.set(key, envelope)
+        revisions.set(envelope.order.id, 0)
+      }
 
-      response
-        .writeHead(200, { 'content-type': 'application/json' })
-        .end(
-          JSON.stringify({
-            orderId: `ELY-${key.slice(-6)}`,
-            orderNumber: 'ELY-9001',
-          })
-        )
+      response.writeHead(200, { 'content-type': 'application/json' }).end(
+        JSON.stringify({
+          orderId: `ELY-${key.slice(-6)}`,
+          orderNumber: 'ELY-9001',
+        })
+      )
     })
   })
 
@@ -184,6 +243,12 @@ async function startReceiver(): Promise<Receiver> {
     keyId,
     secret,
     filed,
+    revisions,
+    seen,
+    applied,
+    get conflicts() {
+      return state.conflicts
+    },
     get requests() {
       return state.requests
     },
@@ -209,6 +274,8 @@ async function startReceiver(): Promise<Receiver> {
 interface Fixture {
   organizationId: string
   orderId: string
+  /** The NCOM-stored variant, for the stock-ownership assertions. */
+  localVariantId: string
 }
 
 /**
@@ -261,7 +328,19 @@ async function seed(receiver: Receiver): Promise<Fixture> {
     },
   })
 
-  // A product NCOM stores, so one line can honestly report source `ncom`.
+  // A product NCOM stores, so one line can honestly report source `ncom` — and
+  // so the stock assertions have something real to move. Its units are the half
+  // the merchant's system cannot see, which is exactly the half NCOM must go on
+  // managing for a forwarded order.
+  const location = await prisma.location.create({
+    data: {
+      organizationId: organization.id,
+      name: 'Handoff warehouse',
+      isActive: true,
+    },
+    select: { id: true },
+  })
+
   const local = await prisma.product.create({
     data: {
       organizationId: organization.id,
@@ -269,7 +348,15 @@ async function seed(receiver: Receiver): Promise<Fixture> {
       handle: `tote-${suffix}`,
       status: 'ACTIVE',
       variants: {
-        create: { title: 'Default', priceCents: 20_000, position: 0 },
+        create: {
+          title: 'Default',
+          priceCents: 20_000,
+          position: 0,
+          inventoryTracked: true,
+          inventoryLevels: {
+            create: { locationId: location.id, available: 10, committed: 1 },
+          },
+        },
       },
     },
     select: { id: true, variants: { select: { id: true } } },
@@ -343,7 +430,11 @@ async function seed(receiver: Receiver): Promise<Fixture> {
     select: { id: true },
   })
 
-  return { organizationId: organization.id, orderId: order.id }
+  return {
+    organizationId: organization.id,
+    orderId: order.id,
+    localVariantId,
+  }
 }
 
 async function cleanup(organizationId: string) {
@@ -362,6 +453,10 @@ async function main() {
     await checkDelivery(fixture, receiver)
     await checkRetryIsExactlyOnce(fixture, receiver)
     await checkRefusalIsTerminal(fixture, receiver)
+    await checkChangesFollowTheOrder(fixture, receiver)
+    await checkStaleChangeIsRefused(fixture, receiver)
+    await checkChangesKeepTheirOrder(fixture, receiver)
+    await checkMerchantCancellation(fixture, receiver)
   } finally {
     await cleanup(fixture.organizationId)
     await receiver.close()
@@ -634,6 +729,303 @@ async function checkRefusalIsTerminal(
   // And the queue must not pick a terminal row back up.
   const swept = await retryPendingForwards()
   check(swept === 0, 'the sweep leaves refused handoffs alone')
+}
+
+/** Re-delivers the order so a fresh handoff row exists for a change test. */
+async function replace(
+  { organizationId, orderId }: Fixture,
+  receiver: Receiver
+): Promise<void> {
+  await prisma.orderSyncMessage.deleteMany({ where: { orderId } })
+  await prisma.orderForward.deleteMany({ where: { orderId } })
+  receiver.filed.clear()
+  receiver.revisions.clear()
+  receiver.seen.clear()
+  receiver.applied.length = 0
+  receiver.behaviour = 'accept'
+  await prisma.order.update({
+    where: { id: orderId },
+    data: { syncRevision: 0, cancelledAt: null },
+  })
+  const forward = await queue(organizationId, orderId, receiver.baseUrl)
+  await attemptForward(forward)
+  await prisma.orderForward.updateMany({
+    where: { orderId },
+    data: { conflictAt: null, conflictReason: null, remoteRevision: null },
+  })
+}
+
+async function checkChangesFollowTheOrder(
+  fixture: Fixture,
+  receiver: Receiver
+) {
+  section('A change made here reaches the site that is processing the order')
+  await replace(fixture, receiver)
+
+  await prisma.order.update({
+    where: { id: fixture.orderId },
+    data: { syncRevision: { increment: 1 }, note: 'Ring the bell twice' },
+  })
+  await syncOrderChange(
+    fixture.organizationId,
+    fixture.orderId,
+    'ORDER_UPDATED'
+  )
+  await drainOrder(fixture.orderId)
+
+  check(
+    receiver.revisions.get(fixture.orderId) === 1,
+    'their site moved to the new revision'
+  )
+  check(
+    receiver.applied.at(-1)?.topic === 'order.updated',
+    'it arrived as an update, not as a second order'
+  )
+  check(
+    receiver.filed.size === 1,
+    'a change does not create a second order on their side'
+  )
+
+  const forward = await prisma.orderForward.findFirst({
+    where: { orderId: fixture.orderId },
+  })
+  check(
+    forward?.syncedRevision === 1,
+    'NCOM records the revision both sides now agree on'
+  )
+  check(forward?.conflictAt === null, 'no conflict was raised')
+}
+
+async function checkStaleChangeIsRefused(fixture: Fixture, receiver: Receiver) {
+  section(
+    'A change built on a version they no longer hold is refused, not merged'
+  )
+  await replace(fixture, receiver)
+
+  // Somebody edits the order on *their* side. Their revision moves and NCOM
+  // never hears about it — exactly the situation two order books get into.
+  receiver.revisions.set(fixture.orderId, 5)
+
+  await prisma.order.update({
+    where: { id: fixture.orderId },
+    data: { syncRevision: { increment: 1 } },
+  })
+  await syncOrderChange(
+    fixture.organizationId,
+    fixture.orderId,
+    'ORDER_UPDATED'
+  )
+  await drainOrder(fixture.orderId)
+
+  check(
+    receiver.conflicts >= 1,
+    'their site refused it with a version mismatch'
+  )
+  check(
+    receiver.revisions.get(fixture.orderId) === 5,
+    'their copy was not overwritten by a change built on the wrong base'
+  )
+
+  const forward = await prisma.orderForward.findFirst({
+    where: { orderId: fixture.orderId },
+  })
+  check(forward?.conflictAt !== null, 'NCOM flags the order as diverged')
+  check(
+    forward?.remoteRevision === 5,
+    'and remembers which version they hold, so a human can resolve it'
+  )
+  check(
+    (forward?.conflictReason ?? '').includes('5'),
+    'the reason names both versions rather than saying "conflict"'
+  )
+
+  // Nothing further is sent while the two disagree.
+  await prisma.order.update({
+    where: { id: fixture.orderId },
+    data: { syncRevision: { increment: 1 } },
+  })
+  const before = receiver.applied.length
+  await syncOrderChange(
+    fixture.organizationId,
+    fixture.orderId,
+    'ORDER_UPDATED'
+  )
+  await drainOrder(fixture.orderId)
+  check(
+    receiver.applied.length === before,
+    'syncing stops for a diverged order instead of piling changes onto it'
+  )
+}
+
+async function checkChangesKeepTheirOrder(
+  fixture: Fixture,
+  receiver: Receiver
+) {
+  section('Two changes arrive in the order they were made, or not at all')
+  await replace(fixture, receiver)
+
+  // Their site is down while the first change is made.
+  receiver.behaviour = 'error'
+  await prisma.order.update({
+    where: { id: fixture.orderId },
+    data: { syncRevision: { increment: 1 } },
+  })
+  await syncOrderChange(
+    fixture.organizationId,
+    fixture.orderId,
+    'ORDER_UPDATED'
+  )
+  await drainOrder(fixture.orderId)
+
+  // And a second change is made before it comes back.
+  await prisma.order.update({
+    where: { id: fixture.orderId },
+    data: { syncRevision: { increment: 1 } },
+  })
+  await syncOrderChange(
+    fixture.organizationId,
+    fixture.orderId,
+    'ORDER_UPDATED'
+  )
+  await drainOrder(fixture.orderId)
+
+  check(
+    receiver.applied.length === 0,
+    'nothing was delivered while their site was down'
+  )
+
+  receiver.behaviour = 'accept'
+  await prisma.orderSyncMessage.updateMany({
+    where: { orderId: fixture.orderId, status: 'PENDING' },
+    data: { nextAttemptAt: new Date(Date.now() - 1000) },
+  })
+  await drainOrder(fixture.orderId)
+
+  const revisions = receiver.applied.map((entry) => entry.revision)
+  check(
+    revisions.join(',') === '1,2',
+    `both changes landed oldest-first (got ${revisions.join(',') || 'none'})`
+  )
+  check(
+    receiver.revisions.get(fixture.orderId) === 2,
+    'their site ends on the revision NCOM is on'
+  )
+}
+
+async function checkMerchantCancellation(fixture: Fixture, receiver: Receiver) {
+  section(
+    'A cancellation on their side reaches NCOM and returns only our units'
+  )
+  await replace(fixture, receiver)
+
+  // Which units NCOM is entitled to move — the part of the cancellation that is
+  // actually new. The order carries one line from the merchant's catalogue and
+  // one from NCOM's, and only the second is ours to give back; theirs were
+  // returned by their own cancellation before this message was ever sent.
+  const ours = await ncomOwnedUnits(fixture.orderId)
+  check(
+    ours.length === 1,
+    `only NCOM's own line is returnable from here (got ${ours.length} of 2)`
+  )
+  check(
+    ours[0]?.variantId === fixture.localVariantId,
+    "and it is the NCOM-stored product, not the merchant's"
+  )
+
+  // The state transition, run on an order whose goods have already gone out —
+  // which is the branch that moves no stock, so this exercises the whole real
+  // path without needing the inventory stack, which cannot be loaded in a
+  // plain-node process (it reaches the session stack through rbac). The
+  // selection above is the half that is new; `returnToStock` beneath it is the
+  // same call the ordinary cancel path has always made.
+  await prisma.order.update({
+    where: { id: fixture.orderId },
+    data: { stockConsumedAt: new Date() },
+  })
+
+  const applied = await applyInboundChange(fixture.organizationId, {
+    topic: 'order.cancelled',
+    idempotencyKey: 'ely:cancel:1',
+    baseRevision: 0,
+    revision: 1,
+    reason: 'Customer changed their mind',
+    order: { id: fixture.orderId },
+  })
+  check(applied.ok, 'the change is accepted')
+  check(applied.ok && applied.revision === 1, 'NCOM advances its revision')
+
+  const order = await prisma.order.findUnique({
+    where: { id: fixture.orderId },
+    select: { cancelledAt: true, workflowState: true, syncRevision: true },
+  })
+  check(order?.cancelledAt !== null, 'the order is cancelled here too')
+  check(order?.workflowState === 'CANCELLED', 'and its status follows')
+
+  // The echo test: applying their change must not queue a message back to them.
+  check(
+    receiver.applied.length === 0,
+    'nothing is sent back to them for a change that came from them'
+  )
+  const queued = await prisma.orderSyncMessage.count({
+    where: { orderId: fixture.orderId },
+  })
+  check(
+    queued === 0,
+    'and nothing is even queued — a change that came from them cannot echo back'
+  )
+
+  // Their retry of the same cancellation, recognised by its key.
+  const repeat = await applyInboundChange(fixture.organizationId, {
+    topic: 'order.cancelled',
+    idempotencyKey: 'ely:cancel:1',
+    baseRevision: 0,
+    revision: 1,
+    order: { id: fixture.orderId },
+  })
+  check(
+    repeat.ok && repeat.deduped === true,
+    'a repeated cancellation is answered, not applied twice'
+  )
+
+  // A *different* change quoting the same old base is not a retry — it is a
+  // fork. This is the case a revision comparison gets wrong, and getting it
+  // wrong means silently dropping somebody's edit.
+  const fork = await applyInboundChange(fixture.organizationId, {
+    topic: 'order.updated',
+    idempotencyKey: 'ely:edit:7',
+    baseRevision: 0,
+    revision: 1,
+    order: { id: fixture.orderId },
+  })
+  check(
+    !fork.ok && fork.status === 409,
+    'a different change built on a version NCOM has moved past is refused, not swallowed as a retry'
+  )
+
+  // A change from a version NCOM never had.
+  const ahead = await applyInboundChange(fixture.organizationId, {
+    topic: 'order.updated',
+    idempotencyKey: 'ely:edit:9',
+    baseRevision: 9,
+    revision: 10,
+    order: { id: fixture.orderId },
+  })
+  check(
+    !ahead.ok && ahead.status === 409,
+    'a change from a version NCOM never had is refused with 409'
+  )
+  check(
+    !ahead.ok && ahead.revision === 1,
+    'and the refusal tells them which version NCOM holds'
+  )
+
+  const forward = await prisma.orderForward.findFirst({
+    where: { orderId: fixture.orderId },
+  })
+  check(
+    forward?.conflictAt !== null,
+    'the order is flagged so a human sees the two sides disagree'
+  )
 }
 
 /** Queues one handoff, the way checkout does, and returns its row id. */

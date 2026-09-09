@@ -99,3 +99,23 @@ export async function recordDestinationHealth(
       // not turn that into a failed handoff.
     })
 }
+
+/**
+ * Whether this order was handed to a merchant's website.
+ *
+ * Asked of the handoff row rather than of the workspace's current mode, and the
+ * difference matters: a workspace that switches back to processing orders in
+ * NCOM still has orders out there that somebody else's system is holding stock
+ * for. Those orders keep behaving as forwarded ones for the rest of their
+ * lives, because that is what they are.
+ */
+export async function isForwardedOrder(
+  organizationId: string,
+  orderId: string
+): Promise<boolean> {
+  const forward = await prisma.orderForward.findFirst({
+    where: { orderId, organizationId },
+    select: { id: true },
+  })
+  return forward !== null
+}

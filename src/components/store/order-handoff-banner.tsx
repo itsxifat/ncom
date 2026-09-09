@@ -21,13 +21,40 @@ export function OrderHandoffBanner({
   endpointHost,
   pending,
   stuck,
+  conflicted,
 }: {
   forwarding: boolean
   /** The host orders are handed to, for a sentence a human can read. */
   endpointHost: string | null
   pending: number
   stuck: number
+  conflicted: number
 }) {
+  // A disagreement leads, ahead even of an undelivered order. An order nobody
+  // received is one problem in one place; an order that says different things
+  // in two places is a number somebody is about to act on believing it.
+  if (conflicted > 0) {
+    return (
+      <Card className="border-destructive/50">
+        <CardContent className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-destructive flex items-start gap-2 text-sm">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+            <span>
+              <strong>
+                {conflicted} {conflicted === 1 ? 'order' : 'orders'}
+              </strong>{' '}
+              changed here and on{' '}
+              {endpointHost ? <code>{endpointHost}</code> : 'your website'} at
+              the same time, so the two now disagree. Syncing has stopped for
+              them until somebody decides which version is right — open each one
+              to compare.
+            </span>
+          </p>
+        </CardContent>
+      </Card>
+    )
+  }
+
   // The failure case leads, whatever the mode. An order their website never
   // received is the one thing on this screen that costs money while nobody
   // looks at it.

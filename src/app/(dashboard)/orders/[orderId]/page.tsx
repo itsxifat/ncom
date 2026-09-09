@@ -233,6 +233,12 @@ export default async function OrderDetailPage({
                 remoteOrderNumber: handoff.remoteOrderNumber,
                 statusCode: handoff.statusCode,
                 error: handoff.error,
+                conflictAt: handoff.conflictAt?.toISOString() ?? null,
+                conflictReason: handoff.conflictReason,
+                syncedRevision: handoff.syncedRevision,
+                revision: handoff.revision,
+                pendingChanges: handoff.pendingChanges,
+                failedChanges: handoff.failedChanges,
               }}
             />
           ) : (

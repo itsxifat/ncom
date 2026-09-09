@@ -5,6 +5,7 @@ import { requireOrgAccess } from '@/server/auth/rbac'
 import { decryptSecret, encryptSecret, maskSecret } from '@/lib/crypto'
 import { assertPublicHttpsUrl } from '@/lib/outbound-url'
 import { attemptForward, schedule } from './forward'
+import { drainOrder, syncOrderChange } from './sync'
 import type { OrderForwardStatus, OrderRouting } from '@/generated/prisma/enums'
 
 /**
@@ -235,6 +236,12 @@ export interface ForwardSummary {
   pending: number
   /** Their site refused, or the queue gave up. These need a human. */
   stuck: number
+  /**
+   * Orders the two sides disagree about. The most serious of the three: the
+   * order exists in both places and says different things in each, and further
+   * syncing for it has stopped.
+   */
+  conflicted: number
 }
 
 export async function getForwardSummary(
@@ -255,12 +262,29 @@ export async function getForwardSummary(
     else stuck += row._count._all
   }
 
-  return { pending, stuck }
+  // Counted separately rather than folded into `stuck`. A handoff that never
+  // landed is an order the merchant has not seen; a conflict is an order they
+  // have seen and changed, which is a different conversation and a different
+  // fix.
+  const conflicted = await prisma.orderForward.count({
+    where: { organizationId, conflictAt: { not: null } },
+  })
+
+  return { pending, stuck, conflicted }
 }
 
 export interface OrderForwardView {
   status: OrderForwardStatus
   endpointUrl: string
+  /** Set when the two sides diverged and syncing for this order has stopped. */
+  conflictAt: Date | null
+  conflictReason: string | null
+  /** The revision both sides last agreed on, against NCOM's own. */
+  syncedRevision: number
+  revision: number
+  /** Changes still on their way, and any that gave up. */
+  pendingChanges: number
+  failedChanges: number
   attempts: number
   nextAttemptAt: Date | null
   deliveredAt: Date | null
@@ -278,30 +302,67 @@ export async function getOrderForward(
 ): Promise<OrderForwardView | null> {
   await requireOrgAccess(organizationId)
 
-  const row = await prisma.orderForward.findFirst({
-    where: { orderId, organizationId },
-    select: {
-      status: true,
-      endpointUrl: true,
-      attempts: true,
-      nextAttemptAt: true,
-      deliveredAt: true,
-      remoteOrderNumber: true,
-      remoteOrderId: true,
-      statusCode: true,
-      error: true,
-      createdAt: true,
-    },
-  })
+  const [row, order, changes] = await Promise.all([
+    prisma.orderForward.findFirst({
+      where: { orderId, organizationId },
+      select: {
+        status: true,
+        endpointUrl: true,
+        attempts: true,
+        nextAttemptAt: true,
+        deliveredAt: true,
+        remoteOrderNumber: true,
+        remoteOrderId: true,
+        statusCode: true,
+        error: true,
+        createdAt: true,
+        conflictAt: true,
+        conflictReason: true,
+        syncedRevision: true,
+      },
+    }),
+    prisma.order.findFirst({
+      where: { id: orderId, organizationId },
+      select: { syncRevision: true },
+    }),
+    prisma.orderSyncMessage.groupBy({
+      by: ['status'],
+      where: { orderId, organizationId, status: { not: 'DELIVERED' } },
+      _count: { _all: true },
+    }),
+  ])
 
-  return row
+  if (!row) return null
+
+  let pendingChanges = 0
+  let failedChanges = 0
+  for (const entry of changes) {
+    if (entry.status === 'PENDING') pendingChanges += entry._count._all
+    else failedChanges += entry._count._all
+  }
+
+  return {
+    ...row,
+    revision: order?.syncRevision ?? 0,
+    pendingChanges,
+    failedChanges,
+  }
 }
 
 /**
- * Sends an order again by hand.
+ * Sends an order to the merchant's website again, by hand.
  *
- * For the two states a human has to resolve: a receiver that refused, and one
- * that never answered. Resets the schedule rather than the attempt count, so
+ * One button for the three states a human has to resolve, because from where
+ * the merchant is standing they are one problem — "their site and mine do not
+ * agree, fix it":
+ *
+ *   the order never arrived (refused, or out of attempts);
+ *   the order arrived but a later change did not;
+ *   both sides have it and they disagree.
+ *
+ * The first two are a delivery problem and the fix is to try again. The third
+ * is a judgement, and pressing this is where the judgement is recorded — see
+ * the note in the body. Resets the schedule rather than the attempt count, so
  * the audit trail still shows how hard the queue tried on its own.
  */
 export async function resendForward(
@@ -315,15 +376,67 @@ export async function resendForward(
 
   const forward = await prisma.orderForward.findFirst({
     where: { orderId, organizationId },
-    select: { id: true, status: true },
+    select: {
+      id: true,
+      status: true,
+      conflictAt: true,
+      remoteRevision: true,
+    },
   })
   if (!forward) throw new Error('This order was never queued for your website')
-  if (forward.status === 'DELIVERED') return
 
-  await prisma.orderForward.update({
-    where: { id: forward.id },
-    data: { status: 'PENDING', attempts: 0, nextAttemptAt: new Date() },
+  // ── Resolving a disagreement ────────────────────────────────────────────
+  //
+  // The order arrived; what went wrong is that the two copies have since
+  // stopped matching. Pressing this after reading the conflict is a person
+  // saying "I have compared them and NCOM's version is the one to keep", and
+  // that is the only authority there is for the decision — nothing automatic
+  // can make it without silently discarding somebody's real work.
+  //
+  // Expressed by quoting *their* revision as the base of the replacement,
+  // rather than by a force flag: the message then means exactly what the human
+  // meant, and their receiver accepts it through the same revision check as
+  // every other message rather than through a special case that would also
+  // accept a genuine mistake.
+  if (forward.conflictAt) {
+    await prisma.orderForward.update({
+      where: { id: forward.id },
+      data: { conflictAt: null, conflictReason: null, remoteRevision: null },
+    })
+
+    await syncOrderChange(organizationId, orderId, 'ORDER_UPDATED', {
+      baseRevision: forward.remoteRevision ?? undefined,
+      pastConflict: true,
+    })
+    return
+  }
+
+  // ── Re-sending the order itself ─────────────────────────────────────────
+  if (forward.status !== 'DELIVERED') {
+    await prisma.orderForward.update({
+      where: { id: forward.id },
+      data: { status: 'PENDING', attempts: 0, nextAttemptAt: new Date() },
+    })
+
+    await schedule(() => attemptForward(forward.id))
+    return
+  }
+
+  // ── Re-sending a change that could not be delivered ─────────────────────
+  //
+  // The order landed but a later edit did not. Requeue the stalled messages
+  // rather than the order, and reset the schedule rather than the attempt
+  // count, so the audit trail still shows how hard the queue tried on its own.
+  const stalled = await prisma.orderSyncMessage.findMany({
+    where: { orderId, organizationId, status: { in: ['FAILED', 'REFUSED'] } },
+    select: { id: true },
+  })
+  if (stalled.length === 0) return
+
+  await prisma.orderSyncMessage.updateMany({
+    where: { id: { in: stalled.map((message) => message.id) } },
+    data: { status: 'PENDING', nextAttemptAt: new Date() },
   })
 
-  await schedule(() => attemptForward(forward.id))
+  await schedule(() => drainOrder(orderId))
 }

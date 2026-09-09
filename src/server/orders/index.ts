@@ -12,13 +12,21 @@ import 'server-only'
  * Everything a caller outside this directory should touch is re-exported here.
  */
 
-export { loadOrderTarget, type OrderTarget } from './destination'
+export {
+  loadOrderTarget,
+  isForwardedOrder,
+  type OrderTarget,
+} from './destination'
 
 export {
   forwardOrder,
   retryPendingForwards,
   testOrderDestination,
 } from './forward'
+
+export { syncOrderChange, retryPendingSyncs, type SyncKind } from './sync'
+
+export { applyInboundChange, authenticateCallback } from './inbound'
 
 export {
   getOrderDestinationStatus,
