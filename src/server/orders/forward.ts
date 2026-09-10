@@ -328,6 +328,9 @@ export async function testOrderDestination(
       secret,
       timeoutMs: row.timeoutMs,
       handoffInline: true,
+      // Immaterial here, and false rather than true so it reads as what it is:
+      // a test order is not a sale, and nothing reports it on either side.
+      ncomReportsPurchase: false,
     },
     envelope.idempotencyKey,
     JSON.stringify(envelope)

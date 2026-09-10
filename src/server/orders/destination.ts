@@ -21,6 +21,20 @@ export interface OrderTarget {
   secret: string
   timeoutMs: number
   handoffInline: boolean
+  /**
+   * Whether NCOM still reports the Purchase for orders sent here.
+   *
+   * False when the merchant's website reports it instead — the usual case, and
+   * what stops the same sale being counted twice by a pixel both sides share.
+   * Resolved here rather than at the point of use so that the one question
+   * checkout already asks about a workspace answers this one too: a decision
+   * about a handed-over order should not cost a second query about whether the
+   * order was handed over.
+   *
+   * Says nothing about PageView or ViewContent. Those are reported by NCOM for
+   * every landing page it serves, because it is the only side that served it.
+   */
+  ncomReportsPurchase: boolean
 }
 
 /**
@@ -50,6 +64,7 @@ export async function loadOrderTarget(
       secret: true,
       timeoutMs: true,
       handoffInline: true,
+      purchaseReporting: true,
     },
   })
 
@@ -74,6 +89,7 @@ export async function loadOrderTarget(
     secret,
     timeoutMs: row.timeoutMs,
     handoffInline: row.handoffInline,
+    ncomReportsPurchase: row.purchaseReporting === 'NCOM',
   }
 }
 

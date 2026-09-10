@@ -64,6 +64,22 @@ export interface PlaceOrderResult {
   orderNumber: string
   totalCents: number
   currencyCode: string
+  /**
+   * Whether the caller should report this sale to the store's ad platforms.
+   *
+   * True for every order NCOM processes. False only when the order was handed
+   * to a merchant's website that reports its own purchases — both sides
+   * usually share one Meta pixel, and two reports of one sale under two event
+   * ids are two conversions in the merchant's ad account.
+   *
+   * Answered here rather than looked up by the caller because this function is
+   * the one that knows whether the order was actually handed over. A workspace
+   * set to OWN_WEBSITE whose endpoint is half-configured processes its orders
+   * here after all (see `loadOrderTarget`), and those must still be reported —
+   * reading the workspace's *setting* instead of its outcome would silently
+   * drop every one of them.
+   */
+  reportPurchase: boolean
 }
 
 /**
@@ -136,11 +152,18 @@ export async function placeOrder(
   // Idempotent replay: a cart that already converted returns its order rather
   // than erroring, so a retried request is indistinguishable from the first.
   if (cart.completedAt && cart.order) {
+    // Asked again here because a replay has to report exactly what the first
+    // attempt reported. Saying yes when the answer is yes costs nothing — the
+    // event id is derived from the order, so the delivery row deduplicates
+    // against the one already queued — but saying yes when the merchant's
+    // website is the reporter is the double count this setting exists to stop.
+    const target = await loadOrderTarget(organizationId)
     return {
       orderId: cart.order.id,
       orderNumber: cart.order.orderNumber,
       totalCents: cart.order.totalCents,
       currencyCode: cart.order.currencyCode,
+      reportPurchase: target ? target.ncomReportsPurchase : true,
     }
   }
 
@@ -317,6 +340,7 @@ export async function placeOrder(
             orderNumber: existing.orderNumber,
             totalCents: existing.totalCents,
             currencyCode: existing.currencyCode,
+            reportPurchase: handoff ? handoff.ncomReportsPurchase : true,
           }
         }
       }
@@ -498,6 +522,9 @@ export async function placeOrder(
         orderNumber: order.orderNumber,
         totalCents: order.totalCents,
         currencyCode: order.currencyCode,
+        // Not handed over means nobody else could report it, so NCOM always
+        // does. Handed over, the merchant's own setting decides.
+        reportPurchase: handoff ? handoff.ncomReportsPurchase : true,
       }
     })
   } catch (error) {

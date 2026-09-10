@@ -113,7 +113,14 @@ export async function POST(request: Request) {
       parsed.data
     )
 
-    const tracking = await reportConversion(store.id, result.orderId, ip)
+    // Null when the merchant's own website is the one reporting this sale, and
+    // null is the whole suppression: it stops the server's copy here, and the
+    // browser mirrors nothing without it, so neither half of the pair fires.
+    // Anything less would leave the pixel firing from the page and the double
+    // count exactly where it was.
+    const tracking = result.reportPurchase
+      ? await reportConversion(store.id, result.orderId, ip)
+      : null
 
     return NextResponse.json({
       ok: true,
@@ -123,7 +130,8 @@ export async function POST(request: Request) {
       offerLabel: result.offerLabel,
       quantity: result.quantity,
       // What the browser's Meta pixel should repeat, if there is one. Null when
-      // the store reports from the browser only, or not at all.
+      // the store reports from the browser only, not at all, or — for an order
+      // handed to the merchant's website — when their site is the reporter.
       tracking,
     })
   } catch (cause) {

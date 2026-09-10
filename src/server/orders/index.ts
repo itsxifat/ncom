@@ -32,6 +32,7 @@ export {
   getOrderDestinationStatus,
   saveOrderDestination,
   setOrderRouting,
+  setPurchaseReporting,
   rotateOrderDestinationSecret,
   getForwardSummary,
   getOrderForward,

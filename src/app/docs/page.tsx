@@ -1001,6 +1001,34 @@ curl -s "$BASE/ping" \\
                 Orders screen here, as a record of what was sent.
               </Callout>
 
+              <H3>Who reports the sale to Meta</H3>
+
+              <P>
+                Most shops run the same Meta pixel on their landing pages here
+                and on the website taking these orders. If both sides report a
+                sale, Meta has no id in common to match the two reports on and
+                counts <strong>two purchases and twice the revenue</strong> — so
+                one side has to be the reporter, and you name it in{' '}
+                <strong>Settings → Order handling</strong>.
+              </P>
+
+              <P>
+                It defaults to <strong>your website</strong>, which is right if
+                your site reports purchases from its server the way it does for
+                a sale on your own storefront. Choose <strong>NCOM</strong>{' '}
+                instead if your site only fires its pixel in the browser: a
+                buyer who closes the tab before your confirmation page loads is
+                a sale it never reports, and NCOM sees every one of them.
+              </P>
+
+              <P>
+                This covers the <Code>Purchase</Code> event only. The landing
+                page&rsquo;s <Code>PageView</Code> and <Code>ViewContent</Code>{' '}
+                are always reported by NCOM, whichever you pick — your website
+                never served that page, so it has nothing to say about who
+                looked at it.
+              </P>
+
               <H3>What you have to build</H3>
 
               <P>

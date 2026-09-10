@@ -6,7 +6,11 @@ import { decryptSecret, encryptSecret, maskSecret } from '@/lib/crypto'
 import { assertPublicHttpsUrl } from '@/lib/outbound-url'
 import { attemptForward, schedule } from './forward'
 import { drainOrder, syncOrderChange } from './sync'
-import type { OrderForwardStatus, OrderRouting } from '@/generated/prisma/enums'
+import type {
+  OrderForwardStatus,
+  OrderRouting,
+  PurchaseReporting,
+} from '@/generated/prisma/enums'
 
 /**
  * Everything a human presses on the order-handling screens.
@@ -24,6 +28,8 @@ import type { OrderForwardStatus, OrderRouting } from '@/generated/prisma/enums'
 // ── Where orders go ──────────────────────────────────────────────────────
 export interface OrderDestinationStatus {
   mode: OrderRouting
+  /** Who reports the Purchase once orders are handed over. Inert until then. */
+  purchaseReporting: PurchaseReporting
   endpointUrl: string | null
   keyId: string | null
   /** Enough to tell two secrets apart in a support thread, never enough to sign. */
@@ -37,6 +43,7 @@ export interface OrderDestinationStatus {
 
 const DEFAULT_STATUS: OrderDestinationStatus = {
   mode: 'NCOM',
+  purchaseReporting: 'OWN_WEBSITE',
   endpointUrl: null,
   keyId: null,
   secretHint: null,
@@ -64,6 +71,7 @@ export async function getOrderDestinationStatus(
 
   return {
     mode: row.mode,
+    purchaseReporting: row.purchaseReporting,
     endpointUrl: row.endpointUrl,
     keyId: row.keyId,
     secretHint: row.secret ? safeHint(row.secret) : null,
@@ -191,6 +199,43 @@ export async function setOrderRouting(
   await prisma.orderDestination.update({
     where: { organizationId },
     data: { mode },
+  })
+}
+
+/**
+ * Chooses which side reports the sale to the ad platforms.
+ *
+ * Unguarded, unlike `setOrderRouting`, and on purpose: neither answer can lose
+ * an order, and there is nothing this side can test. Whether the merchant's
+ * website actually reports its purchases is a fact about their pixel setup that
+ * NCOM cannot see from here — no request it could make would distinguish a site
+ * that reports server-side from one that reports on a confirmation page the
+ * buyer never reaches. So the merchant is told plainly what each answer means
+ * and trusted with it, which is also the only honest thing to do when the cost
+ * of guessing wrong is a number in a report rather than a sale on the floor.
+ *
+ * Takes effect on the next order. Ones already placed have been reported, or
+ * not, and this does not go back and change either.
+ */
+export async function setPurchaseReporting(
+  organizationId: string,
+  reporter: PurchaseReporting
+): Promise<void> {
+  await requireOrgAccess(organizationId, 'ADMIN')
+
+  const row = await prisma.orderDestination.findUnique({
+    where: { organizationId },
+    select: { id: true },
+  })
+  if (!row) {
+    throw new Error(
+      'Add the address of your order endpoint first — there is nowhere for orders to go yet'
+    )
+  }
+
+  await prisma.orderDestination.update({
+    where: { organizationId },
+    data: { purchaseReporting: reporter },
   })
 }
 

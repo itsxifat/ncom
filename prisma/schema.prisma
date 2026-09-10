@@ -1847,6 +1847,30 @@ enum OrderRouting {
   OWN_WEBSITE
 }
 
+/// Which side tells the ad platforms about a handed-over sale.
+///
+/// A merchant usually runs the *same* Meta pixel on their landing pages here
+/// and on the website their orders are handed to. Both sides then report the
+/// same sale, each with its own `event_id` — NCOM's is keyed by NCOM's order
+/// id, theirs by theirs — and Meta, having no id in common to match them on,
+/// counts two purchases and twice the revenue. This is the switch that stops
+/// that, by naming one side as the one that reports.
+///
+/// PURCHASE only, and that is the whole point. The landing page's PageView and
+/// ViewContent are always NCOM's to report no matter what this says: the
+/// merchant's website never served that page and cannot report a visit to it.
+/// Suppressing those as well would trade double-counted sales for a funnel that
+/// starts at the checkout.
+enum PurchaseReporting {
+  /// NCOM reports it, exactly as it does for an order it processes itself.
+  /// The right answer when the merchant's site has no server-side Conversions
+  /// API and fires its pixel from the browser — a buyer who never loads their
+  /// confirmation page is a sale their site never hears about.
+  NCOM
+  /// The merchant's website reports it, off the order NCOM hands over.
+  OWN_WEBSITE
+}
+
 /// The website a workspace's orders are handed to, and the credentials for it.
 ///
 /// Deliberately a separate row from CatalogConnection rather than three more
@@ -1896,6 +1920,20 @@ model OrderDestination {
   /// told it does. Off puts every order straight on the queue, for a receiver
   /// that is reliably slower than a shopper will wait.
   handoffInline Boolean @default(true)
+
+  /// Who reports the Purchase conversion once an order is handed over.
+  ///
+  /// Inert while `mode` is NCOM: an order NCOM processes is one the merchant's
+  /// website never sees, so NCOM reports it whatever this holds. It only starts
+  /// meaning something at the moment the switch above moves.
+  ///
+  /// Defaults to OWN_WEBSITE because a site that is trusted to take the order,
+  /// the stock and the money is normally the one that already reports the sale
+  /// — and because the failure it prevents (every sale counted twice, ad spend
+  /// priced against numbers that are wrong) is the one merchants actually hit.
+  /// A merchant whose site reports from the browser only should set it back to
+  /// NCOM on the settings screen, which says so where the choice is made.
+  purchaseReporting PurchaseReporting @default(OWN_WEBSITE)
 
   lastCheckedAt DateTime?
   lastOkAt      DateTime?

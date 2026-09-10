@@ -14,6 +14,7 @@ import {
   rotateOrderSecretAction,
   saveOrderDestinationAction,
   setOrderRoutingAction,
+  setPurchaseReportingAction,
   testOrderDestinationAction,
   type DestinationResult,
 } from '@/app/(dashboard)/settings/order-destination/actions'
@@ -31,6 +32,7 @@ import { cn } from '@/lib/utils'
 
 export interface OrderDestinationView {
   mode: 'NCOM' | 'OWN_WEBSITE'
+  purchaseReporting: 'NCOM' | 'OWN_WEBSITE'
   endpointUrl: string | null
   keyId: string | null
   secretHint: string | null
@@ -73,6 +75,7 @@ export function OrderDestinationManager({
 
   const forwarding = status.mode === 'OWN_WEBSITE'
   const proven = Boolean(status.lastOkAt)
+  const siteReportsPurchase = status.purchaseReporting === 'OWN_WEBSITE'
 
   return (
     <div className="flex flex-col gap-6">
@@ -256,6 +259,52 @@ export function OrderDestinationManager({
         </Card>
       )}
 
+      {/* Only while orders are actually handed over. Shown any earlier it would
+          be a question about a situation the merchant is not in, and the answer
+          does nothing until they are: an order NCOM processes is one no other
+          system saw, so NCOM reports it whatever this says. */}
+      {forwarding && (
+        <Card>
+          <CardContent className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1">
+              <h3 className="font-medium">Who reports the sale to Meta</h3>
+              <p className="text-muted-foreground text-sm">
+                Your landing pages here and the website taking these orders
+                normally run the same pixel. If both report a sale, Meta has no
+                id in common to match the two reports on and counts{' '}
+                <strong>two purchases and twice the revenue</strong> — which is
+                what your ad costs are then measured against. One side reports.
+              </p>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Reporter
+                selected={siteReportsPurchase}
+                title="My website reports it"
+                detail="Right when your site sends purchases to Meta from its server, off the order we hand it. Nothing changes on your side."
+                disabled={pending}
+                onSelect={() =>
+                  run(() => setPurchaseReportingAction('OWN_WEBSITE'))
+                }
+              />
+              <Reporter
+                selected={!siteReportsPurchase}
+                title="NCOM reports it"
+                detail="Right when your site only fires its pixel in the browser. A buyer who closes the tab before your confirmation page loads is a sale it never reports — we always see it."
+                disabled={pending}
+                onSelect={() => run(() => setPurchaseReportingAction('NCOM'))}
+              />
+            </div>
+
+            <p className="text-muted-foreground text-sm">
+              Page views and product views are reported by NCOM either way. Your
+              website never serves the landing page, so it has nothing to say
+              about who looked at it — only the sale is in question here.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
       {/* The interaction merchants get wrong, said once, where it applies. A
           shop whose stock NCOM can already reserve will have that reservation
           silently switched off when orders start being handed over, and finding
@@ -309,6 +358,41 @@ function Choice({
         {action && <div className="mt-auto pt-2">{action}</div>}
       </CardContent>
     </Card>
+  )
+}
+
+function Reporter({
+  selected,
+  title,
+  detail,
+  disabled,
+  onSelect,
+}: {
+  selected: boolean
+  title: string
+  detail: string
+  disabled: boolean
+  onSelect: () => void
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={selected}
+      disabled={disabled || selected}
+      onClick={onSelect}
+      className={cn(
+        'flex flex-col gap-1.5 rounded-lg border p-3 text-left transition-colors',
+        selected
+          ? 'border-primary bg-primary/5'
+          : 'border-border hover:bg-muted/50 disabled:hover:bg-transparent'
+      )}
+    >
+      <span className="flex items-center gap-2 text-sm font-medium">
+        {selected && <Check className="size-3.5 shrink-0" />}
+        {title}
+      </span>
+      <span className="text-muted-foreground text-sm">{detail}</span>
+    </button>
   )
 }
 

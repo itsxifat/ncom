@@ -25,6 +25,7 @@ export default async function OrderDestinationPage() {
         hasCatalogConnection={connection !== null}
         status={{
           mode: status.mode,
+          purchaseReporting: status.purchaseReporting,
           endpointUrl: status.endpointUrl,
           keyId: status.keyId,
           secretHint: status.secretHint,

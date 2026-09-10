@@ -17,9 +17,10 @@ import {
   rotateOrderDestinationSecret,
   saveOrderDestination,
   setOrderRouting,
+  setPurchaseReporting,
   testOrderDestination,
 } from '@/server/orders'
-import type { OrderRouting } from '@/generated/prisma/enums'
+import type { OrderRouting, PurchaseReporting } from '@/generated/prisma/enums'
 
 async function org() {
   const { organization } = await getActiveOrganization()
@@ -95,6 +96,26 @@ export async function setOrderRoutingAction(
 ): Promise<DestinationResult> {
   try {
     await setOrderRouting(await org(), mode)
+    refresh()
+    return { ok: true }
+  } catch (cause) {
+    return { ok: false, error: message(cause) }
+  }
+}
+
+/**
+ * Chooses who reports the Purchase.
+ *
+ * Its own action rather than a field on the save above, because it is its own
+ * decision: a merchant fixing double-counted conversions is not editing their
+ * endpoint, and making them press Save — which re-tests the endpoint and clears
+ * its health — to change a reporting preference would be a strange bargain.
+ */
+export async function setPurchaseReportingAction(
+  reporter: PurchaseReporting
+): Promise<DestinationResult> {
+  try {
+    await setPurchaseReporting(await org(), reporter)
     refresh()
     return { ok: true }
   } catch (cause) {

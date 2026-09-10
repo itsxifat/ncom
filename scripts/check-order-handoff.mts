@@ -38,6 +38,7 @@ import { absoluteImageUrl, buildHandoffEnvelope } from '@/server/orders/payload'
 import { attemptForward, retryPendingForwards } from '@/server/orders/forward'
 import { attemptSync, drainOrder, syncOrderChange } from '@/server/orders/sync'
 import { applyInboundChange, ncomOwnedUnits } from '@/server/orders/inbound'
+import { loadOrderTarget } from '@/server/orders/destination'
 import type { HandoffEnvelope } from '@/server/orders/types'
 
 // ── Reporting ────────────────────────────────────────────────────────────
@@ -450,6 +451,7 @@ async function main() {
   try {
     await checkPayload(fixture)
     await checkImages()
+    await checkPurchaseReporting(fixture)
     await checkDelivery(fixture, receiver)
     await checkRetryIsExactlyOnce(fixture, receiver)
     await checkRefusalIsTerminal(fixture, receiver)
@@ -607,6 +609,48 @@ async function checkImages() {
     'a relative URL with no origin to resolve against is null, not a fragment'
   )
   check(absoluteImageUrl(null, origin) === null, 'a missing image is null')
+}
+
+async function checkPurchaseReporting({ organizationId }: Fixture) {
+  section('One side reports the sale, and it is the side the merchant picked')
+
+  // The pivot the whole double-counting fix hangs on. Checkout asks this one
+  // question and reports or stays quiet on the answer, so a flip here is either
+  // every forwarded sale counted twice in the merchant's ad account or none of
+  // them counted at all — and both look fine from inside NCOM.
+
+  const seeded = await loadOrderTarget(organizationId)
+  check(
+    seeded?.ncomReportsPurchase === false,
+    'by default the website taking the orders is the one reporting them'
+  )
+
+  await prisma.orderDestination.update({
+    where: { organizationId },
+    data: { purchaseReporting: 'NCOM' },
+  })
+  const ncomReports = await loadOrderTarget(organizationId)
+  check(
+    ncomReports?.ncomReportsPurchase === true,
+    'a merchant whose site only fires a browser pixel can hand reporting back'
+  )
+
+  // Back to NCOM routing: there is no other system in the picture, so the
+  // question does not arise and checkout must not find an answer to it here.
+  await prisma.orderDestination.update({
+    where: { organizationId },
+    data: { mode: 'NCOM' },
+  })
+  check(
+    (await loadOrderTarget(organizationId)) === null,
+    'an order NCOM processes itself has no destination, so NCOM reports it'
+  )
+
+  // Everything after this check expects the fixture as it was seeded.
+  await prisma.orderDestination.update({
+    where: { organizationId },
+    data: { mode: 'OWN_WEBSITE', purchaseReporting: 'OWN_WEBSITE' },
+  })
 }
 
 async function checkDelivery(
