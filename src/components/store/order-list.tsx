@@ -39,6 +39,11 @@ import {
   resolveStatusColors,
   type StatusColorMap,
 } from '@/lib/order-status-colors'
+import {
+  HANDOFF_BADGE_LABEL,
+  HANDOFF_TONE,
+  type HandoffState,
+} from '@/lib/order-handoff'
 import { cn } from '@/lib/utils'
 import type {
   FinancialStatus,
@@ -64,6 +69,10 @@ export interface OrderListRow {
   offerLabel: string | null
   totalCents: number
   currencyCode: string
+  /** Who is packing this one — see lib/order-handoff. */
+  handoff: HandoffState
+  /** Why it is not simply done, when it is not. Null for the settled states. */
+  handoffNote: string | null
 }
 
 /**
@@ -92,6 +101,7 @@ export function OrderList({
   base,
   statusColors,
   canEditStatus,
+  showHandoff,
 }: {
   orders: OrderListRow[]
   total: number
@@ -99,6 +109,14 @@ export function OrderList({
   statusColors: StatusColorMap
   /** Viewers see the colours but cannot move an order along. */
   canEditStatus: boolean
+  /**
+   * Whether to say where each order is being processed.
+   *
+   * Off for the workspaces that have never handed an order over, which is most
+   * of them: a column reading "Here" on every row for ever is furniture, and it
+   * would push the badges that do vary off a phone.
+   */
+  showHandoff: boolean
 }) {
   const colors = resolveStatusColors(statusColors)
 
@@ -172,11 +190,34 @@ export function OrderList({
                     {order.customerName} · {order.itemCount}{' '}
                     {order.itemCount === 1 ? 'item' : 'items'} ·{' '}
                     {order.placedOn}
+                    {/* Inline rather than on a line of its own: the meta line
+                        is `truncate`, so a second line would be clipped to
+                        nothing. A long reason ellipsizes here and is read in
+                        full on the order's own handoff panel. */}
+                    {showHandoff && order.handoffNote && (
+                      <>
+                        {' · '}
+                        <span
+                          className={cn(
+                            HANDOFF_TONE[order.handoff] === 'danger'
+                              ? 'text-destructive'
+                              : 'text-amber-600'
+                          )}
+                        >
+                          {order.handoffNote}
+                        </span>
+                      </>
+                    )}
                   </>
                 }
                 badges={
                   <>
                     <FinancialStatusBadge status={order.financialStatus} />
+                    {/* Deliberately beside the payment badge rather than in the
+                        desktop-only group below: "your website never got this"
+                        is the one thing on this row worth interrupting someone
+                        on a phone for. */}
+                    {showHandoff && <HandoffBadge state={order.handoff} />}
                     {/* Provenance — which storefront and which landing page sold
                         it, and under what offer. One catalogue can be sold from
                         several pages, so this is how a merchant tells which page
@@ -221,6 +262,34 @@ export function OrderList({
         )
       })}
     </ListPanel>
+  )
+}
+
+/**
+ * Where this order is being processed.
+ *
+ * Two of the five states are the normal course of events and are drawn as
+ * quietly as the component library allows; the two that cost money are drawn
+ * as loudly as it allows. There is no middle setting on purpose — a merchant
+ * scanning a hundred rows reads colour, not text, and a palette with four
+ * degrees of concern in it has none.
+ */
+function HandoffBadge({ state }: { state: HandoffState }) {
+  const tone = HANDOFF_TONE[state]
+
+  return (
+    <Badge
+      variant={
+        tone === 'danger'
+          ? 'destructive'
+          : tone === 'muted'
+            ? 'outline'
+            : 'secondary'
+      }
+      className={cn(tone === 'warning' && 'border-amber-500/50 text-amber-700')}
+    >
+      {HANDOFF_BADGE_LABEL[state]}
+    </Badge>
   )
 }
 

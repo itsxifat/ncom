@@ -50,6 +50,17 @@ export function OrderHandoffBanner({
               to compare.
             </span>
           </p>
+          {/* The sentence above used to end in "open each one" with no way to
+              find them. This is that way. */}
+          <Button
+            variant="outline"
+            size="sm"
+            render={<Link href="/orders?handoff=CONFLICT" />}
+            nativeButton={false}
+          >
+            Show them
+            <ArrowRight />
+          </Button>
         </CardContent>
       </Card>
     )
@@ -74,15 +85,25 @@ export function OrderHandoffBanner({
               and send it again.
             </span>
           </p>
-          <Button
-            variant="outline"
-            size="sm"
-            render={<Link href="/settings/order-destination" />}
-            nativeButton={false}
-          >
-            Check the endpoint
-            <ArrowRight />
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              render={<Link href="/orders?handoff=STUCK" />}
+              nativeButton={false}
+            >
+              Show them
+              <ArrowRight />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              render={<Link href="/settings/order-destination" />}
+              nativeButton={false}
+            >
+              Check the endpoint
+            </Button>
+          </div>
         </CardContent>
       </Card>
     )
@@ -122,9 +143,12 @@ export function OrderHandoffBanner({
           {pending > 0 && (
             <>
               {' '}
-              <span className="text-muted-foreground">
+              <Link
+                href="/orders?handoff=QUEUED"
+                className="text-muted-foreground underline underline-offset-2"
+              >
                 {pending} {pending === 1 ? 'is' : 'are'} still on the way.
-              </span>
+              </Link>
             </>
           )}
         </p>

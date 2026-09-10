@@ -10,9 +10,11 @@ import { OrderList } from '@/components/store/order-list'
 import { OrderFilters } from '@/components/store/order-filters'
 import { OrderHandoffBanner } from '@/components/store/order-handoff-banner'
 import { orderStatus } from '@/lib/order-status'
+import { HANDOFF_STATES, handoffState } from '@/lib/order-handoff'
 import { Button } from '@/components/ui/button'
 import type {
   FinancialStatus,
+  OrderForwardStatus,
   OrderWorkflowState,
 } from '@/generated/prisma/enums'
 
@@ -68,6 +70,7 @@ export default async function OrdersPage({
     (value) => value === query.financial
   )
   const workflowStates = parseWorkflowStates(query.delivery)
+  const handoff = HANDOFF_STATES.find((value) => value === query.handoff)
   const page = Math.max(1, Number(query.page) || 1)
 
   const { organization, role } = await getActiveOrganization()
@@ -81,6 +84,13 @@ export default async function OrdersPage({
 
   const forwarding = destination.mode === 'OWN_WEBSITE'
   const endpointHost = hostOf(destination.endpointUrl)
+
+  // Whether "where is this order being processed" is a question this workspace
+  // has. Handed-over orders outlive the switch that created them, so a
+  // workspace that has moved back to processing its own orders still needs the
+  // column for the ones it sent — hence the count, not just the mode.
+  const showHandoff =
+    forwarding || forwards.delivered + forwards.pending + forwards.stuck > 0
 
   // A store id from the query string is only honoured if it is one of this
   // workspace's own — `listOrders` scopes by organisation regardless, but a
@@ -98,6 +108,7 @@ export default async function OrdersPage({
         ? { workflowStateIn: workflowStates }
         : {}),
     storeId,
+    handoff,
     take: PAGE_SIZE,
     skip: (page - 1) * PAGE_SIZE,
   })
@@ -113,11 +124,12 @@ export default async function OrdersPage({
       ...(financialStatus ? { financial: financialStatus } : {}),
       ...(workflowStates.length ? { delivery: workflowStates.join(',') } : {}),
       ...(storeId ? { store: storeId } : {}),
+      ...(handoff ? { handoff } : {}),
       page: String(next),
     }).toString()
 
   const filtered = Boolean(
-    search || financialStatus || workflowStates.length || storeId
+    search || financialStatus || workflowStates.length || storeId || handoff
   )
 
   // Nothing at all, and nothing filtered out — this workspace has simply not
@@ -158,6 +170,16 @@ export default async function OrdersPage({
       <OrderFilters
         stores={stores.map((store) => ({ id: store.id, name: store.name }))}
         total={total}
+        // Offered only where it can answer something. A workspace that has
+        // never handed an order over would get a filter whose every option but
+        // one returns nothing.
+        showHandoff={showHandoff}
+        handoffCounts={{
+          sent: forwards.delivered,
+          queued: forwards.pending,
+          stuck: forwards.stuck,
+          conflicted: forwards.conflicted,
+        }}
       />
 
       {items.length === 0 ? (
@@ -171,6 +193,7 @@ export default async function OrdersPage({
           base={base}
           total={total}
           statusColors={statusColors}
+          showHandoff={showHandoff}
           // VIEWERs read the order book; moving a parcel along is an EDITOR's
           // job, and the server enforces the same line. Rendering the menu for
           // someone who cannot use it is offering a button that fails.
@@ -200,6 +223,10 @@ export default async function OrdersPage({
             offerLabel: order.offerLabel,
             totalCents: order.totalCents,
             currencyCode: order.currencyCode,
+            handoff: handoffState(order.forward),
+            // Only worth a sentence when something went wrong; a delivered
+            // handoff explains itself.
+            handoffNote: handoffNote(order.forward),
           }))}
         />
       )}
@@ -230,6 +257,48 @@ export default async function OrdersPage({
       )}
     </div>
   )
+}
+
+/**
+ * The one line a row can afford about a handoff that is not simply done.
+ *
+ * Nothing for the two states that need no explanation — an order processed here
+ * and one that arrived. A merchant scanning this list is looking for the rows
+ * that are neither.
+ */
+function handoffNote(
+  forward: {
+    status: OrderForwardStatus
+    conflictAt: Date | null
+    attempts: number
+    nextAttemptAt: Date | null
+    error: string | null
+  } | null
+): string | null {
+  if (!forward) return null
+
+  if (forward.conflictAt) {
+    return 'Changed here and on your website — open it to compare'
+  }
+
+  if (forward.status === 'PENDING') {
+    if (forward.attempts === 0) return 'Queued to send'
+    const next = forward.nextAttemptAt
+    return next
+      ? `Attempt ${forward.attempts} failed — trying again at ${next.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+      : `Attempt ${forward.attempts} failed — retrying`
+  }
+
+  if (forward.status === 'REFUSED' || forward.status === 'FAILED') {
+    const reason = forward.error?.trim()
+    const gaveUp =
+      forward.status === 'REFUSED'
+        ? 'Your website refused it'
+        : `Gave up after ${forward.attempts} ${forward.attempts === 1 ? 'attempt' : 'attempts'}`
+    return reason ? `${gaveUp} — ${reason}` : gaveUp
+  }
+
+  return null
 }
 
 /** The bare hostname of the order endpoint, for a sentence a merchant reads. */

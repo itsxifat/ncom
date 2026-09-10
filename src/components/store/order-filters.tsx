@@ -8,6 +8,11 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { FormSelect } from '@/components/ui/form-select'
 import { WORKFLOW_STATE_LABEL } from '@/server/courier/statusMap'
+import {
+  HANDOFF_LABEL,
+  HANDOFF_STATES,
+  type HandoffState,
+} from '@/lib/order-handoff'
 import type {
   FinancialStatus,
   OrderWorkflowState,
@@ -100,13 +105,92 @@ const QUICK_VIEWS = [
 
 const SEARCH_DELAY_MS = 300
 
+/**
+ * Which summary count belongs on which chip.
+ *
+ * `NCOM` has none: counting the orders a workspace processes itself means
+ * counting almost every order it has ever taken, and that is a full table scan
+ * to put a number on the one chip whose answer is "the rest of them".
+ */
+const HANDOFF_COUNT_KEY: Record<
+  HandoffState,
+  'sent' | 'queued' | 'stuck' | 'conflicted' | null
+> = {
+  NCOM: null,
+  SENT: 'sent',
+  QUEUED: 'queued',
+  STUCK: 'stuck',
+  CONFLICT: 'conflicted',
+}
+
+/**
+ * One handoff filter, with its count.
+ *
+ * A zero on an alarming chip is still drawn calmly — "Never arrived 0" is good
+ * news, and colouring it red would train people to ignore the colour on the
+ * day it means something.
+ */
+function HandoffChip({
+  label,
+  count,
+  active,
+  alarming = false,
+  onClick,
+}: {
+  label: string
+  count?: number
+  active: boolean
+  alarming?: boolean
+  onClick: () => void
+}) {
+  const loud = alarming && (count ?? 0) > 0
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn(
+        'shrink-0 rounded-full px-3 py-1 text-sm font-medium whitespace-nowrap transition-colors',
+        active
+          ? 'bg-primary text-primary-foreground'
+          : loud
+            ? 'bg-destructive/10 text-destructive hover:bg-destructive/15'
+            : 'bg-muted text-muted-foreground hover:bg-muted/70 hover:text-foreground'
+      )}
+    >
+      {label}
+      {count !== undefined && (
+        <span className="ml-1.5 tabular-nums opacity-70">{count}</span>
+      )}
+    </button>
+  )
+}
+
 export function OrderFilters({
   stores,
   total,
+  showHandoff,
+  handoffCounts,
 }: {
   stores: { id: string; name: string }[]
   /** Shown beside the views so the count is attached to the query producing it. */
   total: number
+  /** Only for workspaces that have actually handed an order to a website. */
+  showHandoff: boolean
+  /**
+   * How many orders sit in each handoff state right now.
+   *
+   * On the buttons rather than left to be discovered by pressing them: the
+   * question a merchant opens this screen with is "did anything fail to reach
+   * my site", and a zero on the button answers it without a round trip.
+   */
+  handoffCounts: {
+    sent: number
+    queued: number
+    stuck: number
+    conflicted: number
+  }
 }) {
   const router = useRouter()
   const pathname = usePathname()
@@ -117,6 +201,7 @@ export function OrderFilters({
   const delivery = params.get('delivery') ?? ''
   const financial = params.get('financial') ?? ''
   const store = params.get('store') ?? ''
+  const handoff = params.get('handoff') ?? ''
 
   const [draft, setDraft] = useState(search)
   // Opened on load only when a filter is active that no saved view can show —
@@ -217,6 +302,13 @@ export function OrderFilters({
       clear: () => push({ store: null }),
     })
   }
+  if (handoff) {
+    pills.push({
+      key: 'handoff',
+      label: HANDOFF_LABEL[handoff as HandoffState] ?? handoff,
+      clear: () => push({ handoff: null }),
+    })
+  }
 
   return (
     <div className="flex flex-col gap-3">
@@ -252,7 +344,13 @@ export function OrderFilters({
             variant="ghost"
             onClick={() => {
               setDraft('')
-              push({ q: null, delivery: null, financial: null, store: null })
+              push({
+                q: null,
+                delivery: null,
+                financial: null,
+                store: null,
+                handoff: null,
+              })
             }}
           >
             <X />
@@ -293,6 +391,41 @@ export function OrderFilters({
           )
         })}
       </div>
+
+      {/* ── Where each order is being processed ─────────────────────
+          Its own row rather than an option inside "More filters", because for
+          a workspace handing orders over this is the first question of the
+          morning — did everything reach my website — and an answer three taps
+          away is an answer nobody checks. The counts are on the buttons so the
+          reassuring case needs no tap at all. */}
+      {showHandoff && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-muted-foreground shrink-0 text-xs font-medium">
+            Processed
+          </span>
+          <div className="-mx-4 flex scrollbar-none gap-1.5 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+            <HandoffChip
+              label="Anywhere"
+              active={handoff === ''}
+              onClick={() => push({ handoff: null })}
+            />
+            {HANDOFF_STATES.map((state) => (
+              <HandoffChip
+                key={state}
+                label={HANDOFF_LABEL[state]}
+                count={
+                  HANDOFF_COUNT_KEY[state]
+                    ? handoffCounts[HANDOFF_COUNT_KEY[state]!]
+                    : undefined
+                }
+                alarming={state === 'STUCK' || state === 'CONFLICT'}
+                active={handoff === state}
+                onClick={() => push({ handoff: state })}
+              />
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── The narrower questions, on request ──────────────────────── */}
       {advanced && (

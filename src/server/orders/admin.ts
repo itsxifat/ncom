@@ -277,6 +277,8 @@ function safeHint(secret: string): string | null {
 // ── The queue ────────────────────────────────────────────────────────────
 
 export interface ForwardSummary {
+  /** Landed. Counted so a screen can tell "nothing handed over" from "all fine". */
+  delivered: number
   /** Queued, still being retried. Usually zero, and briefly non-zero. */
   pending: number
   /** Their site refused, or the queue gave up. These need a human. */
@@ -294,16 +296,22 @@ export async function getForwardSummary(
 ): Promise<ForwardSummary> {
   await requireOrgAccess(organizationId)
 
+  // Every status, not just the unhappy ones. A workspace that has switched back
+  // to processing orders here still has last month's handoffs, and the order
+  // book has to keep saying which orders those were — so the screen needs to
+  // know that any handoff exists at all, not only that something is wrong.
   const counts = await prisma.orderForward.groupBy({
     by: ['status'],
-    where: { organizationId, status: { not: 'DELIVERED' } },
+    where: { organizationId },
     _count: { _all: true },
   })
 
+  let delivered = 0
   let pending = 0
   let stuck = 0
   for (const row of counts) {
-    if (row.status === 'PENDING') pending += row._count._all
+    if (row.status === 'DELIVERED') delivered += row._count._all
+    else if (row.status === 'PENDING') pending += row._count._all
     else stuck += row._count._all
   }
 
@@ -315,7 +323,7 @@ export async function getForwardSummary(
     where: { organizationId, conflictAt: { not: null } },
   })
 
-  return { pending, stuck, conflicted }
+  return { delivered, pending, stuck, conflicted }
 }
 
 export interface OrderForwardView {

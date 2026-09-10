@@ -1,6 +1,8 @@
 import 'server-only'
 import { prisma } from '@/server/db/client'
 import { requireOrgAccess, requireHumanOrgAccess } from '@/server/auth/rbac'
+import type { Prisma } from '@/generated/prisma/client'
+import type { HandoffState } from '@/lib/order-handoff'
 import { returnToStock } from './inventoryService'
 import { isForwardedOrder, syncOrderChange } from '@/server/orders'
 import { legacyFulfillmentStatus } from '@/server/courier/statusMap'
@@ -82,6 +84,16 @@ export async function listOrders(
      * does not quietly hide orders whose site was deleted.
      */
     storeId?: string
+    /**
+     * Where the order is being processed — see lib/order-handoff.
+     *
+     * Expressed against the `forward` relation rather than a column on the
+     * order, because that relation *is* the fact: an order has been handed over
+     * exactly when a handoff row exists for it. A denormalised copy on the
+     * order would be a second source of truth for the same question, and the
+     * two would disagree the first time a retry changed one of them.
+     */
+    handoff?: HandoffState
     take?: number
     skip?: number
   } = {}
@@ -104,6 +116,7 @@ export async function listOrders(
       ? { workflowState: { in: options.workflowStateIn } }
       : {}),
     ...(options.storeId ? { storeId: options.storeId } : {}),
+    ...handoffWhere(options.handoff),
     ...(options.search
       ? {
           OR: [
@@ -139,6 +152,18 @@ export async function listOrders(
         // which offer on it, since a page runs several bundles at once.
         store: { select: { id: true, name: true, subdomain: true } },
         page: { select: { id: true, title: true, slug: true } },
+        // Whether somebody else is packing this one. Null for the ordinary
+        // case, which is what `handoffState` reads as "processed here".
+        forward: {
+          select: {
+            status: true,
+            conflictAt: true,
+            attempts: true,
+            nextAttemptAt: true,
+            remoteOrderNumber: true,
+            error: true,
+          },
+        },
       },
       orderBy: { createdAt: 'desc' },
       take: options.take ?? 50,
@@ -148,6 +173,46 @@ export async function listOrders(
   ])
 
   return { items, total }
+}
+
+/**
+ * One handoff state as a Prisma filter on the `forward` relation.
+ *
+ * `NCOM` is `is: null` — an order with no handoff row — and it is the reason
+ * this cannot be a plain `status` filter: the majority of orders in most
+ * workspaces have no row at all, and "not handed over" is a question about the
+ * relation's absence rather than about any value in it.
+ *
+ * STUCK folds REFUSED and FAILED together to match the vocabulary the list
+ * shows; a merchant filtering for orders their website never got does not
+ * first have to know which of the two ways it failed.
+ */
+function handoffWhere(state: HandoffState | undefined): Prisma.OrderWhereInput {
+  switch (state) {
+    case undefined:
+      return {}
+    case 'NCOM':
+      return { forward: { is: null } }
+    case 'SENT':
+      // Delivered *and* undisputed. A conflicted order arrived too, but it is
+      // its own answer to "where is this order" and has its own filter.
+      return {
+        forward: { is: { status: 'DELIVERED', conflictAt: null } },
+      }
+    case 'QUEUED':
+      return { forward: { is: { status: 'PENDING', conflictAt: null } } }
+    case 'STUCK':
+      return {
+        forward: {
+          is: {
+            status: { in: ['REFUSED', 'FAILED'] },
+            conflictAt: null,
+          },
+        },
+      }
+    case 'CONFLICT':
+      return { forward: { is: { conflictAt: { not: null } } } }
+  }
 }
 
 /**
