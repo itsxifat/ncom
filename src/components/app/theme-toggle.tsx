@@ -33,11 +33,9 @@ const getServerSnapshot = () => false
  * it — a merchant whose device switches at sunset would otherwise have to come
  * back here twice a day.
  *
- * It lives in the rail, which is black in both themes, so it is styled against
- * ink and not against the page: `bg-white/8` for the track, white for the
- * active chip. Those are literal rather than tokens on purpose — the tokens
- * around it describe the *page's* surface, which is the one surface this
- * control is guaranteed not to be sitting on.
+ * It sits on the rail, which follows the theme like every other panel, so it
+ * is drawn in page tokens: a muted track with the active segment raised out of
+ * it as a card.
  *
  * Nothing real renders until after hydration. `theme` comes from localStorage,
  * so on the server it is undefined and every segment would render inactive;
@@ -55,10 +53,7 @@ export function ThemeToggle({ className }: { className?: string }) {
 
   if (!hydrated) {
     return (
-      <div
-        aria-hidden
-        className={cn('h-9 rounded-full bg-white/8', className)}
-      />
+      <div aria-hidden className={cn('bg-muted h-9 rounded-lg', className)} />
     )
   }
 
@@ -67,7 +62,7 @@ export function ThemeToggle({ className }: { className?: string }) {
       role="radiogroup"
       aria-label="Colour theme"
       className={cn(
-        'flex items-center gap-0.5 rounded-full bg-white/8 p-0.5',
+        'bg-muted flex items-center gap-0.5 rounded-lg p-0.5',
         className
       )}
     >
@@ -85,11 +80,11 @@ export function ThemeToggle({ className }: { className?: string }) {
             title={option.label}
             onClick={() => setTheme(option.value)}
             className={cn(
-              'flex h-8 flex-1 items-center justify-center rounded-full transition-colors',
-              'focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:outline-none',
+              'flex h-8 flex-1 items-center justify-center rounded-md transition-colors',
+              'focus-visible:ring-ring/25 focus-visible:ring-2 focus-visible:outline-none',
               isActive
-                ? 'bg-white text-[#0b0b0c]'
-                : 'text-ink-muted hover:bg-white/10 hover:text-white'
+                ? 'bg-card text-foreground shadow-puck'
+                : 'text-muted-foreground hover:text-foreground'
             )}
           >
             <Icon className="size-4" />

@@ -3,162 +3,143 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
-  Activity,
-  LayoutDashboard,
-  Store,
-  Settings,
-  ShieldCheck,
-  Users,
+  ChartColumn,
+  House,
   Package,
-  ShoppingCart,
-  Warehouse,
-  UserRound,
+  PanelsTopLeft,
+  Settings,
+  ShoppingBag,
   Tag,
-  Image as ImageIcon,
-  CreditCard,
-  FolderTree,
-  KeyRound,
-  Webhook,
-  Truck,
-  BarChart3,
-  ScanLine,
-  Printer,
-  Layers,
-  PlugZap,
-  Send,
+  Users,
+  type LucideIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-
-/**
- * Workspace navigation.
- *
- * Grouped to match how the platform is actually shaped: commerce belongs to the
- * workspace (one catalogue, one inventory, one order book, shared by every
- * site), while a store is just a website — a subdomain, its pages and its
- * domain settings. Selling comes first because it is what merchants open the
- * dashboard to do; sites and setup sit below it.
- */
-const NAV_GROUPS: Array<{ label: string | null; items: NavItem[] }> = [
-  {
-    label: null,
-    items: [{ href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard }],
-  },
-  {
-    label: 'Sell',
-    items: [
-      { href: '/orders', label: 'Orders', icon: ShoppingCart },
-      // The packing bench, in the order a parcel meets it: print the sticker,
-      // stick it on, scan it back when it goes out.
-      { href: '/labels', label: 'Labels', icon: Printer },
-      { href: '/scan', label: 'Scan', icon: ScanLine },
-      { href: '/analytics', label: 'Analytics', icon: BarChart3 },
-      { href: '/tracking', label: 'Tracking', icon: Activity },
-      { href: '/products', label: 'Products', icon: Package },
-      { href: '/categories', label: 'Categories', icon: FolderTree },
-      { href: '/collections', label: 'Collections', icon: Layers },
-      { href: '/inventory', label: 'Inventory', icon: Warehouse },
-      { href: '/customers', label: 'Customers', icon: UserRound },
-      { href: '/discounts', label: 'Discounts & offers', icon: Tag },
-    ],
-  },
-  {
-    label: 'Sites',
-    items: [
-      { href: '/stores', label: 'Stores', icon: Store },
-      { href: '/media', label: 'Media', icon: ImageIcon },
-    ],
-  },
-  {
-    label: 'Developers',
-    items: [
-      { href: '/settings/api-keys', label: 'API keys', icon: KeyRound },
-      { href: '/settings/webhooks', label: 'Webhooks', icon: Webhook },
-    ],
-  },
-  {
-    label: 'Setup',
-    items: [
-      // First in Setup because nothing else in the Sell group works without it:
-      // no catalogue, no stock, no offer that resolves.
-      {
-        href: '/settings/product-source',
-        label: 'Product source',
-        icon: PlugZap,
-      },
-      // Directly under Product source: they are two halves of the same
-      // integration — that one reads a merchant's catalogue in, this one writes
-      // their orders back out.
-      {
-        href: '/settings/order-destination',
-        label: 'Order handling',
-        icon: Send,
-      },
-      { href: '/settings/payments', label: 'Payments', icon: Settings },
-      { href: '/settings/courier', label: 'Courier & fraud', icon: Truck },
-      { href: '/settings/shipping', label: 'Shipping', icon: Settings },
-      { href: '/settings/taxes', label: 'Taxes', icon: Settings },
-      { href: '/settings/locations', label: 'Locations', icon: Settings },
-      { href: '/organization', label: 'Workspace', icon: Users },
-      { href: '/billing', label: 'Plan & billing', icon: CreditCard },
-      { href: '/account/profile', label: 'Account', icon: Settings },
-    ],
-  },
-]
 
 interface NavItem {
   href: string
   label: string
-  icon: typeof LayoutDashboard
+  icon: LucideIcon
+  /**
+   * Every route this entry stands for. One entry covers a whole job — Orders
+   * is also the label printer and the scanner — so it has to stay lit on all
+   * of them, or the rail tells someone on /labels that they are nowhere.
+   */
+  owns: string[]
 }
 
-export function SidebarNav({ isPlatformAdmin }: { isPlatformAdmin: boolean }) {
-  const pathname = usePathname()
+/**
+ * The workspace's destinations.
+ *
+ * Seven, down from twenty-six. The old rail listed every screen the platform
+ * has, grouped by how the code is organised, and a merchant opening it for the
+ * first time met Webhooks and Locations at the same weight as Orders. Now each
+ * entry is a job someone opens the workspace to do, the screens that make up a
+ * job are tabs inside it (Products holds Categories, Collections and Stock),
+ * and everything that is set up once lives in Settings at the foot of the rail.
+ *
+ * Selling comes first because it is what merchants open the dashboard to do;
+ * the website comes after, because a page is built once and sold from daily.
+ */
+const NAV_ITEMS: NavItem[] = [
+  { href: '/dashboard', label: 'Home', icon: House, owns: ['/dashboard'] },
+  {
+    href: '/orders',
+    label: 'Orders',
+    icon: ShoppingBag,
+    // The packing bench, in the order a parcel meets it: the order, its
+    // sticker, the scan on the way out.
+    owns: ['/orders', '/labels', '/scan'],
+  },
+  {
+    href: '/products',
+    label: 'Products',
+    icon: Package,
+    owns: ['/products', '/categories', '/collections', '/inventory'],
+  },
+  { href: '/customers', label: 'Customers', icon: Users, owns: ['/customers'] },
+  { href: '/discounts', label: 'Discounts', icon: Tag, owns: ['/discounts'] },
+  {
+    href: '/stores',
+    label: 'Websites',
+    icon: PanelsTopLeft,
+    // "Stores" was the platform's word; what a merchant builds and edits here
+    // is pages, and the images in them.
+    owns: ['/stores', '/media'],
+  },
+  {
+    href: '/analytics',
+    label: 'Analytics',
+    icon: ChartColumn,
+    owns: ['/analytics'],
+  },
+]
 
-  const groups = isPlatformAdmin
-    ? [
-        ...NAV_GROUPS,
-        {
-          label: 'Platform',
-          items: [{ href: '/admin', label: 'Admin', icon: ShieldCheck }],
-        },
-      ]
-    : NAV_GROUPS
+export const SETTINGS_NAV_ITEM: NavItem = {
+  href: '/settings',
+  label: 'Settings',
+  icon: Settings,
+  // Team and billing kept their old URLs; they are settings now all the same.
+  owns: ['/settings', '/organization', '/billing', '/tracking'],
+}
+
+function isActive(item: NavItem, pathname: string) {
+  return item.owns.some(
+    (route) => pathname === route || pathname.startsWith(`${route}/`)
+  )
+}
+
+export function NavLink({
+  item,
+  count,
+}: {
+  item: NavItem
+  /** Things waiting on the merchant here, shown as a number beside the label. */
+  count?: number
+}) {
+  const pathname = usePathname()
+  const active = isActive(item, pathname)
+  const Icon = item.icon
 
   return (
-    <nav className="flex flex-col gap-5">
-      {groups.map((group, index) => (
-        <div key={group.label ?? index} className="flex flex-col gap-1">
-          {group.label && (
-            <p className="text-ink-muted px-3.5 pb-1 text-[11px] font-semibold tracking-wider uppercase">
-              {group.label}
-            </p>
-          )}
-          {group.items.map((item) => {
-            // Exact match for the group roots, prefix match for detail pages,
-            // so /orders/123 still highlights Orders without /settings/taxes
-            // also lighting up /settings/shipping.
-            const isActive =
-              pathname === item.href || pathname.startsWith(`${item.href}/`)
-            const Icon = item.icon
+    <Link
+      href={item.href}
+      aria-current={active ? 'page' : undefined}
+      className={cn(
+        'flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm transition-colors',
+        active
+          ? 'bg-sidebar-primary text-sidebar-primary-foreground font-semibold'
+          : 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground font-medium'
+      )}
+    >
+      <Icon className="size-4.5 shrink-0" />
+      {item.label}
+      {count ? (
+        <span
+          // The number is part of the link's name, so a screen reader hears
+          // "Orders, 15 need you" rather than a bare "15" after it.
+          aria-label={`${count} need you`}
+          className="bg-ink text-ink-foreground ml-auto min-w-6 rounded-full px-2 text-center text-xs leading-5 font-semibold tabular-nums"
+        >
+          {count > 99 ? '99+' : count}
+        </span>
+      ) : null}
+    </Link>
+  )
+}
 
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                aria-current={isActive ? 'page' : undefined}
-                className={cn(
-                  'flex items-center gap-3 rounded-full px-3.5 py-2.5 text-sm font-medium transition-colors',
-                  isActive
-                    ? 'bg-sidebar-primary text-sidebar-primary-foreground'
-                    : 'text-ink-muted hover:bg-sidebar-accent hover:text-sidebar-foreground'
-                )}
-              >
-                <Icon className="size-4.5 shrink-0" />
-                {item.label}
-              </Link>
-            )
-          })}
-        </div>
+export function SidebarNav({
+  ordersNeedingAction,
+}: {
+  ordersNeedingAction: number
+}) {
+  return (
+    <nav aria-label="Main" className="flex flex-col gap-0.5">
+      {NAV_ITEMS.map((item) => (
+        <NavLink
+          key={item.href}
+          item={item}
+          count={item.href === '/orders' ? ordersNeedingAction : undefined}
+        />
       ))}
     </nav>
   )

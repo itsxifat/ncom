@@ -50,16 +50,18 @@ export function OrgSwitcher({
           />
         }
       >
-        <span className="bg-lime text-lime-foreground font-display flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-bold">
+        <span className="bg-lime text-lime-foreground font-display flex size-8 shrink-0 items-center justify-center rounded-md text-xs font-bold">
           {(active?.name ?? '?').slice(0, 1).toUpperCase()}
         </span>
-        <span className="flex min-w-0 flex-col items-start gap-1">
-          {!compact && (
-            <span className="eyebrow text-ink-muted">Workspace</span>
-          )}
-          <span className="max-w-full truncate text-sm font-medium">
+        <span className="flex min-w-0 flex-col items-start gap-0.5">
+          <span className="max-w-full truncate text-sm font-semibold">
             {active?.name ?? 'Select workspace'}
           </span>
+          {!compact && (
+            <span className="text-muted-foreground text-xs font-medium">
+              Workspace
+            </span>
+          )}
         </span>
         {!compact && (
           <ChevronsUpDown className="ml-auto size-4 shrink-0 opacity-40" />

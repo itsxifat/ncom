@@ -6,11 +6,11 @@ import { cn } from '@/lib/utils'
 // gap and the numeral all step down together. Stacking these full-width
 // instead would push the first actual content on the page below the fold.
 const statCardVariants = cva(
-  'shadow-puck relative flex min-h-24 flex-col justify-between gap-4 overflow-hidden rounded-xl p-4 sm:min-h-32 sm:gap-6 sm:p-5 2xl:min-h-36 2xl:p-6',
+  'relative flex min-h-24 flex-col justify-between gap-3 overflow-hidden rounded-xl p-4 sm:min-h-28 sm:gap-4 sm:p-5',
   {
     variants: {
       tone: {
-        default: 'bg-card text-card-foreground ring-foreground/6 ring-1',
+        default: 'bg-card text-card-foreground ring-border ring-1',
         ink: 'bg-ink text-ink-foreground',
         lime: 'bg-lime text-lime-foreground',
       },
@@ -60,7 +60,7 @@ export function StatCard({
       <div>
         <p
           data-slot="stat-value"
-          className="font-display text-2xl leading-none font-semibold tracking-tight sm:text-4xl 2xl:text-5xl"
+          className="font-display text-2xl leading-none font-semibold tracking-tight sm:text-[1.875rem]"
         >
           {value}
         </p>

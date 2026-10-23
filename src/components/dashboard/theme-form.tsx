@@ -17,6 +17,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { FormSelect } from '@/components/ui/form-select'
 import { FontPicker } from '@/components/ui/font-picker'
 import { ColorField as ColorPickerField } from '@/components/ui/color-picker'
+import { siteLanguage, siteNumerals } from '@/modules/sections/language'
 
 /**
  * One theme colour.
@@ -79,6 +80,39 @@ export function ThemeForm({
   return (
     <form id="theme-form" action={action}>
       <FieldGroup>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Field>
+            <FieldLabel htmlFor="language">
+              Language your customers read
+            </FieldLabel>
+            <FormSelect
+              id="language"
+              name="language"
+              defaultValue={siteLanguage(theme)}
+            >
+              <option value="en">English</option>
+              <option value="bn">বাংলা (Bangla)</option>
+            </FormSelect>
+            <FieldDescription>
+              The cart, checkout and other words your shop writes itself.
+            </FieldDescription>
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="numerals">Numbers</FieldLabel>
+            <FormSelect
+              id="numerals"
+              name="numerals"
+              defaultValue={siteNumerals(theme)}
+            >
+              <option value="latin">1,250</option>
+              <option value="bangla">১,২৫০ (Bangla digits)</option>
+            </FormSelect>
+            <FieldDescription>
+              Bangla digits are used only when the language is Bangla.
+            </FieldDescription>
+          </Field>
+        </div>
+
         <div className="grid grid-cols-2 gap-4">
           <ColorField
             name="primaryColor"

@@ -14,7 +14,7 @@ export function ListPanel({
     <div
       data-slot="list-panel"
       className={cn(
-        'bg-card ring-foreground/6 shadow-puck divide-border/60 flex flex-col divide-y overflow-hidden rounded-xl ring-1',
+        'bg-card ring-border divide-border/70 flex flex-col divide-y overflow-hidden rounded-xl ring-1',
         className
       )}
       {...props}

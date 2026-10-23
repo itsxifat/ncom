@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { FormSelect } from '@/components/ui/form-select'
+import { TabCount } from '@/components/app/section-tabs'
 import { WORKFLOW_STATE_LABEL } from '@/server/courier/statusMap'
 import {
   HANDOFF_LABEL,
@@ -71,36 +72,48 @@ const FINANCIAL_LABEL: Record<FinancialStatus, string> = {
 }
 
 /**
- * The saved views, in the order a working day uses them.
+ * The saved views, in the order a parcel moves through them — which is also
+ * the order a working day uses them.
  *
  * "Needs action" is not a single status — it is the three states where the
  * parcel is still the merchant's problem — which is exactly why it belongs
- * here: it is the query nobody can express in one dropdown.
+ * here: it is the query nobody can express in one dropdown. It is also what
+ * the number on the rail's Orders entry counts.
+ *
+ * Payment status is not a view any more. On a cash-on-delivery order "unpaid"
+ * is true of everything not yet delivered, so the view mostly repeated the
+ * ones beside it; it is still one choice away under More filters.
  */
 const QUICK_VIEWS = [
-  { key: '', label: 'All orders', params: {} },
+  { key: '', label: 'All', params: {} },
   {
     key: 'todo',
     label: 'Needs action',
     params: { delivery: 'PENDING,PROCESSING,FRAUD_REVIEW' },
+    urgent: true,
   },
   {
     key: 'review',
-    label: 'Held for review',
+    label: 'Needs review',
     params: { delivery: 'FRAUD_REVIEW' },
+    urgent: true,
+  },
+  {
+    key: 'ship',
+    label: 'Ready to ship',
+    params: { delivery: 'PROCESSING' },
   },
   {
     key: 'transit',
-    label: 'With courier',
+    label: 'On the way',
     params: { delivery: 'DISPATCHED,IN_TRANSIT,OUT_FOR_DELIVERY' },
   },
   { key: 'delivered', label: 'Delivered', params: { delivery: 'DELIVERED' } },
   {
     key: 'problem',
-    label: 'Returned & failed',
+    label: 'Returned or failed',
     params: { delivery: 'RETURNED,FAILED' },
   },
-  { key: 'unpaid', label: 'Unpaid', params: { financial: 'PENDING' } },
 ] as const
 
 const SEARCH_DELAY_MS = 300
@@ -169,13 +182,17 @@ function HandoffChip({
 
 export function OrderFilters({
   stores,
-  total,
+  stateCounts,
   showHandoff,
   handoffCounts,
 }: {
   stores: { id: string; name: string }[]
-  /** Shown beside the views so the count is attached to the query producing it. */
-  total: number
+  /**
+   * Orders per workflow state, for the count on each view. On every view and
+   * not just the open one, because "is anything waiting for review" should be
+   * answered by reading the row, not by pressing each tab to find out.
+   */
+  stateCounts: Partial<Record<OrderWorkflowState, number>>
   /** Only for workspaces that have actually handed an order to a website. */
   showHandoff: boolean
   /**
@@ -254,15 +271,17 @@ export function OrderFilters({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `push` is rebuilt every render; depending on it would reset the timer on each one
   }, [draft, search])
 
-  const activeView =
-    QUICK_VIEWS.find((view) => {
-      if (view.key === '') return false
-      const wantedDelivery =
-        'delivery' in view.params ? view.params.delivery : ''
-      const wantedFinancial =
-        'financial' in view.params ? view.params.financial : ''
-      return delivery === wantedDelivery && financial === wantedFinancial
-    })?.key ?? (delivery || financial ? null : '')
+  // A payment filter from More filters narrows every view, so no view is
+  // marked as current while one is set — the tab would describe a list that
+  // is not the one on screen.
+  const activeView = financial
+    ? null
+    : (QUICK_VIEWS.find(
+        (view) =>
+          view.key !== '' &&
+          'delivery' in view.params &&
+          view.params.delivery === delivery
+      )?.key ?? (delivery ? null : ''))
 
   const pills: { key: string; label: string; clear: () => void }[] = []
   if (search) {
@@ -310,8 +329,59 @@ export function OrderFilters({
     })
   }
 
+  // A view's count is the sum over the states it asks for — the same states
+  // the list query filters on, so the number is the length of the list.
+  const viewCount = (view: (typeof QUICK_VIEWS)[number]): number => {
+    const states: readonly OrderWorkflowState[] =
+      'delivery' in view.params
+        ? (view.params.delivery.split(',') as OrderWorkflowState[])
+        : WORKFLOW_VALUES
+    return states.reduce<number>(
+      (sum, state) => sum + (stateCounts[state] ?? 0),
+      0
+    )
+  }
+
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-4">
+      {/* ── Saved views ─────────────────────────────────────────────── */}
+      <nav
+        aria-label="Order views"
+        className="border-border flex scrollbar-none items-end gap-1 overflow-x-auto border-b"
+      >
+        {QUICK_VIEWS.map((view) => {
+          const isActive = activeView === view.key
+          const count = viewCount(view)
+          return (
+            <button
+              key={view.key}
+              type="button"
+              onClick={() =>
+                push({
+                  delivery:
+                    'delivery' in view.params ? view.params.delivery : null,
+                  financial: null,
+                })
+              }
+              className={cn(
+                '-mb-px flex min-h-11 shrink-0 items-center gap-2 border-b-2 px-3 text-sm whitespace-nowrap transition-colors',
+                isActive
+                  ? 'border-foreground text-foreground font-semibold'
+                  : 'text-muted-foreground hover:text-foreground border-transparent font-medium'
+              )}
+              aria-pressed={isActive}
+            >
+              {view.label}
+              <TabCount
+                tone={'urgent' in view && count > 0 ? 'attention' : 'default'}
+              >
+                {count.toLocaleString('en-US')}
+              </TabCount>
+            </button>
+          )
+        })}
+      </nav>
+
       {/* ── Search + the escape hatch ───────────────────────────────── */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-0 flex-1 sm:max-w-md">
@@ -357,39 +427,6 @@ export function OrderFilters({
             Clear all
           </Button>
         )}
-      </div>
-
-      {/* ── Saved views ─────────────────────────────────────────────── */}
-      <div className="-mx-4 flex scrollbar-none gap-1.5 overflow-x-auto px-4 pb-1 sm:-mx-1 sm:px-1">
-        {QUICK_VIEWS.map((view) => {
-          const isActive = activeView === view.key
-          return (
-            <button
-              key={view.key}
-              type="button"
-              onClick={() =>
-                push({
-                  delivery:
-                    'delivery' in view.params ? view.params.delivery : null,
-                  financial:
-                    'financial' in view.params ? view.params.financial : null,
-                })
-              }
-              className={cn(
-                'shrink-0 rounded-full px-3.5 py-1.5 text-sm font-medium whitespace-nowrap transition-colors',
-                isActive
-                  ? 'bg-primary text-primary-foreground'
-                  : 'bg-muted text-muted-foreground hover:bg-muted/70 hover:text-foreground'
-              )}
-              aria-pressed={isActive}
-            >
-              {view.label}
-              {isActive && (
-                <span className="ml-1.5 tabular-nums opacity-70">{total}</span>
-              )}
-            </button>
-          )
-        })}
       </div>
 
       {/* ── Where each order is being processed ─────────────────────

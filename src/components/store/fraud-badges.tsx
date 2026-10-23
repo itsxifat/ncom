@@ -3,6 +3,11 @@ import {
   SHIPMENT_STATUS_LABEL,
   WORKFLOW_STATE_LABEL,
 } from '@/server/courier/statusMap'
+import {
+  DEFAULT_STATUS_COLORS,
+  TONE_STYLES,
+  type StatusTone,
+} from '@/lib/order-status-colors'
 import type {
   CourierShipmentStatus,
   FraudVerdict,
@@ -20,49 +25,48 @@ import type {
  * other.
  */
 
-const VERDICT_VARIANT = {
-  PASS: 'lime',
-  REVIEW: 'secondary',
-  FAIL: 'destructive',
-  UNAVAILABLE: 'outline',
-} as const
+const VERDICT_TONE: Record<FraudVerdict, StatusTone> = {
+  PASS: 'green',
+  REVIEW: 'amber',
+  FAIL: 'red',
+  UNAVAILABLE: 'none',
+}
 
-const VERDICT_LABEL = {
-  PASS: 'Screened clean',
-  REVIEW: 'Needs review',
-  FAIL: 'Fraud risk',
-  UNAVAILABLE: 'Not screened',
-} as const
+/**
+ * The verdict in the words a merchant would use about a customer, not the
+ * screen's: "Reliable" and "Risky" say what to do with the parcel, where
+ * "Screened clean" and "Fraud risk" described the check.
+ */
+export const VERDICT_LABEL: Record<FraudVerdict, string> = {
+  PASS: 'Reliable',
+  REVIEW: 'Check first',
+  FAIL: 'Risky',
+  UNAVAILABLE: 'Not checked',
+}
 
 export function FraudVerdictBadge({ verdict }: { verdict: FraudVerdict }) {
   return (
-    <Badge variant={VERDICT_VARIANT[verdict]}>{VERDICT_LABEL[verdict]}</Badge>
+    <Badge className={TONE_STYLES[VERDICT_TONE[verdict]].pill}>
+      {VERDICT_LABEL[verdict]}
+    </Badge>
   )
 }
 
-const WORKFLOW_VARIANT: Record<
-  OrderWorkflowState,
-  'default' | 'lime' | 'secondary' | 'destructive' | 'outline'
-> = {
-  PENDING: 'outline',
-  FRAUD_REVIEW: 'destructive',
-  PROCESSING: 'secondary',
-  DISPATCHED: 'secondary',
-  IN_TRANSIT: 'secondary',
-  OUT_FOR_DELIVERY: 'secondary',
-  DELIVERED: 'lime',
-  PARTIALLY_DELIVERED: 'secondary',
-  RETURNED: 'destructive',
-  // Not `outline`. That is what PENDING wears, and a cancelled order that looks
-  // exactly like a fresh one is how a cancellation goes unread on a list —
-  // which is the whole reason the cancelled state is shown here at all now.
-  CANCELLED: 'destructive',
-  FAILED: 'destructive',
-}
-
-export function WorkflowStateBadge({ state }: { state: OrderWorkflowState }) {
+/**
+ * Where an order is, in the merchant's own status colours when they have set
+ * them (Orders → status colours) and the defaults otherwise — so a pill on
+ * Home, on the order list and on the order itself is the same colour for the
+ * same state.
+ */
+export function WorkflowStateBadge({
+  state,
+  tone = DEFAULT_STATUS_COLORS[state],
+}: {
+  state: OrderWorkflowState
+  tone?: StatusTone
+}) {
   return (
-    <Badge variant={WORKFLOW_VARIANT[state]}>
+    <Badge className={TONE_STYLES[tone].pill}>
       {WORKFLOW_STATE_LABEL[state]}
     </Badge>
   )

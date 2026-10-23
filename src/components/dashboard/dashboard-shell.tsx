@@ -1,19 +1,17 @@
 'use client'
 
-import {
-  LayoutDashboard,
-  LogOut,
-  Package,
-  ScanLine,
-  ShoppingCart,
-} from 'lucide-react'
+import { House, Package, ScanLine, ShoppingBag } from 'lucide-react'
 import { AppFrame } from '@/components/app/app-frame'
 import type { TabItem } from '@/components/app/mobile-tab-bar'
 import { BrandMark } from '@/components/app/brand-mark'
+import { AccountMenu } from '@/components/dashboard/account-menu'
+import { CommandMenu } from '@/components/dashboard/command-menu'
 import { OrgSwitcher } from '@/components/dashboard/org-switcher'
-import { SidebarNav } from '@/components/dashboard/sidebar-nav'
-import { Button } from '@/components/ui/button'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import {
+  NavLink,
+  SETTINGS_NAV_ITEM,
+  SidebarNav,
+} from '@/components/dashboard/sidebar-nav'
 
 interface DashboardShellProps {
   organizationId: string
@@ -22,6 +20,8 @@ interface DashboardShellProps {
   userName: string | null | undefined
   userEmail: string | null | undefined
   initials: string | undefined
+  /** Orders still waiting on a person — screened, held or not yet sent. */
+  ordersNeedingAction: number
   signOutAction: () => void | Promise<void>
   children: React.ReactNode
 }
@@ -34,8 +34,8 @@ interface DashboardShellProps {
  * because the phone is the barcode scanner.
  */
 const MOBILE_TABS: TabItem[] = [
-  { href: '/dashboard', label: 'Home', icon: LayoutDashboard, exact: true },
-  { href: '/orders', label: 'Orders', icon: ShoppingCart },
+  { href: '/dashboard', label: 'Home', icon: House, exact: true },
+  { href: '/orders', label: 'Orders', icon: ShoppingBag },
   { href: '/scan', label: 'Scan', icon: ScanLine },
   { href: '/products', label: 'Products', icon: Package },
 ]
@@ -47,13 +47,14 @@ export function DashboardShell({
   userName,
   userEmail,
   initials,
+  ordersNeedingAction,
   signOutAction,
   children,
 }: DashboardShellProps) {
   return (
     <AppFrame
-      brand={<BrandMark />}
-      nav={<SidebarNav isPlatformAdmin={isPlatformAdmin} />}
+      brand={<BrandMark tone="onLight" />}
+      nav={<SidebarNav ordersNeedingAction={ordersNeedingAction} />}
       tabs={MOBILE_TABS}
       // Which workspace you are in is the one piece of context a merchant
       // cannot infer from the page, and it is the thing that makes an
@@ -64,41 +65,32 @@ export function DashboardShell({
           compact
           activeOrgId={organizationId}
           organizations={organizations}
-          className="border-border bg-card h-10 max-w-[11rem] rounded-full border px-2.5"
+          className="border-border bg-card h-10 max-w-44 rounded-lg border px-2"
         />
-      }
-      railFooter={
-        <div className="bg-sidebar-accent flex items-center gap-2.5 rounded-2xl p-2.5">
-          <Avatar className="size-8">
-            <AvatarFallback className="bg-lime text-lime-foreground text-xs font-semibold">
-              {initials}
-            </AvatarFallback>
-          </Avatar>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium">
-              {userName ?? userEmail}
-            </p>
-            <p className="text-ink-muted truncate text-xs">{userEmail}</p>
-          </div>
-          <form action={signOutAction}>
-            <Button
-              type="submit"
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Sign out"
-              className="text-ink-muted hover:bg-white/10 hover:text-white"
-            >
-              <LogOut className="size-4" />
-            </Button>
-          </form>
-        </div>
       }
       railHeader={
-        <OrgSwitcher
-          activeOrgId={organizationId}
-          organizations={organizations}
-          className="bg-sidebar-accent text-sidebar-foreground h-12 w-full rounded-2xl px-2.5 hover:bg-white/10 hover:text-white"
-        />
+        <div className="flex flex-col gap-2">
+          <OrgSwitcher
+            activeOrgId={organizationId}
+            organizations={organizations}
+            className="border-sidebar-border bg-card hover:bg-sidebar-accent h-13 w-full rounded-lg border px-2"
+          />
+          <CommandMenu />
+        </div>
+      }
+      railFooter={
+        <>
+          <NavLink item={SETTINGS_NAV_ITEM} />
+          <div className="border-sidebar-border mt-1.5 border-t pt-1.5">
+            <AccountMenu
+              name={userName}
+              email={userEmail}
+              initials={initials}
+              isPlatformAdmin={isPlatformAdmin}
+              signOutAction={signOutAction}
+            />
+          </div>
+        </>
       }
     >
       {children}

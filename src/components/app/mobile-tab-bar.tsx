@@ -16,11 +16,11 @@ export interface TabItem {
 /**
  * Primary navigation on a phone.
  *
- * The desktop rail is a black panel floating on the canvas; this is the same
- * object rotated onto the bottom edge, and it is deliberately the same black in
- * both themes for the same reason the rail is — the thing you navigate by
- * should not change colour under you. Active still reads as a lime pill,
- * because that is the "you are here" mark the rail already taught.
+ * The desktop rail is a white panel down the left edge; this is the same object
+ * rotated onto the bottom edge and lifted off the page with a shadow, because a
+ * bar floating over scrolling content needs to read as being on top of it.
+ * Active is the lime marker, because that is the "you are here" mark the rail
+ * already taught.
  *
  * It exists at all because a hamburger is the wrong default for a workspace
  * someone checks on their phone between other things. Opening a drawer, reading
@@ -52,7 +52,7 @@ export function MobileTabBar({
       // `pb-safe` rather than a fixed offset: the home-indicator strip is 34pt
       // on some phones, 0 on others and 0 in every desktop browser, and a
       // hard-coded gap is wrong on all three.
-      className="bg-sidebar text-sidebar-foreground shadow-lift pb-safe fixed inset-x-3 bottom-3 z-40 flex items-stretch gap-1 rounded-3xl p-1.5 lg:hidden"
+      className="bg-sidebar text-sidebar-foreground border-sidebar-border shadow-lift pb-safe fixed inset-x-3 bottom-3 z-40 flex items-stretch gap-1 rounded-2xl border p-1.5 lg:hidden"
     >
       {items.map((item) => {
         const isActive = item.exact
@@ -66,10 +66,10 @@ export function MobileTabBar({
             href={item.href}
             aria-current={isActive ? 'page' : undefined}
             className={cn(
-              'flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-[1.25rem] px-1 py-2 transition-colors',
+              'flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 transition-colors',
               isActive
                 ? 'bg-sidebar-primary text-sidebar-primary-foreground'
-                : 'text-ink-muted active:bg-white/10'
+                : 'text-muted-foreground active:bg-sidebar-accent'
             )}
           >
             <Icon className="size-5 shrink-0" />
@@ -89,10 +89,10 @@ export function MobileTabBar({
         aria-haspopup="dialog"
         aria-label="More destinations"
         className={cn(
-          'flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-[1.25rem] px-1 py-2 transition-colors',
+          'flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 transition-colors',
           moreActive
             ? 'bg-sidebar-accent text-sidebar-foreground'
-            : 'text-ink-muted active:bg-white/10'
+            : 'text-muted-foreground active:bg-sidebar-accent'
         )}
       >
         <MoreHorizontal className="size-5 shrink-0" />

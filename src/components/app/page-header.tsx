@@ -48,14 +48,15 @@ export function PageHeader({
         {eyebrow && (
           <p className="eyebrow text-muted-foreground mb-3">{eyebrow}</p>
         )}
-        {/* Starts a step smaller than it used to. `text-3xl` on a 390px
-            screen spends three lines on a title like "Discounts & offers",
-            which is a third of the fold gone before any content. */}
-        <h1 className="font-display text-2xl leading-[1.12] font-semibold tracking-tight text-balance sm:text-3xl sm:leading-[1.08] lg:text-4xl 2xl:text-[2.75rem]">
+        {/* Capped at 32px. A title is a label for the page, not the thing
+            to look at — at 44px it outweighed the orders and figures under
+            it, and on a 390px screen "Discounts & offers" took three lines
+            of the fold before any content. */}
+        <h1 className="font-display text-2xl leading-[1.15] font-semibold tracking-tight text-balance sm:text-[1.75rem] lg:text-[2rem]">
           {title}
         </h1>
         {description && (
-          <p className="text-muted-foreground mt-2.5 max-w-2xl text-sm text-pretty sm:text-base">
+          <p className="text-muted-foreground mt-1.5 max-w-2xl text-sm text-pretty sm:text-[0.9375rem]">
             {description}
           </p>
         )}

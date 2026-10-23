@@ -9,16 +9,15 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
-import { ThemeToggle } from '@/components/app/theme-toggle'
 import { MobileTabBar, type TabItem } from '@/components/app/mobile-tab-bar'
 
 interface AppFrameProps {
-  /** Logo lockup for the black rail. */
+  /** Logo lockup at the top of the rail. */
   brand: React.ReactNode
   /** Context that applies to everything below it — which workspace, which mode. */
   railHeader?: React.ReactNode
   nav: React.ReactNode
-  /** Pinned to the bottom of the rail — identity, escape hatches. */
+  /** Pinned to the bottom of the rail — identity, settings, escape hatches. */
   railFooter?: React.ReactNode
   /**
    * The four destinations worth a permanent thumb-tap on a phone. The bar is
@@ -31,9 +30,15 @@ interface AppFrameProps {
 }
 
 /**
- * Shared geometry for the workspace and the admin panel: a floating black rail
- * and a content column, both inset from the canvas so the page reads as panels
- * laid on a surface rather than regions divided by borders.
+ * Shared geometry for the workspace and the admin panel: a white rail down the
+ * left edge, divided from the content by a hairline, and a content column that
+ * scrolls with the page.
+ *
+ * The rail used to be a black panel floating on the canvas. It looked good and
+ * it worked against the people using it: the darkest, highest-contrast thing on
+ * every screen was the one part that never changes, so the eye kept landing on
+ * the navigation instead of the orders. Now the rail is one more surface, and
+ * the only colour in it is the lime marker on where you are.
  *
  * There is deliberately no top utility bar on desktop. Every action worth
  * showing is either global (and belongs in the rail) or specific to the page
@@ -45,8 +50,8 @@ interface AppFrameProps {
  * the only way in.
  *
  * The content column is deliberately close to uncapped — up to 2400px — so a
- * 27"+ display fills with columns instead of gutter. Grids inside pages add
- * columns at `2xl`/`3xl` to match.
+ * 27"+ display fills with columns instead of gutter. Pages that are a readable
+ * column rather than a table cap themselves; see `PageShell`.
  */
 export function AppFrame({
   brand,
@@ -72,70 +77,53 @@ export function AppFrame({
 
   // The brand and the workspace switcher are the rail's fixed frame: they name
   // where you are, so they stay put while only the list of destinations moves.
-  // The theme switch sits with the footer rather than in the scrolling middle,
-  // because it is a setting rather than a destination and should not drift out
-  // of view under a long nav.
+  // The footer is fixed too, so identity and Settings never scroll out of view
+  // under a long nav.
   const railContent = (
     <>
-      <div className="flex shrink-0 flex-col gap-6">
-        <div className="px-1 pt-1">{brand}</div>
+      <div className="flex shrink-0 flex-col gap-5">
+        <div className="px-2 pt-1">{brand}</div>
         {railHeader}
       </div>
       <div className="overscroll-none-y min-h-0 flex-1 scrollbar-none overflow-x-hidden overflow-y-auto">
         {nav}
       </div>
-      <div className="flex shrink-0 flex-col gap-2.5">
-        <ThemeToggle />
-        {railFooter}
-      </div>
+      {railFooter && (
+        <div className="flex shrink-0 flex-col gap-1">{railFooter}</div>
+      )}
     </>
   )
 
   return (
-    <div className="bg-canvas flex min-h-svh flex-1 flex-col lg:flex-row lg:items-start lg:gap-4 lg:p-4">
+    <div className="bg-canvas flex min-h-svh flex-1 flex-col lg:flex-row lg:items-start">
       {/* The mobile top bar carries identity and context only — every actual
           destination is in the tab bar at the bottom, within reach. */}
       <div className="bg-canvas/85 border-border sticky top-0 z-30 flex h-14 items-center justify-between gap-3 border-b px-4 backdrop-blur-md lg:hidden">
-        {/* The rail's own black is the mark's designed ground, and it is the
-            one surface guaranteed not to move under a theme change, so the
-            lockup travels with a scrap of it rather than being recoloured. */}
-        <span className="bg-sidebar dark flex items-center rounded-full px-3 py-1.5">
-          {brand}
-        </span>
+        {brand}
         {mobileActions}
       </div>
 
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-        {/* `dark` for the same reason the rail carries it: the drawer *is* the
-            rail on a phone, so everything inside it resolves ink tokens no
-            matter what the page behind is doing. */}
         <SheetContent
           side="left"
-          className="dark bg-sidebar text-sidebar-foreground w-76 overflow-hidden p-4 data-[side=left]:sm:max-w-none"
+          className="bg-sidebar text-sidebar-foreground w-76 overflow-hidden p-4 data-[side=left]:sm:max-w-none"
         >
           <SheetHeader className="sr-only p-0">
             <SheetTitle>Navigation</SheetTitle>
           </SheetHeader>
-          <div className="flex h-full min-h-0 flex-col gap-6">
+          <div className="flex h-full min-h-0 flex-col gap-5">
             {railContent}
           </div>
         </SheetContent>
       </Sheet>
 
-      {/*
-       * `dark` is not a theme choice here, it is what keeps the rail black in
-       * both themes. The token block it selects is the ink one, so every
-       * control inside the rail — buttons, the workspace menu's trigger, the
-       * theme switch — resolves colours that are correct on black, rather than
-       * inheriting a light page's palette and rendering pale-on-pale.
-       */}
-      <aside className="dark bg-sidebar text-sidebar-foreground sticky top-4 hidden h-[calc(100svh-2rem)] w-60 shrink-0 flex-col gap-6 overflow-hidden rounded-2xl p-4 lg:flex xl:w-68">
+      <aside className="bg-sidebar text-sidebar-foreground border-sidebar-border sticky top-0 hidden h-svh w-64 shrink-0 flex-col gap-5 overflow-hidden border-r px-3.5 pt-5 pb-3.5 lg:flex xl:w-68">
         {railContent}
       </aside>
 
       {/* `pb-tabbar` clears the floating bar so the last row of a list is
           reachable; the cap lifts at `lg`, where the bar is gone. */}
-      <main className="pb-tabbar w-full min-w-0 flex-1 px-4 pt-5 sm:px-6 lg:px-0 lg:pt-0 lg:pb-12">
+      <main className="pb-tabbar w-full min-w-0 flex-1 px-4 pt-5 sm:px-6 lg:px-10 lg:pt-9 lg:pb-14">
         <div className="3xl:max-w-[2100px] 4xl:max-w-[2400px] mx-auto w-full max-w-[1700px]">
           {children}
         </div>
