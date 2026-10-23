@@ -50,7 +50,7 @@ export default async function CourierSettingsPage() {
   return (
     <PageShell>
       <PageHeader
-        title="Courier & fraud"
+        title="Courier & fraud check"
         description="Connect Steadfast and Pathao, screen customers against their delivery history, and let clean orders ship without you."
       />
 

@@ -14,6 +14,7 @@ import {
   type CheckoutQuote,
 } from '@/server/services/planCheckoutService'
 import { getPlatformFlag } from '@/server/services/platformFlagService'
+import { CreditError, orderCreditPack } from '@/server/services/aiCreditService'
 import { sendEmail } from '@/server/services/emailService'
 import {
   planActivatedEmail,
@@ -202,4 +203,25 @@ function messageFor(error: unknown, fallback: string): string {
     return 'Only a workspace owner can change the plan.'
   }
   return fallback
+}
+
+/**
+ * Orders an AI credit pack. Paid packs wait for the platform team to confirm
+ * payment, as plan orders do; a free pack is added at once.
+ */
+export async function orderCreditPackAction(
+  packId: string
+): Promise<{ ok: true; paid: boolean } | { ok: false; error: string }> {
+  const { organization } = await getActiveOrganization()
+  try {
+    const result = await orderCreditPack(organization.id, packId)
+    revalidatePath('/billing')
+    return { ok: true, paid: result.paid }
+  } catch (cause) {
+    if (cause instanceof CreditError) return { ok: false, error: cause.message }
+    if (cause instanceof AuthorizationError) {
+      return { ok: false, error: 'Only the workspace owner can buy credits.' }
+    }
+    throw cause
+  }
 }

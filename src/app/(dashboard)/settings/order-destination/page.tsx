@@ -17,7 +17,7 @@ export default async function OrderDestinationPage() {
   return (
     <PageShell>
       <PageHeader
-        title="Where orders are processed"
+        title="Where orders go"
         description="An order from a landing page can be worked here, or handed straight to the website you already run. Pick one — it applies to every store and every page in this workspace."
       />
 

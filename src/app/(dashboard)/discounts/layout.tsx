@@ -1,6 +1,6 @@
 import { PageHeader } from '@/components/app/page-header'
 import { PageShell } from '@/components/app/page-shell'
-import { SectionTabs } from './section-tabs'
+import { DiscountsTabs } from './section-tabs'
 
 /**
  * Everything the workspace gives away, in one section.
@@ -22,7 +22,7 @@ export default function DiscountsLayout({
         title="Discounts & offers"
         description="Codes, automatic discounts, and the bundles your landing pages sell."
       />
-      <SectionTabs />
+      <DiscountsTabs />
       {children}
     </PageShell>
   )

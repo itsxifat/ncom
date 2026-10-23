@@ -1,11 +1,16 @@
 import Link from 'next/link'
-import { ShoppingBag } from 'lucide-react'
+import { Printer, ScanLine, ShoppingBag } from 'lucide-react'
 import { getActiveOrganization } from '@/server/services/organizationService'
-import { listOrders } from '@/server/services/orderService'
+import {
+  countOrdersByWorkflowState,
+  listOrders,
+} from '@/server/services/orderService'
 import { getOrderStatusColors } from '@/server/services/organizationSettingsService'
 import { listStores } from '@/server/services/storeService'
 import { getForwardSummary, getOrderDestinationStatus } from '@/server/orders'
 import { EmptyState } from '@/components/app/empty-state'
+import { PageHeader } from '@/components/app/page-header'
+import { PageShell } from '@/components/app/page-shell'
 import { OrderList } from '@/components/store/order-list'
 import { OrderFilters } from '@/components/store/order-filters'
 import { OrderHandoffBanner } from '@/components/store/order-handoff-banner'
@@ -75,12 +80,14 @@ export default async function OrdersPage({
 
   const { organization, role } = await getActiveOrganization()
 
-  const [stores, statusColors, destination, forwards] = await Promise.all([
-    listStores(organization.id),
-    getOrderStatusColors(organization.id),
-    getOrderDestinationStatus(organization.id),
-    getForwardSummary(organization.id),
-  ])
+  const [stores, statusColors, destination, forwards, stateCounts] =
+    await Promise.all([
+      listStores(organization.id),
+      getOrderStatusColors(organization.id),
+      getOrderDestinationStatus(organization.id),
+      getForwardSummary(organization.id),
+      countOrdersByWorkflowState(organization.id),
+    ])
 
   const forwarding = destination.mode === 'OWN_WEBSITE'
   const endpointHost = hostOf(destination.endpointUrl)
@@ -132,11 +139,41 @@ export default async function OrdersPage({
     search || financialStatus || workflowStates.length || storeId || handoff
   )
 
+  // The packing bench lives here now rather than in the rail: printing the
+  // stickers and scanning parcels out are things done *to* this list.
+  const header = (
+    <PageHeader
+      title="Orders"
+      description="Every order from your pages, from the first check to the customer’s door."
+      actions={
+        <>
+          <Button
+            variant="outline"
+            render={<Link href="/scan" />}
+            nativeButton={false}
+          >
+            <ScanLine />
+            Scan parcels
+          </Button>
+          <Button
+            variant="outline"
+            render={<Link href="/labels" />}
+            nativeButton={false}
+          >
+            <Printer />
+            Print labels
+          </Button>
+        </>
+      }
+    />
+  )
+
   // Nothing at all, and nothing filtered out — this workspace has simply not
   // sold anything yet, which is a different screen from "no matches".
   if (total === 0 && !filtered) {
     return (
-      <div className="flex flex-col gap-5">
+      <PageShell width="wide" className="gap-5">
+        {header}
         <OrderHandoffBanner
           forwarding={forwarding}
           endpointHost={endpointHost}
@@ -153,12 +190,13 @@ export default async function OrdersPage({
               : 'Orders placed on your storefront will appear here.'
           }
         />
-      </div>
+      </PageShell>
     )
   }
 
   return (
-    <div className="flex flex-col gap-5">
+    <PageShell width="wide" className="gap-5">
+      {header}
       <OrderHandoffBanner
         forwarding={forwarding}
         endpointHost={endpointHost}
@@ -169,7 +207,7 @@ export default async function OrdersPage({
 
       <OrderFilters
         stores={stores.map((store) => ({ id: store.id, name: store.name }))}
-        total={total}
+        stateCounts={stateCounts}
         // Offered only where it can answer something. A workspace that has
         // never handed an order over would get a filter whose every option but
         // one returns nothing.
@@ -255,7 +293,7 @@ export default async function OrdersPage({
           )}
         </nav>
       )}
-    </div>
+    </PageShell>
   )
 }
 

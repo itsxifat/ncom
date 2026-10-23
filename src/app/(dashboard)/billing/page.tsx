@@ -4,6 +4,13 @@ import { getActiveOrganization } from '@/server/services/organizationService'
 import { getEntitlementsWithUsage } from '@/server/services/entitlementService'
 import { listPlanOrders } from '@/server/services/planCheckoutService'
 import { getPlatformFlag } from '@/server/services/platformFlagService'
+import { aiBuilderAvailable } from '@/server/services/aiSettingsService'
+import {
+  getAiCreditSummary,
+  listAiCreditEntries,
+  listCreditOrders,
+  listCreditPacks,
+} from '@/server/services/aiCreditService'
 import { prisma } from '@/server/db/client'
 import { PageHeader } from '@/components/app/page-header'
 import { PageShell } from '@/components/app/page-shell'
@@ -26,6 +33,7 @@ import {
   SUPPORT_TIER_LABELS,
 } from '@/lib/plans'
 import { SubscriptionControls } from './SubscriptionControls'
+import { AiCreditsSection } from './AiCreditsSection'
 
 export const metadata = { title: 'Plan & billing' }
 
@@ -46,21 +54,41 @@ export default async function BillingPage({
   const { activated, pending } = await searchParams
   const { organization, role } = await getActiveOrganization()
 
-  const [{ entitlements, usage }, orders, selfServe, subscription] =
-    await Promise.all([
-      getEntitlementsWithUsage(organization.id),
-      listPlanOrders(organization.id),
-      getPlatformFlag('billing.selfServeUpgrades'),
-      prisma.subscription.findUnique({
-        where: { organizationId: organization.id },
-        select: {
-          cancelAtPeriodEnd: true,
-          currentPeriodEnd: true,
-          trialEndsAt: true,
-          coupon: { select: { code: true, description: true } },
-        },
-      }),
-    ])
+  const [
+    { entitlements, usage },
+    orders,
+    selfServe,
+    subscription,
+    aiAvailable,
+    aiCredits,
+    creditPacks,
+    creditOrders,
+  ] = await Promise.all([
+    getEntitlementsWithUsage(organization.id),
+    listPlanOrders(organization.id),
+    getPlatformFlag('billing.selfServeUpgrades'),
+    prisma.subscription.findUnique({
+      where: { organizationId: organization.id },
+      select: {
+        cancelAtPeriodEnd: true,
+        currentPeriodEnd: true,
+        trialEndsAt: true,
+        coupon: { select: { code: true, description: true } },
+      },
+    }),
+    aiBuilderAvailable(),
+    getAiCreditSummary(organization.id),
+    listCreditPacks(),
+    listCreditOrders(organization.id),
+  ])
+  // After the summary, not beside it: reading the summary is what gives a
+  // workspace its plan's one-time credits, and the history should show them.
+  const creditEntries = await listAiCreditEntries(organization.id, 10)
+  // Shown where the AI builder is offered — and, if it is switched off for a
+  // while, still to a workspace with credits or orders, so what it paid for
+  // does not seem to have vanished.
+  const showAiCredits =
+    aiAvailable || aiCredits.balance > 0 || creditOrders.length > 0
 
   // Billing is owner-only, matching the team roles: an ADMIN runs the store, an
   // OWNER owns the account.
@@ -69,7 +97,8 @@ export default async function BillingPage({
   return (
     <PageShell>
       <PageHeader
-        eyebrow="Workspace"
+        backHref="/settings"
+        backLabel="Settings"
         title="Plan & billing"
         description="What this workspace is on, what it has used, and what changing plan would give you."
         actions={
@@ -233,6 +262,16 @@ export default async function BillingPage({
           })}
         </div>
       </SettingsSection>
+
+      {showAiCredits && (
+        <AiCreditsSection
+          summary={aiCredits}
+          packs={creditPacks}
+          orders={creditOrders}
+          entries={creditEntries}
+          canBuy={canManage}
+        />
+      )}
 
       {orders.length > 0 && (
         <SettingsSection

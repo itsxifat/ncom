@@ -25,9 +25,10 @@ export default async function OrganizationPage() {
   return (
     <PageShell>
       <PageHeader
-        eyebrow="Workspace"
-        title={organization.name}
-        description="Your workspace holds your stores and the people who work on them."
+        backHref="/settings"
+        backLabel="Settings"
+        title="Team"
+        description={`The people who work in ${organization.name}, and what the workspace is called.`}
       />
 
       <SettingsSection

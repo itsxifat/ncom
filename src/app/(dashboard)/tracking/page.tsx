@@ -73,8 +73,9 @@ export default async function TrackingPage({
   return (
     <div className="flex flex-col gap-8">
       <PageHeader
-        eyebrow="Marketing"
-        title="Tracking"
+        backHref="/settings"
+        backLabel="Settings"
+        title="Facebook & Google ad tracking"
         description="Pixels, Conversions API and GA4 for every store — and every event this server reported, with what came back."
       />
 

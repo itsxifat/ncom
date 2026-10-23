@@ -157,7 +157,10 @@ export async function updateOrganizationSettingsAction(
     return fail(cause)
   }
 
-  revalidatePath('/settings')
+  // Everything, not just this screen: the currency is how every price in the
+  // workspace is written, and Home, the order list and every product form
+  // would otherwise keep showing the old sign until someone reloaded them.
+  revalidatePath('/', 'layout')
   return { success: 'Settings saved.' }
 }
 

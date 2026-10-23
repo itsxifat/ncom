@@ -20,8 +20,9 @@ export default async function ScanPage() {
   return (
     <div className="flex flex-col gap-8">
       <PageHeader
-        eyebrow="Fulfilment"
-        title="Scan"
+        backHref="/orders"
+        backLabel="Orders"
+        title="Scan parcels"
         description="Scan a parcel sticker to open its order. Works with a barcode gun or a phone camera."
       />
 

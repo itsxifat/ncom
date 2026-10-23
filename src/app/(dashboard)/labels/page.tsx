@@ -89,8 +89,9 @@ export default async function LabelsPage({
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
-        eyebrow="Fulfilment"
-        title="Labels"
+        backHref="/orders"
+        backLabel="Orders"
+        title="Print labels"
         description="Tick the orders going out, then print 4×6 parcel stickers or A4 invoices. Every sticker carries a barcode the scanner reads."
       />
 

@@ -17,7 +17,7 @@ export default async function ProductSourcePage() {
   return (
     <PageShell>
       <PageHeader
-        title="Product source"
+        title="Your website's products"
         description="Connect the website you already sell from. Its products, prices, photos and stock are read live on every request and never copied here — and they sit alongside any products you add in NCOM."
       />
 

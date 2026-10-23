@@ -13,6 +13,7 @@ import { CourierPanel } from '@/components/store/courier-panel'
 import { OrderHandoffPanel } from '@/components/store/order-handoff-panel'
 import { WorkflowStateBadge } from '@/components/store/fraud-badges'
 import { formatMoney } from '@/lib/money'
+import { readFormAnswers } from '@/lib/order-form-answers'
 import { orderStatus } from '@/lib/order-status'
 import { PageHeader } from '@/components/app/page-header'
 import { LocalTime } from '@/components/app/local-time'
@@ -102,6 +103,10 @@ export default async function OrderDetailPage({
     returnedQuantity: line.returnedQuantity,
     unitPriceCents: line.unitPriceCents,
   }))
+
+  // What the buyer answered to the landing page's own questions — the size,
+  // the name for the card — in the words they were asked.
+  const formAnswers = readFormAnswers(order.formAnswers)
 
   const refundableCents = order.paidTotalCents - order.refundedTotalCents
   const outstandingCents = order.totalCents - order.paidTotalCents
@@ -576,6 +581,28 @@ export default async function OrderDetailPage({
               </div>
             </CardContent>
           </Card>
+
+          {formAnswers.length > 0 && (
+            <Card>
+              <CardContent className="flex flex-col gap-3">
+                <h2 className="font-display text-lg font-semibold tracking-tight">
+                  Order form answers
+                </h2>
+                <dl className="flex flex-col gap-3 text-sm">
+                  {formAnswers.map((entry, index) => (
+                    <div key={index}>
+                      <dt className="text-muted-foreground text-xs font-medium">
+                        {entry.question}
+                      </dt>
+                      <dd className="font-medium whitespace-pre-line">
+                        {entry.answer}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              </CardContent>
+            </Card>
+          )}
 
           {order.transactions.length > 0 && (
             <Card>
