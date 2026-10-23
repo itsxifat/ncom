@@ -93,6 +93,16 @@ export default function proxy(request: NextRequest, event: NextFetchEvent) {
 // to that tenant's own sitemap/robots route, not fall through to NCOM's own
 // app/sitemap.ts. On the root domain they're harmless: authorized() doesn't
 // treat them as protected routes, so they pass through unchanged.
+//
+// api/fonts is excluded because its answers are public and cached for a day
+// to a year, by browsers and by any CDN in front of us. NextAuth's handling
+// adds Set-Cookie to whatever it passes through — a CSRF token for anyone,
+// and a freshly signed session token for a signed-in merchant — and a shared
+// cache that stored such a font could hand that merchant's session to the
+// next visitor. The routes need neither auth nor the tenant rewrite (/api is
+// global on every host), so they skip this function entirely.
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|api/auth).*)'],
+  matcher: [
+    '/((?!_next/static|_next/image|favicon.ico|api/auth|api/fonts/).*)',
+  ],
 }

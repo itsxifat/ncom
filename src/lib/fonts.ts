@@ -21,6 +21,7 @@ import {
   Fira_Code,
   Fraunces,
   Galada,
+  Google_Sans,
   Great_Vibes,
   Hind_Siliguri,
   IBM_Plex_Mono,
@@ -75,6 +76,7 @@ import {
   Work_Sans,
   Zilla_Slab,
 } from 'next/font/google'
+import { takaFont } from './taka-font'
 
 /**
  * The typefaces a merchant can put on their storefront.
@@ -377,6 +379,14 @@ const sourceCodePro = Source_Code_Pro({
 // Bangla families carry the `latin` subset as well: a Bengali storefront still
 // prints prices, order numbers and courier names in Latin characters, and a
 // font without that range would render them from an unrelated fallback face.
+// Google Sans is the Bangla default: one family with its Latin and Bengali
+// letters drawn together, so a line that mixes a Bangla headline with an
+// English product name or a price reads as one voice rather than two fonts.
+const googleSans = Google_Sans({
+  subsets: ['bengali', 'latin'],
+  display: 'swap',
+  preload: false,
+})
 const hindSiliguri = Hind_Siliguri({
   subsets: ['bengali', 'latin'],
   weight: ['400', '600', '700'],
@@ -441,6 +451,22 @@ const alkatra = Alkatra({
 export type FontScript = 'latin' | 'bangla'
 
 /** The generic family appended to every stack, by the shape of the group. */
+/**
+ * NCOM's taka sign, first in every stack below. It covers "৳" and nothing
+ * else (see lib/taka-font.ts), so a price reads the same on every storefront
+ * whichever fonts the merchant chose — Hind Siliguri's knotted sign, a Latin
+ * face with none at all — and matches the dashboard's.
+ *
+ * Read defensively. In a route handler the local font is not compiled at all
+ * (Turbopack leaves `lib/taka-font.ts` with no exports in that layer), so the
+ * import is undefined there — and reading `.style` of it at module load took
+ * down every route that reaches this file: the landing page's order endpoint,
+ * the MCP server. Nothing a route handler builds is ever drawn, so a generic
+ * family keeps those stacks valid.
+ */
+const TAKA =
+  (takaFont as typeof takaFont | undefined)?.style.fontFamily ?? 'system-ui'
+
 const GENERIC: Record<string, string> = {
   sans: 'ui-sans-serif, system-ui, sans-serif',
   serif: 'ui-serif, Georgia, serif',
@@ -470,11 +496,28 @@ export interface FontGroup {
 /** Only the parts of a `next/font` result this module needs. */
 type LoadedFont = { style: { fontFamily: string } }
 
+/**
+ * The Bangla face that stands in for a Latin family's missing letters, by the
+ * family's shape.
+ *
+ * A Latin face has no Bengali glyphs, so a Bangla word set in Poppins is drawn
+ * from whatever the visitor's phone happens to have — often nothing that
+ * matches, sometimes boxes. Every Latin stack therefore names a Bangla
+ * companion between its own face and the generic fallback: English letters
+ * keep the merchant's face, and Bangla letters get a real Bangla one of the
+ * same character. The companion is a CSS variable (`--page-bangla-*`) rather
+ * than a literal, so the storefront's theme turns companions on (see
+ * `themeToCssProperties`) and every other place a stack is used — the font
+ * picker, the dashboard — falls straight through to the generic family.
+ */
+type Companion = 'sans' | 'serif' | 'display' | 'hand' | 'mono'
+
 function group(
   label: string,
   generic: keyof typeof GENERIC,
   script: FontScript,
-  fonts: [name: string, loaded: LoadedFont][]
+  fonts: [name: string, loaded: LoadedFont][],
+  companion?: Companion
 ): FontGroup {
   return {
     label,
@@ -482,7 +525,10 @@ function group(
       name,
       group: label,
       script,
-      stack: `${loaded.style.fontFamily}, ${GENERIC[generic]}`,
+      stack:
+        script === 'latin' && companion
+          ? `${TAKA}, ${loaded.style.fontFamily}, var(--page-bangla-${companion}, ${GENERIC[generic]}), ${GENERIC[generic]}`
+          : `${TAKA}, ${loaded.style.fontFamily}, ${GENERIC[generic]}`,
     })),
   }
 }
@@ -492,85 +538,116 @@ function group(
  * the way the files are organised.
  */
 export const FONT_GROUPS: FontGroup[] = [
-  group('Sans serif', 'sans', 'latin', [
-    ['Inter', inter],
-    ['Manrope', manrope],
-    ['DM Sans', dmSans],
-    ['Plus Jakarta Sans', plusJakartaSans],
-    ['Poppins', poppins],
-    ['Montserrat', montserrat],
-    ['Roboto', roboto],
-    ['Open Sans', openSans],
-    ['Lato', lato],
-    ['Nunito', nunito],
-    ['Work Sans', workSans],
-    ['Figtree', figtree],
-    ['Rubik', rubik],
-    ['Karla', karla],
-    ['Mulish', mulish],
-    ['Outfit', outfit],
-    ['Sora', sora],
-    ['Urbanist', urbanist],
-    ['Barlow', barlow],
-    ['Raleway', raleway],
-    ['Quicksand', quicksand],
-    ['Public Sans', publicSans],
-    ['Archivo', archivo],
-    ['Onest', onest],
-  ]),
-  group('Serif', 'serif', 'latin', [
-    ['Playfair Display', playfairDisplay],
-    ['DM Serif Display', dmSerifDisplay],
-    ['Merriweather', merriweather],
-    ['Lora', lora],
-    ['Source Serif 4', sourceSerif],
-    ['EB Garamond', ebGaramond],
-    ['Libre Baskerville', libreBaskerville],
-    ['Cormorant Garamond', cormorantGaramond],
-    ['Fraunces', fraunces],
-    ['Bitter', bitter],
-    ['Crimson Pro', crimsonPro],
-    ['Spectral', spectral],
-    ['Newsreader', newsreader],
-    ['Zilla Slab', zillaSlab],
-    ['Instrument Serif', instrumentSerif],
-  ]),
-  group('Display', 'sans', 'latin', [
-    ['Bebas Neue', bebasNeue],
-    ['Anton', anton],
-    ['Oswald', oswald],
-    ['Space Grotesk', spaceGrotesk],
-    ['Archivo Black', archivoBlack],
-    ['Righteous', righteous],
-    ['Alfa Slab One', alfaSlabOne],
-    ['Teko', teko],
-    ['Unbounded', unbounded],
-    ['Syne', syne],
-  ]),
-  group('Handwriting', 'cursive', 'latin', [
-    ['Dancing Script', dancingScript],
-    ['Caveat', caveat],
-    ['Pacifico', pacifico],
-    ['Great Vibes', greatVibes],
-    ['Satisfy', satisfy],
-    ['Sacramento', sacramento],
-    ['Kalam', kalam],
-    ['Shadows Into Light', shadowsIntoLight],
-    ['Indie Flower', indieFlower],
-    ['Permanent Marker', permanentMarker],
-  ]),
-  group('Monospace', 'mono', 'latin', [
-    ['JetBrains Mono', jetbrainsMono],
-    ['Roboto Mono', robotoMono],
-    ['Space Mono', spaceMono],
-    ['IBM Plex Mono', ibmPlexMono],
-    ['Fira Code', firaCode],
-    ['Source Code Pro', sourceCodePro],
-  ]),
+  group(
+    'Sans serif',
+    'sans',
+    'latin',
+    [
+      ['Inter', inter],
+      ['Manrope', manrope],
+      ['DM Sans', dmSans],
+      ['Plus Jakarta Sans', plusJakartaSans],
+      ['Poppins', poppins],
+      ['Montserrat', montserrat],
+      ['Roboto', roboto],
+      ['Open Sans', openSans],
+      ['Lato', lato],
+      ['Nunito', nunito],
+      ['Work Sans', workSans],
+      ['Figtree', figtree],
+      ['Rubik', rubik],
+      ['Karla', karla],
+      ['Mulish', mulish],
+      ['Outfit', outfit],
+      ['Sora', sora],
+      ['Urbanist', urbanist],
+      ['Barlow', barlow],
+      ['Raleway', raleway],
+      ['Quicksand', quicksand],
+      ['Public Sans', publicSans],
+      ['Archivo', archivo],
+      ['Onest', onest],
+    ],
+    'sans'
+  ),
+  group(
+    'Serif',
+    'serif',
+    'latin',
+    [
+      ['Playfair Display', playfairDisplay],
+      ['DM Serif Display', dmSerifDisplay],
+      ['Merriweather', merriweather],
+      ['Lora', lora],
+      ['Source Serif 4', sourceSerif],
+      ['EB Garamond', ebGaramond],
+      ['Libre Baskerville', libreBaskerville],
+      ['Cormorant Garamond', cormorantGaramond],
+      ['Fraunces', fraunces],
+      ['Bitter', bitter],
+      ['Crimson Pro', crimsonPro],
+      ['Spectral', spectral],
+      ['Newsreader', newsreader],
+      ['Zilla Slab', zillaSlab],
+      ['Instrument Serif', instrumentSerif],
+    ],
+    'serif'
+  ),
+  group(
+    'Display',
+    'sans',
+    'latin',
+    [
+      ['Bebas Neue', bebasNeue],
+      ['Anton', anton],
+      ['Oswald', oswald],
+      ['Space Grotesk', spaceGrotesk],
+      ['Archivo Black', archivoBlack],
+      ['Righteous', righteous],
+      ['Alfa Slab One', alfaSlabOne],
+      ['Teko', teko],
+      ['Unbounded', unbounded],
+      ['Syne', syne],
+    ],
+    'display'
+  ),
+  group(
+    'Handwriting',
+    'cursive',
+    'latin',
+    [
+      ['Dancing Script', dancingScript],
+      ['Caveat', caveat],
+      ['Pacifico', pacifico],
+      ['Great Vibes', greatVibes],
+      ['Satisfy', satisfy],
+      ['Sacramento', sacramento],
+      ['Kalam', kalam],
+      ['Shadows Into Light', shadowsIntoLight],
+      ['Indie Flower', indieFlower],
+      ['Permanent Marker', permanentMarker],
+    ],
+    'hand'
+  ),
+  group(
+    'Monospace',
+    'mono',
+    'latin',
+    [
+      ['JetBrains Mono', jetbrainsMono],
+      ['Roboto Mono', robotoMono],
+      ['Space Mono', spaceMono],
+      ['IBM Plex Mono', ibmPlexMono],
+      ['Fira Code', firaCode],
+      ['Source Code Pro', sourceCodePro],
+    ],
+    'mono'
+  ),
   // Split by shape like the Latin groups rather than lumped into one "Bangla"
   // list, so each family gets the generic fallback that matches it — a serif
   // Bengali face dropping to `sans-serif` mid-download is a visible jump.
   group('Bangla sans', 'sans', 'bangla', [
+    ['Google Sans', googleSans],
     ['Hind Siliguri', hindSiliguri],
     ['Noto Sans Bengali', notoSansBengali],
     ['Anek Bangla', anekBangla],
@@ -588,6 +665,18 @@ export const FONT_GROUPS: FontGroup[] = [
   ]),
 ]
 
+/**
+ * The companion faces as CSS variables, for the storefront's theme to set.
+ * See `Companion` for why Latin stacks name them.
+ */
+export const BANGLA_COMPANION_PROPERTIES: Record<string, string> = {
+  '--page-bangla-sans': `${googleSans.style.fontFamily}`,
+  '--page-bangla-serif': `${notoSerifBengali.style.fontFamily}`,
+  '--page-bangla-display': `${googleSans.style.fontFamily}`,
+  '--page-bangla-hand': `${atma.style.fontFamily}`,
+  '--page-bangla-mono': `${notoSansBengali.style.fontFamily}`,
+}
+
 export const FONT_OPTIONS: FontOption[] = FONT_GROUPS.flatMap(
   (entry) => entry.fonts
 )
@@ -599,7 +688,11 @@ const BY_NAME = new Map(
 export function findFont(
   name: string | null | undefined
 ): FontOption | undefined {
-  return name ? BY_NAME.get(name.trim().toLowerCase()) : undefined
+  // Spaces squeezed as every other font-name comparison does, so "Hind  Siliguri"
+  // is the catalogue face rather than a Google family to fetch.
+  return name
+    ? BY_NAME.get(name.trim().replace(/\s+/g, ' ').toLowerCase())
+    : undefined
 }
 
 /**
@@ -662,6 +755,36 @@ export function fontStack(name: string | null | undefined): string {
   const option = findFont(name)
   if (option) return option.stack
 
+  // Any other Google Fonts family, loaded through NCOM's own font proxy (see
+  // `lib/font-stylesheet.ts`). The Bangla companion sits behind it for the
+  // same reason it sits behind every Latin catalogue face: a family without
+  // Bangla letters should hand those letters to a real Bangla face, and one
+  // that has them never reaches the companion at all. Decided by the name's
+  // shape alone, which keeps the Google names list out of this file: a
+  // typed-in "Arial" is named as itself but gets no stylesheet, so a
+  // visitor's own copy of it is used if they have one. Spaces are evened out
+  // because a quoted family name is matched against its `@font-face` letter
+  // for letter (only case aside), and the stylesheet declares Google's
+  // spelling: "Josefin  Sans" would load the face and then never use it.
+  if (isGoogleFamilyName(name)) {
+    return `${TAKA}, "${name!.trim().replace(/\s+/g, ' ')}", var(--page-bangla-sans, ${GENERIC.sans}), ${GENERIC.sans}`
+  }
+
   const legacy = (name ?? '').replace(/[^\p{L}\p{N} '-]/gu, '').trim()
-  return legacy ? `"${legacy}", ${GENERIC.sans}` : GENERIC.sans
+  return legacy
+    ? `${TAKA}, "${legacy}", ${GENERIC.sans}`
+    : `${TAKA}, ${GENERIC.sans}`
+}
+
+/**
+ * Whether a stored font name could be a Google Fonts family outside the
+ * catalogue: letters, digits and spaces only — the shape of every Google
+ * family name — so it is safe both inside a CSS string and in a URL. Only the
+ * shape: `googleFamilyName` in lib/font-stylesheet.ts is what checks that the
+ * family exists before a page asks the font proxy for it.
+ */
+export function isGoogleFamilyName(name: string | null | undefined): boolean {
+  if (!name) return false
+  const trimmed = name.trim()
+  return /^[A-Za-z0-9][A-Za-z0-9 ]{0,59}$/.test(trimmed) && !findFont(trimmed)
 }

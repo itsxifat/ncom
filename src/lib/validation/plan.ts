@@ -105,6 +105,19 @@ export const planFormSchema = z.object({
   fairUseNote: z.string().trim().max(400).optional(),
   enforceTrafficCap: checkbox,
   enforceVisitorCap: checkbox,
+
+  aiMonthlyCredits: z.coerce
+    .number()
+    .int('Credits are a whole number.')
+    .min(0)
+    .max(1_000_000)
+    .default(0),
+  aiStartCredits: z.coerce
+    .number()
+    .int('Credits are a whole number.')
+    .min(0)
+    .max(1_000_000)
+    .default(0),
 })
 
 export const addonFormSchema = z.object({

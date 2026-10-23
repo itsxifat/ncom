@@ -75,6 +75,23 @@ export const offerOrderSchema = z.object({
     .max(2000)
     .optional()
     .transform((value) => value || undefined),
+
+  /**
+   * Answers to the merchant's own questions, each naming its question by id.
+   * Which questions there are — and which must be answered — is read from the
+   * page the buyer was shown, never from here: an answer to a question the
+   * page does not ask is dropped. The limits are the order form's own (see
+   * `orderform/questions.ts`).
+   */
+  answers: z
+    .array(
+      z.object({
+        id: z.string().trim().min(1).max(40),
+        answer: z.string().trim().max(500),
+      })
+    )
+    .max(10)
+    .optional(),
 })
 
 export type OfferOrderInput = z.infer<typeof offerOrderSchema>

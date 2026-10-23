@@ -35,6 +35,19 @@ const STRIPE_FRAME_SRC = 'https://js.stripe.com https://hooks.stripe.com'
 // policy rather than this one, so no script-src/connect-src entry is needed.
 const YOUTUBE_FRAME_SRC = 'https://www.youtube-nocookie.com'
 
+// The Custom code block (modules/sections/customcode) keeps a pasted iframe
+// only when it points at one of these embed hosts — Vimeo's player, Google
+// Maps' embed and Facebook's video/page plugins — and forces a sandbox on it.
+// Same reasoning as YouTube: framing is all that is granted, and each frame is
+// a cross-origin document under its own policy. The sanitiser checks the path
+// as well as the host; this list is the browser-side backstop.
+const EMBED_FRAME_SRC =
+  'https://player.vimeo.com https://www.google.com https://www.facebook.com'
+
+// <video> and <audio> in a pasted design play files from wherever the merchant
+// hosts them. Media cannot run script, so any HTTPS source is allowed.
+const MEDIA_SRC = "'self' blob: https:"
+
 const cspHeader = `
   default-src 'self';
   script-src 'self' 'unsafe-inline' ${ANALYTICS_SCRIPT_SRC} ${STRIPE_SCRIPT_SRC}${isDev ? " 'unsafe-eval'" : ''};
@@ -42,7 +55,8 @@ const cspHeader = `
   img-src 'self' blob: data: https:;
   font-src 'self' data:;
   connect-src 'self' ${ANALYTICS_CONNECT_SRC} ${STRIPE_CONNECT_SRC}${isDev ? ' ws://localhost:* http://localhost:*' : ''};
-  frame-src 'self' ${STRIPE_FRAME_SRC} ${YOUTUBE_FRAME_SRC};
+  frame-src 'self' ${STRIPE_FRAME_SRC} ${YOUTUBE_FRAME_SRC} ${EMBED_FRAME_SRC};
+  media-src ${MEDIA_SRC};
   object-src 'none';
   base-uri 'self';
   form-action 'self';

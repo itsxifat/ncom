@@ -39,6 +39,12 @@ interface ToneStyle {
   bar: string
   /** A solid swatch, for the settings picker and the legend. */
   swatch: string
+  /**
+   * The status pill: a pale fill with a deep text colour of the same hue, so
+   * the label carries the meaning on its own and the colour only confirms it.
+   * Every pairing clears 4.5:1 in both themes.
+   */
+  pill: string
 }
 
 /**
@@ -53,42 +59,52 @@ export const TONE_STYLES: Record<StatusTone, ToneStyle> = {
     row: '',
     bar: 'bg-transparent',
     swatch: 'bg-muted border border-border',
+    // An outline rather than a grey fill: grey is what Cancelled wears by
+    // default, and a fresh order that looks like a cancelled one is how a
+    // cancellation goes unread on a list.
+    pill: 'border-border bg-card text-foreground',
   },
   green: {
     label: 'Green',
     row: 'bg-emerald-500/8 hover:bg-emerald-500/14 dark:bg-emerald-400/10 dark:hover:bg-emerald-400/16',
     bar: 'bg-emerald-500 dark:bg-emerald-400',
     swatch: 'bg-emerald-500 dark:bg-emerald-400',
+    pill: 'bg-emerald-50 text-emerald-800 dark:bg-emerald-400/15 dark:text-emerald-200',
   },
   amber: {
     label: 'Amber',
     row: 'bg-amber-500/10 hover:bg-amber-500/16 dark:bg-amber-400/10 dark:hover:bg-amber-400/16',
     bar: 'bg-amber-500 dark:bg-amber-400',
     swatch: 'bg-amber-500 dark:bg-amber-400',
+    pill: 'bg-amber-50 text-amber-900 dark:bg-amber-400/15 dark:text-amber-200',
   },
   red: {
     label: 'Red',
     row: 'bg-red-500/8 hover:bg-red-500/14 dark:bg-red-400/10 dark:hover:bg-red-400/16',
     bar: 'bg-red-500 dark:bg-red-400',
     swatch: 'bg-red-500 dark:bg-red-400',
+    pill: 'bg-red-50 text-red-800 dark:bg-red-400/15 dark:text-red-200',
   },
   blue: {
     label: 'Blue',
     row: 'bg-sky-500/8 hover:bg-sky-500/14 dark:bg-sky-400/10 dark:hover:bg-sky-400/16',
     bar: 'bg-sky-500 dark:bg-sky-400',
     swatch: 'bg-sky-500 dark:bg-sky-400',
+    pill: 'bg-sky-50 text-sky-800 dark:bg-sky-400/15 dark:text-sky-200',
   },
   purple: {
     label: 'Purple',
     row: 'bg-violet-500/8 hover:bg-violet-500/14 dark:bg-violet-400/10 dark:hover:bg-violet-400/16',
     bar: 'bg-violet-500 dark:bg-violet-400',
     swatch: 'bg-violet-500 dark:bg-violet-400',
+    pill: 'bg-violet-50 text-violet-800 dark:bg-violet-400/15 dark:text-violet-200',
   },
   slate: {
     label: 'Grey',
     row: 'bg-slate-500/8 hover:bg-slate-500/14 dark:bg-slate-400/8 dark:hover:bg-slate-400/14',
     bar: 'bg-slate-400 dark:bg-slate-500',
     swatch: 'bg-slate-400 dark:bg-slate-500',
+    pill: 'bg-slate-100 text-slate-700 dark:bg-slate-400/15 dark:text-slate-200',
   },
 }
 

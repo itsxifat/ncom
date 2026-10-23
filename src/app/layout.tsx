@@ -1,5 +1,11 @@
 import type { Metadata, Viewport } from 'next'
-import { Manrope, Space_Grotesk, Geist_Mono } from 'next/font/google'
+import {
+  Manrope,
+  Space_Grotesk,
+  Geist_Mono,
+  Google_Sans,
+} from 'next/font/google'
+import { takaFont } from '@/lib/taka-font'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toaster } from '@/components/ui/sonner'
 import { SessionProvider } from '@/components/session-provider'
@@ -25,6 +31,40 @@ const geistMono = Geist_Mono({
   variable: '--font-geist-mono',
   subsets: ['latin'],
 })
+
+// None of the three above has Bangla letters, and the workspace shows plenty:
+// the "বাংলা" language choice, Bangla template names, merchants' own Bangla
+// product names in every input. Without this the browser draws those in
+// whatever the operating system happens to have. Google Sans — the storefront's
+// Bangla default too — sits after each family in globals.css, so it is fetched
+// only for characters those families lack: a Bangla letter, and the odd symbol
+// none of them draws (which also lands on Google Sans).
+//
+// It is not a Bengali-only download, though. `subsets` only picks what would
+// be preloaded: the stylesheet still declares all 25 of the family's
+// `unicode-range` files, and many of them also list the marks Bangla shares
+// with other scripts. Measured in Chrome: a Bangla word fetches the Bengali
+// file (~75KB); a "।" adds the Telugu one (~67KB), which lists the danda too;
+// and a zero-width joiner (U+200D, part of how Bangla spells র with য-ফলা)
+// adds every file that lists the joiners — Latin, Devanagari, Tamil,
+// Malayalam, Sinhala, Hebrew, Thai and more, about 350KB on top. So a page
+// with ordinary Bangla text on it can cost close to 500KB, once per browser
+// before the cache has it. Only self-hosting the Bengali file (next/font/local
+// with its own `unicode-range`, like lib/taka-font.ts) would stop that.
+//
+// No preload, because a page with no Bangla on it should fetch none of this,
+// and no metric-adjusted fallback: that would be a resized Arial for Latin
+// letters the workspace's own families always draw first.
+const banglaSans = Google_Sans({
+  variable: '--font-bangla',
+  subsets: ['bengali'],
+  display: 'swap',
+  preload: false,
+  adjustFontFallback: false,
+})
+
+// Money is written with NCOM's own taka sign, Google Sans's ৳: see
+// lib/taka-font.ts, which the storefront's font stacks use too.
 
 // `icon.png`, `apple-icon.png` and `favicon.ico` in this directory are picked up
 // by the App Router automatically and emitted as the right <link> tags, so there
@@ -70,7 +110,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   viewportFit: 'cover',
   themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#eceef1' },
+    { media: '(prefers-color-scheme: light)', color: '#f5f6f8' },
     { media: '(prefers-color-scheme: dark)', color: '#131316' },
   ],
 }
@@ -84,9 +124,6 @@ export default function RootLayout({ children }: LayoutProps<'/'>) {
     // disagree on this one attribute. The warning is suppressed on <html>
     // alone, so a real mismatch anywhere inside the tree still reports.
     //
-    // The workspace rail opts out of all of this and stays black in both
-    // themes; see the note on `.dark` in globals.css.
-    //
     // Tenant storefronts are unaffected either way. They render through
     // `PageThemeProvider`, which namespaces its variables under `--page-*` and
     // sets its own background, so a merchant's own theme still wins on their
@@ -95,7 +132,7 @@ export default function RootLayout({ children }: LayoutProps<'/'>) {
     <html
       lang="en"
       suppressHydrationWarning
-      className={`${manrope.variable} ${spaceGrotesk.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${manrope.variable} ${spaceGrotesk.variable} ${geistMono.variable} ${banglaSans.variable} ${takaFont.variable} h-full antialiased`}
     >
       <body className="flex min-h-full flex-col">
         <ThemeProvider>

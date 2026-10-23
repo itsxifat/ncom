@@ -26,6 +26,9 @@ export const updateThemeSchema = z.object({
     .enum(['compact', 'comfortable', 'spacious'])
     .default('comfortable'),
   showStickyHeader: z.boolean().default(true),
+  // What shoppers read: the storefront's own words and its digits.
+  language: z.enum(['en', 'bn']).optional(),
+  numerals: z.enum(['latin', 'bangla']).optional(),
   // Escape hatch for anything the controls above do not cover. Scoped to the
   // rendered page by PageThemeProvider, not injected globally.
   customCss: z.string().max(20000).optional(),

@@ -18,10 +18,16 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-manrope);
-  --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-space-grotesk);
-  --font-display: var(--font-space-grotesk);
+  /* `--font-taka` leads every stack: it covers U+09F3 and nothing else, so
+     each family below still sets every other character — see the root layout.
+     `--font-bangla` follows each family for the letters it has none of, so
+     only Bangla text reaches it. */
+  --font-sans: var(--font-taka), var(--font-manrope), var(--font-bangla);
+  --font-mono: var(--font-taka), var(--font-geist-mono), var(--font-bangla);
+  --font-heading:
+    var(--font-taka), var(--font-space-grotesk), var(--font-bangla);
+  --font-display:
+    var(--font-taka), var(--font-space-grotesk), var(--font-bangla);
   --color-ink: var(--ink);
   --color-ink-foreground: var(--ink-foreground);
   --color-ink-muted: var(--ink-muted);
@@ -76,16 +82,22 @@
 }
 
 /*
- * NCOM brand v3 — acid lime, true black, cool gray, white.
+ * NCOM brand v4 — the calm workspace. Acid lime, true black, cool gray, white.
  *
- * Three surfaces, three jobs. The canvas is a cool light gray so white cards
- * read as objects sitting *on* something rather than holes cut out of the
- * page. True black (--ink) is the action color: nav rail, primary buttons,
- * the pills that mark "you are here". Acid lime (--lime) is the signature and
- * is rationed — it lands on exactly one thing per screen (the active nav item,
- * the spotlight tile, a hovered arrow puck) so it never becomes wallpaper.
- * Lime is a surface color only: at ~92% luminance it is unreadable as text on
- * white, so every use pairs it with ink text on top.
+ * The workspace is opened by merchants between other jobs, many of whom have
+ * never run software like it, so the surfaces get out of the way: a pale
+ * canvas, white panels marked by a hairline rather than a shadow, and a white
+ * nav rail that is one more panel rather than a black slab the eye keeps
+ * returning to. True black (--ink) is the action colour — primary buttons,
+ * the count on a tab — and acid lime (--lime) is the signature, rationed to
+ * "you are here": the active nav item, a finished checklist step. Lime is a
+ * surface colour only: at ~92% luminance it is unreadable as text on white,
+ * so every use pairs it with ink text on top.
+ *
+ * Secondary text is #5e5f66, not the lighter grey the v3 palette used. That
+ * grey measured under 4.5:1 against the canvas, which is the line where small
+ * print stops being readable for a good share of the people reading it — and
+ * the small print here is order numbers, phone numbers and dates.
  */
 /*
  * `color-scheme` is what the browser reads to paint the parts of a control it
@@ -96,8 +108,8 @@
  */
 :root {
   color-scheme: light;
-  --canvas: #eceef1;
-  --background: #eceef1;
+  --canvas: #f5f6f8;
+  --background: #f5f6f8;
   --foreground: #0b0b0c;
   --card: #ffffff;
   --card-foreground: #0b0b0c;
@@ -107,17 +119,17 @@
   --primary-foreground: #ffffff;
   --secondary: #ffffff;
   --secondary-foreground: #0b0b0c;
-  --muted: #f3f4f6;
-  --muted-foreground: #71727a;
+  --muted: #f1f2f5;
+  --muted-foreground: #5e5f66;
   --accent: #f1f2f5;
   --accent-foreground: #0b0b0c;
   --destructive: #d92d20;
-  --border: #e3e4e9;
-  --input: #dfe0e6;
+  --border: #e4e5ea;
+  --input: #dcdde3;
   --ring: #0b0b0c;
   --ink: #0b0b0c;
   --ink-foreground: #f7f7f8;
-  --ink-muted: #8b8c93;
+  --ink-muted: #5e5f66;
   --ink-raised: #17171a;
   --lime: #d8f84e;
   --lime-strong: #c6e92f;
@@ -129,31 +141,30 @@
   --chart-3: #71727a;
   --chart-4: #a7f3d0;
   --chart-5: #d92d20;
-  --radius: 1.125rem;
-  --sidebar: #0b0b0c;
-  --sidebar-foreground: #f7f7f8;
+  /* 12px controls, ~17px panels. The v3 radius made every card a lozenge;
+     at this size a panel still reads as soft without reading as a toy. */
+  --radius: 0.75rem;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #0b0b0c;
   --sidebar-primary: #d8f84e;
   --sidebar-primary-foreground: #0b0b0c;
-  --sidebar-accent: #17171a;
-  --sidebar-accent-foreground: #f7f7f8;
-  --sidebar-border: color-mix(in oklab, white 10%, transparent);
-  --sidebar-ring: #d8f84e;
+  --sidebar-accent: #f1f2f5;
+  --sidebar-accent-foreground: #0b0b0c;
+  --sidebar-border: #e4e5ea;
+  --sidebar-ring: #0b0b0c;
 }
 
 /*
  * Dark mode.
  *
- * The rail is *not* part of what this inverts. In light mode the black rail is
- * the darkest thing on screen, and that is the whole spatial idea: the rail is
- * the floor, the canvas sits on it, cards sit on the canvas. Inverting the page
- * must not collapse that stack, so dark mode lifts the canvas to a charcoal and
- * leaves `--sidebar` at the same true black it has in light mode. The rail is
- * then still the darkest surface, still reads as the same object, and the one
- * element people navigate by never changes colour when they flip the switch.
+ * The rail inverts with everything else now that it is a panel rather than a
+ * black slab: it is the card colour, a step above the charcoal canvas, edged
+ * by the same hairline. Lime stays the "you are here" marker in both themes,
+ * so the one thing people navigate by still does not change under them.
  *
- * That is why the canvas here is #131316 rather than the #0b0b0c you would
- * expect from the brand's true black: a true-black canvas behind a true-black
- * rail is one undifferentiated sheet, with the rail invisible inside it.
+ * The canvas is #131316 rather than the brand's true black so that panels and
+ * the rail have something darker to sit on; true black behind a dark card is
+ * one undifferentiated sheet.
  */
 .dark {
   color-scheme: dark;
@@ -195,12 +206,12 @@
      that plays the same role here. */
   --chart-2: #f7f7f8;
   --chart-3: #9a9ba3;
-  /* True black, exactly as in light mode - see the note above. */
-  --sidebar: #0b0b0c;
+  --ink-muted: #9a9ba3;
+  --sidebar: #1c1c20;
   --sidebar-foreground: #f7f7f8;
   --sidebar-primary: #d8f84e;
   --sidebar-primary-foreground: #0b0b0c;
-  --sidebar-accent: #1c1c20;
+  --sidebar-accent: #26262c;
   --sidebar-accent-foreground: #f7f7f8;
   --sidebar-border: color-mix(in oklab, white 10%, transparent);
   --sidebar-ring: #d8f84e;
@@ -239,13 +250,16 @@
   }
 }
 
-/* Uppercase micro-label used for the one-word category above a heading. */
+/*
+ * The small label above a heading or a figure. It used to be spaced-out mono
+ * capitals, which read as a technical readout; a merchant scanning a stat tile
+ * for "Sales" should meet the word as they would write it.
+ */
 @utility eyebrow {
-  font-family: var(--font-mono);
-  font-size: 0.6875rem;
-  line-height: 1;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.2;
 }
 
 /*
@@ -334,4 +348,47 @@
  */
 @utility lp-hero-full {
   min-height: 85svh;
+}
+
+/*
+ * Room under a store's product page for the phone buy bar.
+ *
+ * The bar is fixed to the bottom of the screen; without this, scrolling to the
+ * end of a product page leaves the footer's last lines underneath it. Set and
+ * cleared by the product details block itself, so it only ever applies while
+ * the bar is actually on screen.
+ */
+@media (max-width: 1023px) {
+  body.sf-has-buy-bar {
+    padding-bottom: 76px;
+  }
+}
+
+/*
+ * Every heading on a storefront is set in the theme's heading font.
+ *
+ * Blocks never named the font themselves, so the theme's "Heading font" only
+ * reached the few that did, and a merchant who chose a serif for their
+ * headlines saw their headlines stay in the body face. Zero specificity on
+ * purpose: a block class that sets a family, a section's own font override
+ * (it redefines the same variable) and anything set in the element panel all
+ * still win.
+ */
+:where([data-page-theme]) :where(h1, h2, h3, h4) {
+  font-family: var(--page-font-heading);
+}
+
+/*
+ * No letter-spacing on a Bangla storefront.
+ *
+ * Bangla is a joined script: vowel signs, conjuncts and the headstroke are
+ * drawn by the font shaping a whole word at once, and a browser gives that up
+ * as soon as letters are spaced apart — "অফার" falls into "অ ফা র". The blocks'
+ * own `tracking-*` classes were written for Latin eyebrows and badges, so on a
+ * Bangla site they are switched off. Unlayered, so it outranks the utility
+ * classes; one attribute's weight, so a letter-spacing the merchant set in the
+ * element panel (two attributes) or inline in their text still wins.
+ */
+:where([data-page-theme][lang='bn']) [class*='tracking-'] {
+  letter-spacing: normal;
 }

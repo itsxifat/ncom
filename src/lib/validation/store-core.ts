@@ -22,6 +22,12 @@ export const createStoreSchema = z.object({
   // Chosen once, at creation. Every order is recorded in it and it cannot be
   // changed after the first sale — see organizationSettingsService.updateOrganizationSettings.
   currencyCode: z.string().trim().length(3).toUpperCase().default('USD'),
+  /** Landing page or online store — see SiteKind in schema.prisma. */
+  kind: z.enum(['LANDING', 'STORE']).default('LANDING'),
+  /** A key from modules/templates. Unknown or absent means the blank start. */
+  templateKey: z.string().trim().max(60).optional(),
+  /** What shoppers read — the template's copy and the storefront's words. */
+  language: z.enum(['en', 'bn']).default('en'),
 })
 
 export const updateStoreSchema = z.object({

@@ -50,6 +50,7 @@ model User {
   mediaAssets  MediaAsset[]  @relation("UploadedBy")
   auditLogs    AuditLog[]
   pageVersions PageVersion[]
+  savedBlocks  SavedBlock[]
 
   verificationCodes EmailVerificationCode[]
   couponsCreated    PlanCoupon[]
@@ -116,6 +117,13 @@ model Organization {
   invitations OrgInvitation[]
   stores      Store[]
   mediaAssets MediaAsset[]
+  savedBlocks SavedBlock[]
+
+  // AI builder credits: the balance, every movement of it, and the packs
+  // bought. See AiCreditAccount.
+  aiCreditAccount AiCreditAccount?
+  aiCreditEntries AiCreditEntry[]
+  aiCreditOrders  AiCreditOrder[]
 
   // Commerce lives here, not on Store. One catalogue, one inventory, one order
   // book, one set of payment/shipping/tax settings — reused by every storefront
@@ -211,6 +219,19 @@ enum OrgRole {
 
 // ── Stores & Pages ───────────────────────────────────────────────────────
 
+/// What a website is for, which decides what it is made of.
+///
+/// The two are different products to the merchant, not two settings on one: a
+/// landing page is a single page that sells one thing (or a small set) through
+/// its own order form, and an online store is a shop — a home page, a page per
+/// product, category pages, a cart, a checkout and customer accounts. They share
+/// the builder, the blocks, the catalogue and the order book; what differs is
+/// which pages exist and how a visitor buys.
+enum SiteKind {
+  LANDING
+  STORE
+}
+
 model Store {
   id                String   @id @default(cuid())
   organizationId    String
@@ -219,6 +240,14 @@ model Store {
   isSearchIndexable Boolean  @default(true)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
+
+  /// Landing for every site made before stores existed, which is what they all
+  /// were: one or more order-form pages under one address.
+  kind        SiteKind @default(LANDING)
+  /// The starter design this site was created from, by its key in
+  /// modules/templates. Recorded so "start again from the template" has
+  /// something to start from; null for sites created blank or before templates.
+  templateKey String?
 
   /// The one stock pool this store sells from.
   ///
@@ -287,6 +316,31 @@ model ThemeSettings {
   sectionSpacing   String  @default("comfortable")
   showStickyHeader Boolean @default(true)
 
+  /// The language the site speaks to shoppers in: "en" or "bn".
+  ///
+  /// It decides the words NCOM itself puts on the page — "Add to cart", the
+  /// checkout's labels, "Sold out" — and the starting copy of a block the
+  /// merchant adds. The merchant's own words are whatever they typed. A theme
+  /// column rather than a store one so it is drafted and published with the
+  /// rest of the look: switching a live shop to Bangla happens on Publish,
+  /// not halfway through a shopper's checkout.
+  language String @default("en")
+  /// How prices and counts are written: "latin" (1,250) or "bangla" (১,২৫০).
+  /// Separate from the language because Bangla shops genuinely differ here.
+  numerals String @default("latin")
+
+  /// The theme visitors see, frozen when the site was last published.
+  ///
+  /// The columns above are the working copy: the builder's Design panel edits
+  /// them as the merchant tries colours out, and the canvas paints from them.
+  /// Publishing copies them here, so a merchant can try six palettes on a
+  /// Saturday afternoon without their customers watching the shop change colour
+  /// six times. Every publish path writes it, and sites live before it existed
+  /// had it filled from their columns when it arrived, so null means the site
+  /// has never been published: there is no live look to keep, and the columns
+  /// are read.
+  liveTheme Json?
+
   updatedAt DateTime @updatedAt
 
   store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
@@ -339,12 +393,37 @@ model StoreIntegrationConfig {
   store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
 }
 
+/// What a page is to the site it belongs to.
+///
+/// Most pages are STANDARD — something a visitor reaches at its own address.
+/// An online store also has three pages nobody visits by name, each designed
+/// once in the builder and used everywhere:
+///
+///   LAYOUT  — the header, footer and announcement bar every page shares
+///   PRODUCT — how every product page looks; the product changes, the design
+///             does not
+///   CATALOG — how every list of products looks: a category, a collection,
+///             search results, the whole shop
+///
+/// They are pages rather than settings so the builder, the block library, the
+/// per-element design layer, versioning and publishing all apply to them for
+/// free — a merchant designs their product page the same way they design their
+/// home page. They are never routable by slug and never count as pages against
+/// a plan.
+enum PageRole {
+  STANDARD
+  LAYOUT
+  PRODUCT
+  CATALOG
+}
+
 model Page {
   id                 String     @id @default(cuid())
   storeId            String
   slug               String
   title              String
   isHome             Boolean    @default(false)
+  role               PageRole   @default(STANDARD)
   status             PageStatus @default(DRAFT)
   publishedVersionId String?    @unique
   publishedAt        DateTime?
@@ -354,6 +433,15 @@ model Page {
   seoDescription String?
   ogImageMediaId String?
   robotsIndex    Boolean @default(true)
+
+  /// Goes up by one on every save of the page's blocks, whoever saves them.
+  ///
+  /// The builder sends back the number it loaded, so a tab left open cannot
+  /// save its old copy over what the AI editor (or another tab) saved since:
+  /// the numbers differ, the save is refused, and the merchant is asked to
+  /// reload. A counter rather than `updatedAt`, because publishing writes the
+  /// page row too and must not make the builder think someone else edited it.
+  sectionsRevision Int @default(0)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -368,6 +456,7 @@ model Page {
   orders           Order[]
 
   @@unique([storeId, slug])
+  @@index([storeId, role])
 }
 
 enum PageStatus {
@@ -769,6 +858,145 @@ model PageVersion {
   @@index([pageId, createdAt])
 }
 
+/// A block a merchant saved to use again, on another page or another site.
+///
+/// The organisation's rather than one store's: the point is to make a section
+/// once — a size chart, a delivery-terms strip, the custom-code hero an AI
+/// wrote — and drop it into the next campaign page. It is a copy, not a link.
+/// Inserting it puts its content on the page, and editing either afterwards
+/// leaves the other alone, because a shared section that silently changed
+/// every page using it is a surprise no merchant asked for.
+model SavedBlock {
+  id             String   @id @default(cuid())
+  organizationId String
+  /// What the merchant called it, shown in the block library.
+  name           String
+  /// The block type, as on PageSection. Which sites and pages may take it is
+  /// the block definition's to say, so it is not repeated here.
+  type           String
+  content        Json
+  config         Json
+  createdById    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy    User?        @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, createdAt])
+}
+
+// ── AI builder credits ──────────────────────────────────────────────────
+
+/// A workspace's AI builder credits.
+///
+/// Two pots, spent in this order. The month's allowance comes from the plan
+/// (`Plan.aiMonthlyCredits`) and is not stored: only how much of it has been
+/// used in `monthlyPeriod` is, so a plan change or an admin editing the plan
+/// takes effect at once, and a new month starts by the period no longer
+/// matching. `balance` is what was bought or given, and never expires.
+model AiCreditAccount {
+  organizationId String   @id
+  /// Bought and granted credits left. Never negative.
+  balance        Int      @default(0)
+  /// The month `monthlyUsed` counts in, as "2026-10" (UTC).
+  monthlyPeriod  String   @default("")
+  monthlyUsed    Int      @default(0)
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+enum AiCreditEntryKind {
+  /// Spent on an AI request.
+  USAGE
+  /// An AI request that failed or was stopped, given back.
+  REFUND
+  /// A credit pack paid for.
+  PURCHASE
+  /// The one-time credits for starting a plan.
+  PLAN_START
+  /// Added by the platform team.
+  ADMIN_GRANT
+  /// Taken away by the platform team.
+  ADMIN_DEDUCT
+}
+
+/// One movement of a workspace's credits — the history the billing page shows
+/// and support reads. Signed amounts per pot: a request paid partly from the
+/// month's allowance and partly from the balance is one entry.
+model AiCreditEntry {
+  id             String            @id @default(cuid())
+  organizationId String
+  kind           AiCreditEntryKind
+  /// Change to the month's allowance used (negative = more used).
+  monthlyDelta   Int               @default(0)
+  /// Change to the balance.
+  balanceDelta   Int               @default(0)
+  /// The balance after this entry, for reading the history without summing it.
+  balanceAfter   Int
+  description    String
+  /// Makes a grant happen once: "plan-start:<org>:<plan>", "order:<id>".
+  dedupeKey      String?           @unique
+  orderId        String?
+  createdById    String?
+  createdAt      DateTime          @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+}
+
+/// Credits a workspace can buy, as the platform team prices them.
+model AiCreditPack {
+  id           String   @id @default(cuid())
+  name         String
+  credits      Int
+  currencyCode String   @default("BDT")
+  priceCents   Int
+  isActive     Boolean  @default(true)
+  position     Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([isActive, position])
+}
+
+enum AiCreditOrderStatus {
+  /// Recorded; waits for the platform team to confirm payment.
+  AWAITING_PAYMENT
+  /// Paid, and the credits are on the balance.
+  PAID
+  CANCELED
+}
+
+/// A credit pack a workspace asked for. Like a plan order, it waits for
+/// payment by hand while no gateway is connected; marking it paid is what puts
+/// the credits on the balance.
+model AiCreditOrder {
+  id                String              @id @default(cuid())
+  organizationId    String
+  packId            String?
+  /// What was bought, copied: a pack is renamed and repriced over time.
+  packName          String
+  credits           Int
+  currencyCode      String              @default("BDT")
+  totalCents        Int
+  status            AiCreditOrderStatus @default(AWAITING_PAYMENT)
+  provider          String?
+  providerReference String?
+  paidAt            DateTime?
+  canceledAt        DateTime?
+  createdById       String?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+  @@index([status])
+}
+
 // ── Media ───────────────────────────────────────────────────────────────
 
 model MediaAsset {
@@ -1012,6 +1240,16 @@ model Plan {
 
   enforceTrafficCap Boolean @default(true)
   enforceVisitorCap Boolean @default(false)
+
+  // ── AI builder credits ──
+  /// Credits a workspace on this plan gets every calendar month, for the AI
+  /// builder. They refresh on the 1st and do not carry over — bought credits
+  /// are what carries over.
+  aiMonthlyCredits Int @default(0)
+  /// Credits given once, when a workspace starts this plan — a welcome on the
+  /// free plan, a bonus for upgrading. Once per workspace per plan, so moving
+  /// away and back does not hand them out again.
+  aiStartCredits   Int @default(0)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2767,6 +3005,13 @@ model Order {
   shippingWaived       Boolean @default(false)
 
   note          String?
+  /// The merchant's own questions from the order form, with what this buyer
+  /// answered: `[{ "question": "Size", "answer": "XL" }, …]`.
+  ///
+  /// Copied as they were asked, like the offer's label: a merchant rewords and
+  /// removes questions while a campaign runs, and an order must keep saying
+  /// what its buyer was actually asked. Null when the form asked nothing extra.
+  formAnswers   Json?
   tags          String[] @default([])
   // Marketing attribution captured at checkout.
   landingSite   String?
@@ -3350,6 +3595,10 @@ enum ApiScope {
   ORDERS_WRITE
   WEBHOOKS_READ
   WEBHOOKS_WRITE
+  // Websites: read the pages, blocks and themes; write them as drafts and
+  // publish. What an AI code editor connected over MCP works with.
+  SITES_READ
+  SITES_WRITE
 }
 
 // ── Integration: outbound webhooks ───────────────────────────────────────

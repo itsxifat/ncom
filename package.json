@@ -17,6 +17,7 @@
     "test:e2e": "playwright test",
     "check:connector": "tsx --conditions=react-server scripts/check-connector.mts",
     "check:elements": "tsx scripts/check-elements.mts",
+    "fonts:update": "tsx scripts/update-google-fonts.mts",
     "check:stock-queue": "tsx --conditions=react-server scripts/check-stock-queue.mts",
     "adopt:remote": "tsx --conditions=react-server scripts/adopt-remote-products.mts",
     "check:adopt-remote": "tsx --conditions=react-server scripts/check-adopt-remote.mts",
@@ -38,6 +39,7 @@
     ]
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.137.0",
     "@auth/core": "0.41.3",
     "@auth/prisma-adapter": "^2.11.3",
     "@base-ui/react": "^1.7.0",

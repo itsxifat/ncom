@@ -120,8 +120,15 @@ export function applyPromotions(input: {
   shippingCents: number
   promotions: PublicPromotions
   formatMoney: (cents: number) => string
+  /**
+   * Names a rule the merchant left unnamed. Defaults to the English
+   * `defaultRuleLabel`; a storefront in another language passes its own.
+   */
+  ruleLabel?: (rule: PublicDiscountRule) => string
 }): AppliedPromotions {
   const { goodsCents, quantity, promotions, formatMoney } = input
+  const nameRule =
+    input.ruleLabel ?? ((rule) => defaultRuleLabel(rule, formatMoney))
 
   let best: { amount: number; rule: PublicDiscountRule | null } = {
     amount: 0,
@@ -138,9 +145,7 @@ export function applyPromotions(input: {
 
   return {
     discountCents: best.amount,
-    label: best.rule
-      ? (best.rule.label ?? defaultRuleLabel(best.rule, formatMoney))
-      : '',
+    label: best.rule ? (best.rule.label ?? nameRule(best.rule)) : '',
     freeShipping: free,
     shippingCents: free ? 0 : Math.max(0, Math.round(input.shippingCents)),
   }
@@ -172,8 +177,12 @@ export function promotionHints(input: {
   quantity: number
   promotions: PublicPromotions
   formatMoney: (cents: number) => string
+  /** See `applyPromotions`. */
+  ruleLabel?: (rule: PublicDiscountRule) => string
 }): PromotionHints {
   const { goodsCents, quantity, promotions, formatMoney } = input
+  const nameRule =
+    input.ruleLabel ?? ((rule) => defaultRuleLabel(rule, formatMoney))
   const hints: PromotionHints = { freeShipping: null, discount: null }
 
   const freeRule = promotions.freeShipping
@@ -238,7 +247,7 @@ export function promotionHints(input: {
       nearest = {
         amountMoreCents: amountMore,
         quantityMore,
-        label: rule.label ?? defaultRuleLabel(rule, formatMoney),
+        label: rule.label ?? nameRule(rule),
         distance,
       }
     }

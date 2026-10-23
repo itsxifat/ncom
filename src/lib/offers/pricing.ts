@@ -225,7 +225,23 @@ export interface OfferQuote {
   outsideOfferCents: number
   /** Set when the selection cannot be priced; goodsCents is meaningless then. */
   error: string | null
+  /**
+   * The same refusal as data, so a storefront can say it in its own language.
+   * `error` stays the English sentence the server and the dashboard use.
+   */
+  issue: OfferQuoteIssue | null
 }
+
+export type OfferQuoteIssue =
+  | { code: 'item-sold-out'; title: string }
+  | { code: 'all-sold-out' }
+  | { code: 'choose-options' }
+  | { code: 'choose-items' }
+  | { code: 'item-unavailable' }
+  | { code: 'too-few'; min: number; scoped: boolean }
+  | { code: 'too-many'; max: number; scoped: boolean }
+  | { code: 'sets-only'; quantities: number[]; have: number; scoped: boolean }
+  | { code: 'no-price' }
 
 /**
  * Price a buyer's selection against an offer.
@@ -264,6 +280,7 @@ export function quoteOffer(
     quantity: 0,
     outsideOfferCents: 0,
     error: null,
+    issue: null,
   }
 
   if (selections.length === 0) {
@@ -286,6 +303,10 @@ export function quoteOffer(
           soldOut.length === 1
             ? `${soldOut[0]!.title} is out of stock.`
             : 'Everything in this offer is out of stock right now.',
+        issue:
+          soldOut.length === 1
+            ? { code: 'item-sold-out', title: soldOut[0]!.title }
+            : { code: 'all-sold-out' },
       }
     }
 
@@ -295,6 +316,9 @@ export function quoteOffer(
         offer.kind === 'FIXED'
           ? 'Please choose an option for each item.'
           : 'Please choose at least one item.',
+      issue: {
+        code: offer.kind === 'FIXED' ? 'choose-options' : 'choose-items',
+      },
     }
   }
 
@@ -313,7 +337,11 @@ export function quoteOffer(
   for (const selection of selections) {
     const variant = variantLookup(selection.variantId)
     if (!variant) {
-      return { ...empty, error: 'One of the chosen items is unavailable.' }
+      return {
+        ...empty,
+        error: 'One of the chosen items is unavailable.',
+        issue: { code: 'item-unavailable' },
+      }
     }
     const lineQuantity = Math.max(1, Math.round(selection.quantity))
     const lineRegular = variant.priceCents * lineQuantity
@@ -352,6 +380,7 @@ export function quoteOffer(
       quantity,
       outsideOfferCents,
       error: null,
+      issue: null,
     }
   }
 
@@ -368,6 +397,7 @@ export function quoteOffer(
       ...empty,
       quantity,
       error: `Please choose at least ${bounds.min} item${bounds.min === 1 ? '' : 's'}${scope}.`,
+      issue: { code: 'too-few', min: bounds.min, scoped: Boolean(scope) },
     }
   }
   if (bounds.max > 0 && offerQuantity > bounds.max) {
@@ -375,6 +405,7 @@ export function quoteOffer(
       ...empty,
       quantity,
       error: `You can order up to ${bounds.max} item${bounds.max === 1 ? '' : 's'}${scope}.`,
+      issue: { code: 'too-many', max: bounds.max, scoped: Boolean(scope) },
     }
   }
 
@@ -403,6 +434,15 @@ export function quoteOffer(
           rungs.length > 0
             ? `This offer is sold in sets of ${listQuantities(rungs)} — you have ${offerQuantity}${scope ? ' in it' : ''}.`
             : 'No price is set for that many items.',
+        issue:
+          rungs.length > 0
+            ? {
+                code: 'sets-only',
+                quantities: rungs,
+                have: offerQuantity,
+                scoped: Boolean(scope),
+              }
+            : { code: 'no-price' },
       }
     }
     const goodsCents = tierPrice + outsideOfferCents
@@ -413,6 +453,7 @@ export function quoteOffer(
       quantity,
       outsideOfferCents,
       error: null,
+      issue: null,
     }
   }
 
@@ -431,6 +472,7 @@ export function quoteOffer(
       quantity,
       outsideOfferCents,
       error: null,
+      issue: null,
     }
   }
 
@@ -450,6 +492,7 @@ export function quoteOffer(
     quantity,
     outsideOfferCents,
     error: null,
+    issue: null,
   }
 }
 

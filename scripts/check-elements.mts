@@ -30,11 +30,23 @@
  * reported as unreadable rather than silently passing. Keep them literals.
  */
 
-import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import ts from 'typescript'
 
 const SECTIONS_DIR = join(process.cwd(), 'src/modules/sections')
+
+/**
+ * Where markup shared between store blocks lives.
+ *
+ * A product card is drawn the same way by the product grid, the related
+ * products row and the catalogue page, so it is written once, outside any one
+ * block's folder. The parts it draws are still the importing block's parts —
+ * each block declares them in its own `elements` — so a block that imports
+ * from here is checked against what these files draw as well as its own.
+ */
+const SHARED_ALIAS = '@/modules/storefront/'
+const SHARED_DIR = join(process.cwd(), 'src/modules/storefront')
 
 /**
  * Element keys drawn by shared helpers rather than by a block's own markup.
@@ -297,9 +309,26 @@ function contentFieldResolves(
   return null
 }
 
+/** Shared storefront files a block file imports, resolved to paths. */
+function sharedImports(file: string): string[] {
+  const out: string[] = []
+  for (const statement of parse(file).statements) {
+    if (!ts.isImportDeclaration(statement)) continue
+    const specifier = statement.moduleSpecifier
+    if (!ts.isStringLiteral(specifier)) continue
+    if (!specifier.text.startsWith(SHARED_ALIAS)) continue
+    const base = join(SHARED_DIR, specifier.text.slice(SHARED_ALIAS.length))
+    for (const candidate of [`${base}.tsx`, `${base}.ts`]) {
+      if (existsSync(candidate)) out.push(candidate)
+    }
+  }
+  return out
+}
+
 function checkBlock(dir: string, name: string) {
-  const files = tsxFilesIn(dir)
-  const index = files.find((file) => file.endsWith('index.tsx'))
+  const own = tsxFilesIn(dir)
+  const files = [...new Set([...own, ...own.flatMap(sharedImports)])]
+  const index = own.find((file) => file.endsWith('index.tsx'))
   if (!index) return
 
   const declaration = declarationIn(index)

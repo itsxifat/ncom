@@ -69,7 +69,25 @@ export function formatMoney(
   return new Intl.NumberFormat(locale, {
     style: 'currency',
     currency: currencyCode.toUpperCase(),
+    // `narrowSymbol` is what writes BDT as "৳" rather than the letters "BDT":
+    // en-US has no wide symbol for the taka, so plain `symbol` falls back to
+    // the code. Currencies that already had one ($, €, £) come out unchanged.
+    currencyDisplay: 'narrowSymbol',
   }).format(major)
+}
+
+/** The sign an amount in this currency is written with: "৳" for BDT. */
+export function currencySymbol(currencyCode: string, locale = 'en-US'): string {
+  const code = currencyCode.toUpperCase()
+  return (
+    new Intl.NumberFormat(locale, {
+      style: 'currency',
+      currency: code,
+      currencyDisplay: 'narrowSymbol',
+    })
+      .formatToParts(0)
+      .find((part) => part.type === 'currency')?.value ?? code
+  )
 }
 
 /** Formats without the currency symbol: 129900 -> "1,299.00". */
