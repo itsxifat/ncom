@@ -12,6 +12,7 @@ import {
 import { AppFrame } from '@/components/app/app-frame'
 import type { TabItem } from '@/components/app/mobile-tab-bar'
 import { BrandMark } from '@/components/app/brand-mark'
+import { ThemeToggle } from '@/components/app/theme-toggle'
 import { AdminSidebarNav } from '@/components/admin/admin-sidebar-nav'
 
 /**
@@ -30,19 +31,19 @@ const MOBILE_TABS: TabItem[] = [
 export function AdminShell({ children }: { children: React.ReactNode }) {
   return (
     <AppFrame
-      brand={<BrandMark suffix="Admin" />}
+      brand={<BrandMark suffix="Admin" tone="onLight" />}
       tabs={MOBILE_TABS}
       // The blast radius warning is a rail fixture on desktop. On a phone the
       // rail is a drawer nobody has open while they work, so the same warning
       // rides in the top bar, where it is in view for every destructive tap.
       mobileActions={
-        <span className="bg-lime text-lime-foreground inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[0.6875rem] font-semibold tracking-wide uppercase">
+        <span className="bg-lime text-lime-foreground inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold">
           <ShieldAlert className="size-3.5" />
           All tenants
         </span>
       }
       railHeader={
-        <div className="bg-lime text-lime-foreground flex items-start gap-2.5 rounded-2xl p-3">
+        <div className="bg-lime text-lime-foreground flex items-start gap-2.5 rounded-lg p-3">
           <ShieldAlert className="mt-px size-4 shrink-0" />
           <p className="text-xs leading-snug font-medium">
             You&apos;re in the platform admin. Actions here affect every tenant.
@@ -51,13 +52,16 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
       }
       nav={<AdminSidebarNav />}
       railFooter={
-        <Link
-          href="/dashboard"
-          className="text-ink-muted hover:bg-sidebar-accent hover:text-sidebar-foreground flex items-center gap-3 rounded-full px-3.5 py-2.5 text-sm font-medium transition-colors"
-        >
-          <ArrowLeft className="size-4.5 shrink-0" />
-          Back to workspace
-        </Link>
+        <>
+          <ThemeToggle className="mb-1" />
+          <Link
+            href="/dashboard"
+            className="text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm font-medium transition-colors"
+          >
+            <ArrowLeft className="size-4.5 shrink-0" />
+            Back to workspace
+          </Link>
+        </>
       }
     >
       {children}

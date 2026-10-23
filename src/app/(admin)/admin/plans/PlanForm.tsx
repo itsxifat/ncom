@@ -371,6 +371,51 @@ export function PlanForm({ plan }: { plan: PlanModel | null }) {
       </SettingsSection>
 
       <SettingsSection
+        title="AI builder credits"
+        description="What workspaces on this plan can spend on the AI builder. Request prices are set under AI builder; extra credits are sold as packs under AI credits."
+      >
+        <FieldGroup>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field>
+              <FieldLabel htmlFor="aiMonthlyCredits">Every month</FieldLabel>
+              <Input
+                id="aiMonthlyCredits"
+                name="aiMonthlyCredits"
+                inputMode="numeric"
+                defaultValue={String(plan?.aiMonthlyCredits ?? 0)}
+              />
+              <FieldDescription>
+                Refreshed on the 1st of each month; unused ones don&apos;t carry
+                over. 0 = none.
+              </FieldDescription>
+              {errors.aiMonthlyCredits && (
+                <FieldError>{errors.aiMonthlyCredits}</FieldError>
+              )}
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="aiStartCredits">
+                Once, on starting this plan
+              </FieldLabel>
+              <Input
+                id="aiStartCredits"
+                name="aiStartCredits"
+                inputMode="numeric"
+                defaultValue={String(plan?.aiStartCredits ?? 0)}
+              />
+              <FieldDescription>
+                A welcome or upgrade bonus that never expires. Each workspace
+                gets it once per plan — including workspaces already on it, the
+                next time they use AI or open billing.
+              </FieldDescription>
+              {errors.aiStartCredits && (
+                <FieldError>{errors.aiStartCredits}</FieldError>
+              )}
+            </Field>
+          </div>
+        </FieldGroup>
+      </SettingsSection>
+
+      <SettingsSection
         title="Features"
         description="“Optional add-on” means the tenant can buy it on this plan; “Not included” means it isn't sold at this tier at all."
       >

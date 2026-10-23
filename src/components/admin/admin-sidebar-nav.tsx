@@ -17,6 +17,8 @@ import {
   CreditCard,
   Activity,
   Mail,
+  Coins,
+  Sparkles,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -43,6 +45,7 @@ const NAV_GROUPS = [
         label: 'Subscriptions',
         icon: CreditCard,
       },
+      { href: '/admin/ai-credits', label: 'AI credits', icon: Coins },
       { href: '/admin/usage', label: 'Usage', icon: Activity },
     ],
   },
@@ -59,6 +62,7 @@ const NAV_GROUPS = [
     items: [
       { href: '/admin/domains', label: 'Domains', icon: Globe2 },
       { href: '/admin/email', label: 'Email', icon: Mail },
+      { href: '/admin/ai', label: 'AI builder', icon: Sparkles },
       { href: '/admin/settings', label: 'Settings', icon: Settings },
     ],
   },
@@ -71,7 +75,9 @@ export function AdminSidebarNav() {
     <nav className="flex flex-col gap-6">
       {NAV_GROUPS.map((group) => (
         <div key={group.label} className="flex flex-col gap-1">
-          <p className="eyebrow text-ink-muted mb-2 px-3.5">{group.label}</p>
+          <p className="text-muted-foreground mb-1 px-3 text-xs font-semibold">
+            {group.label}
+          </p>
           {group.items.map((item) => {
             const isActive =
               pathname === item.href ||
@@ -84,10 +90,10 @@ export function AdminSidebarNav() {
                 href={item.href}
                 aria-current={isActive ? 'page' : undefined}
                 className={cn(
-                  'flex items-center gap-3 rounded-full px-3.5 py-2.5 text-sm font-medium transition-colors',
+                  'flex min-h-10 items-center gap-3 rounded-lg px-3 text-sm transition-colors',
                   isActive
-                    ? 'bg-sidebar-primary text-sidebar-primary-foreground'
-                    : 'text-ink-muted hover:bg-sidebar-accent hover:text-sidebar-foreground'
+                    ? 'bg-sidebar-primary text-sidebar-primary-foreground font-semibold'
+                    : 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground font-medium'
                 )}
               >
                 <Icon className="size-4.5 shrink-0" />

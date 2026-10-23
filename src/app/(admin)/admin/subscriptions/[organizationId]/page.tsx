@@ -6,6 +6,11 @@ import {
 } from '@/server/services/planAdminService'
 import { getUsageSnapshot } from '@/server/services/usageService'
 import { getEntitlements } from '@/server/services/entitlementService'
+import {
+  getAiCreditSummaryForAdmin,
+  listAiCreditEntriesForAdmin,
+  listCreditOrdersForAdmin,
+} from '@/server/services/aiCreditService'
 import { PageHeader } from '@/components/app/page-header'
 import { PageShell } from '@/components/app/page-shell'
 import { StatCard } from '@/components/app/stat-card'
@@ -14,6 +19,7 @@ import {
   SubscriptionEditor,
   type SubscriptionEditorData,
 } from './SubscriptionEditor'
+import { AiCreditsAdminSection } from './AiCreditsAdminSection'
 
 export default async function AdminSubscriptionDetailPage({
   params,
@@ -32,6 +38,13 @@ export default async function AdminSubscriptionDetailPage({
     getEntitlements(organizationId),
   ])
   if (!subscription) notFound()
+  // The summary first: reading it is what gives the plan's one-time credits,
+  // and the history below should include them.
+  const credits = await getAiCreditSummaryForAdmin(organizationId)
+  const [creditEntries, creditOrders] = await Promise.all([
+    listAiCreditEntriesForAdmin(organizationId, 15),
+    listCreditOrdersForAdmin({ organizationId }),
+  ])
 
   const data: SubscriptionEditorData = {
     organizationId,
@@ -126,6 +139,13 @@ export default async function AdminSubscriptionDetailPage({
               ? 'Unlimited'
               : `${plan.monthlyTrafficMb} MB`,
         }}
+      />
+
+      <AiCreditsAdminSection
+        organizationId={organizationId}
+        summary={credits}
+        entries={creditEntries}
+        orders={creditOrders}
       />
     </PageShell>
   )
