@@ -43,7 +43,15 @@ export interface PricedCart extends PricingResult {
 
 export async function priceCartById(
   cartId: string,
-  options: { shippingRateId?: string | null } = {}
+  options: {
+    shippingRateId?: string | null
+    /**
+     * Price as if shipping here. A store's checkout opens before the shopper
+     * has typed an address, and the rates it offers have to be the ones for
+     * the country the shop delivers in — not every zone's rates at once.
+     */
+    countryCode?: string | null
+  } = {}
 ): Promise<PricedCart> {
   const cart = await prisma.cart.findUnique({
     where: { id: cartId },
@@ -110,7 +118,8 @@ export async function priceCartById(
   }
 
   const shippingAddress = parseAddress(cart.shippingAddress)
-  const countryCode = shippingAddress?.countryCode ?? null
+  const countryCode =
+    shippingAddress?.countryCode ?? options.countryCode ?? null
   const provinceCode = shippingAddress?.provinceCode ?? null
 
   const [discount, taxRates, shippingRates] = await Promise.all([
@@ -321,14 +330,18 @@ async function loadShippingRates(
     include: { rates: { orderBy: { position: 'asc' } } },
   })
 
-  const matching = countryCode
-    ? zones.filter(
-        (zone) =>
-          zone.countryCodes.includes(countryCode) ||
-          // An empty country list is the "rest of world" catch-all zone.
-          zone.countryCodes.length === 0
-      )
-    : zones
+  // A zone naming the country wins; the "rest of world" zone (an empty
+  // country list) is the fallback for countries no zone names. Offering both
+  // put the free rate every store is created with beside a merchant's own
+  // Inside/Outside Dhaka rates, and shoppers sensibly picked the free one.
+  const named = countryCode
+    ? zones.filter((zone) => zone.countryCodes.includes(countryCode))
+    : []
+  const matching = !countryCode
+    ? zones
+    : named.length > 0
+      ? named
+      : zones.filter((zone) => zone.countryCodes.length === 0)
 
   return matching.flatMap((zone) => zone.rates)
 }

@@ -78,6 +78,8 @@ export interface ResolvedEntitlements {
   currentPeriodEnd: Date | null
   cancelAtPeriodEnd: boolean
   isDefaultPlan: boolean
+  /** AI builder credits the plan includes: every month, and once on starting it. */
+  aiCredits: { monthly: number; onStart: number }
 }
 
 /** Raised when an action would exceed a quota. Carries what the UI needs to explain it. */
@@ -313,6 +315,7 @@ function resolveFromSubscription(
     currentPeriodEnd: subscription.currentPeriodEnd,
     cancelAtPeriodEnd: subscription.cancelAtPeriodEnd,
     isDefaultPlan: plan.isDefault,
+    aiCredits: { monthly: plan.aiMonthlyCredits, onStart: plan.aiStartCredits },
   }
 }
 
@@ -367,6 +370,7 @@ function lockedDownEntitlements(organizationId: string): ResolvedEntitlements {
     currentPeriodEnd: null,
     cancelAtPeriodEnd: false,
     isDefaultPlan: false,
+    aiCredits: { monthly: 0, onStart: 0 },
   }
 }
 

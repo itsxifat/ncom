@@ -320,18 +320,24 @@ export const SHIPMENT_STATUS_LABEL: Record<CourierShipmentStatus, string> = {
   UNKNOWN: 'Unknown',
 }
 
+/**
+ * What each state is called wherever a merchant reads it. Every label answers
+ * "what happens to this order next" in words a first-time seller already uses:
+ * "Ready to ship" rather than "Processing", which said only that the system
+ * was busy with it.
+ */
 export const WORKFLOW_STATE_LABEL: Record<OrderWorkflowState, string> = {
-  PENDING: 'Pending',
+  PENDING: 'New',
   FRAUD_REVIEW: 'Needs review',
-  PROCESSING: 'Processing',
+  PROCESSING: 'Ready to ship',
   // "Dispatched" describes what the merchant did; this describes where the
   // parcel is, which is what everyone reading the order actually wants to know.
   DISPATCHED: 'Sent to courier',
-  IN_TRANSIT: 'In transit',
+  IN_TRANSIT: 'On the way',
   OUT_FOR_DELIVERY: 'Out for delivery',
   DELIVERED: 'Delivered',
-  PARTIALLY_DELIVERED: 'Partially delivered',
+  PARTIALLY_DELIVERED: 'Partly delivered',
   RETURNED: 'Returned',
   CANCELLED: 'Cancelled',
-  FAILED: 'Failed',
+  FAILED: 'Delivery failed',
 }

@@ -40,8 +40,15 @@ export interface UsageSnapshot {
 
 // ── Stock metrics: counted live ───────────────────────────────────────────
 
+/**
+ * Pages a merchant made and visitors can open. A store's layout, product page
+ * and catalogue page are parts of the store rather than pages of it — a plan
+ * that allows one page must still allow an online store with a home page.
+ */
 export function countPages(organizationId: string): Promise<number> {
-  return prisma.page.count({ where: { store: { organizationId } } })
+  return prisma.page.count({
+    where: { store: { organizationId }, role: 'STANDARD' },
+  })
 }
 
 export function countStores(organizationId: string): Promise<number> {

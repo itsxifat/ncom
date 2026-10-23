@@ -39,6 +39,8 @@ export async function registerCustomer(
     password: string
     firstName?: string
     lastName?: string
+    /** The number the courier and the shop call — most buyers here give it. */
+    phone?: string
     acceptsMarketing?: boolean
   }
 ): Promise<{ customerId: string; token: string }> {
@@ -71,6 +73,7 @@ export async function registerCustomer(
           passwordHash,
           firstName: input.firstName ?? undefined,
           lastName: input.lastName ?? undefined,
+          phone: input.phone ?? undefined,
           acceptsMarketing: input.acceptsMarketing ?? false,
           marketingOptInAt: input.acceptsMarketing ? new Date() : null,
         },
@@ -83,6 +86,7 @@ export async function registerCustomer(
           passwordHash,
           firstName: input.firstName ?? null,
           lastName: input.lastName ?? null,
+          phone: input.phone ?? null,
           acceptsMarketing: input.acceptsMarketing ?? false,
           marketingOptInAt: input.acceptsMarketing ? new Date() : null,
         },

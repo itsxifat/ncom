@@ -20,6 +20,12 @@ import { evaluateDiscount } from '@/lib/pricing'
 import { formatMoney } from '@/lib/money'
 import type { PricingLine } from '@/lib/pricing'
 import type { OfferOrderInput } from '@/lib/validation/offerOrder'
+import { orderformContentSchema } from '@/modules/sections/orderform'
+import {
+  askedQuestions,
+  checkAnswers,
+  type AskedQuestion,
+} from '@/modules/sections/orderform/questions'
 
 /**
  * Places an order from a landing page's offer form.
@@ -53,6 +59,31 @@ export interface OfferOrderResult extends PlaceOrderResult {
   quantity: number
 }
 
+/**
+ * A question the page requires left unanswered, or a choice answered with
+ * something that is not one of its options. Thrown before anything is priced
+ * or reserved; the route turns it into a sentence naming the question, in the
+ * page's language.
+ *
+ * The form itself refuses to send either — the browser enforces a required
+ * question like the phone number — so this is met by a hand-written form, or
+ * by a page that was republished with a new question while the buyer had it
+ * open.
+ */
+export class OrderFormAnswerError extends Error {
+  constructor(
+    readonly reason: 'missing' | 'not-a-choice',
+    readonly question: string
+  ) {
+    super(
+      reason === 'missing'
+        ? `Please answer “${question}”.`
+        : `Please choose one of the answers to “${question}”.`
+    )
+    this.name = 'OrderFormAnswerError'
+  }
+}
+
 export async function placeOfferOrder(
   organizationId: string,
   storeId: string,
@@ -68,11 +99,21 @@ export async function placeOfferOrder(
   // scraped form could name another tenant's page and sell their offers.
   const page = await prisma.page.findFirst({
     where: { id: input.pageId, storeId },
-    select: { id: true, status: true },
+    select: { id: true, status: true, publishedVersionId: true },
   })
   if (!page) throw new Error('This form belongs to a different page')
   if (page.status !== 'PUBLISHED') {
     throw new Error('This page is not accepting orders yet')
+  }
+
+  // The merchant's own questions, checked first: an unanswered one costs the
+  // buyer nothing yet, and nothing has been reserved for them.
+  const answered = checkAnswers(
+    await publishedQuestions(page.publishedVersionId),
+    input.answers
+  )
+  if (!answered.ok) {
+    throw new OrderFormAnswerError(answered.reason, answered.question)
   }
 
   const priced = await priceOfferSubmission(
@@ -197,6 +238,7 @@ export async function placeOfferOrder(
       giftCents > 0 && priced.gift
         ? new Map([[priced.gift.variantId, priced.gift.quantity]])
         : undefined,
+    formAnswers: answered.answers,
   }
 
   const result = await placeOrder(
@@ -210,6 +252,39 @@ export async function placeOfferOrder(
     offerLabel: priced.offer.label,
     quantity: priced.quantity,
   }
+}
+
+/**
+ * The questions on the order form the buyer was shown.
+ *
+ * Read from the page's published version, which is what the live page draws
+ * — not from its draft, which the merchant may be adding a question to at
+ * this moment. Read the way the page reads it, too: a hidden order form asks
+ * nothing, and a form whose saved content does not parse is drawn from the
+ * block's defaults, which ask nothing either. Requiring an answer the buyer
+ * was never shown a question for would refuse every order on the page.
+ */
+async function publishedQuestions(
+  versionId: string | null
+): Promise<AskedQuestion[]> {
+  if (!versionId) return []
+  const version = await prisma.pageVersion.findUnique({
+    where: { id: versionId },
+    select: { snapshot: true },
+  })
+  const sections = (version?.snapshot as { sections?: unknown } | null)
+    ?.sections
+  if (!Array.isArray(sections)) return []
+
+  const form = sections.find((section): section is Record<string, unknown> => {
+    if (!section || typeof section !== 'object') return false
+    const { type, isVisible } = section as Record<string, unknown>
+    return (type === 'orderform' || type === 'order-form') && Boolean(isVisible)
+  })
+  if (!form) return []
+
+  const parsed = orderformContentSchema.safeParse(form.content)
+  return parsed.success ? askedQuestions(parsed.data.questions) : []
 }
 
 interface ResolvedCoupon {

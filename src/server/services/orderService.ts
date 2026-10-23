@@ -216,6 +216,27 @@ function handoffWhere(state: HandoffState | undefined): Prisma.OrderWhereInput {
 }
 
 /**
+ * How many orders sit in each workflow state, for the counts on the order
+ * list's views. Counted on the column exactly as `listOrders` filters on it,
+ * so a view's number is the length of the list that view opens.
+ */
+export async function countOrdersByWorkflowState(
+  organizationId: string
+): Promise<Partial<Record<OrderWorkflowState, number>>> {
+  await requireOrgAccess(organizationId, 'VIEWER')
+
+  const rows = await prisma.order.groupBy({
+    by: ['workflowState'],
+    where: { organizationId },
+    _count: { _all: true },
+  })
+
+  return Object.fromEntries(
+    rows.map((row) => [row.workflowState, row._count._all])
+  )
+}
+
+/**
  * Tells subscribers an order moved.
  *
  * Reloads the order rather than passing along whatever the caller happened to

@@ -53,7 +53,16 @@ type ProductRow = Awaited<
 
 export async function listLocalProducts(
   organizationId: string,
-  query: ProductQuery & { take?: number; skip?: number } = {}
+  query: ProductQuery & {
+    take?: number
+    skip?: number
+    /**
+     * Several categories at once — a category page lists what is filed under
+     * its subcategories too, and the shopper should not have to know which
+     * level of the tree the merchant happened to file a product at.
+     */
+    categoryIds?: string[]
+  } = {}
 ): Promise<ProductPage> {
   const search = query.q?.trim()
 
@@ -64,7 +73,11 @@ export async function listLocalProducts(
     organizationId,
     ...(query.includeDrafts ? {} : { status: 'ACTIVE' as const }),
     ...(query.ids && query.ids.length > 0 ? { id: { in: query.ids } } : {}),
-    ...(query.categoryId ? { categoryId: query.categoryId } : {}),
+    ...(query.categoryIds && query.categoryIds.length > 0
+      ? { categoryId: { in: query.categoryIds } }
+      : query.categoryId
+        ? { categoryId: query.categoryId }
+        : {}),
     ...(search
       ? {
           OR: [

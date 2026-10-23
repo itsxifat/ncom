@@ -70,7 +70,13 @@ const CART_INCLUDE = {
 
 export async function getOrCreateCart(
   organizationId: string,
-  token: string | null
+  token: string | null,
+  /**
+   * The storefront the cart is being started on, recorded for attribution —
+   * the order it becomes copies it, which is how a merchant with a store and
+   * three landing pages can tell where a sale came from.
+   */
+  options: { storeId?: string } = {}
 ): Promise<{ id: string; token: string }> {
   if (token) {
     const existing = await prisma.cart.findFirst({
@@ -88,6 +94,7 @@ export async function getOrCreateCart(
   const cart = await prisma.cart.create({
     data: {
       organizationId,
+      storeId: options.storeId ?? null,
       currencyCode: settings?.currencyCode ?? 'USD',
       expiresAt: new Date(Date.now() + CART_TTL_DAYS * 24 * 60 * 60 * 1000),
     },
@@ -329,6 +336,52 @@ export async function setCartShippingRate(
   })
 
   return loadDecorated(cart.id)
+}
+
+/**
+ * Who is buying and where it goes, from a store's one-page checkout.
+ *
+ * Separate from `setCartContact` because that one was written for a checkout
+ * that asked for an email first. A cash-on-delivery shop asks for a phone
+ * number — the courier calls it and the merchant confirms the order on it —
+ * and treats an email as optional, so this takes either and requires the
+ * phone. The rate is cleared with the address, as `setCartAddresses` does: a
+ * new destination can rule out the rate chosen for the old one.
+ */
+export async function setCartCheckoutDetails(
+  organizationId: string,
+  token: string,
+  input: {
+    phone: string
+    email?: string | null
+    note?: string | null
+    shippingAddress: AddressInput
+  }
+): Promise<void> {
+  const cart = await requireOpenCart(organizationId, token)
+  await prisma.cart.update({
+    where: { id: cart.id },
+    data: {
+      phone: input.phone,
+      email: input.email || null,
+      note: input.note || null,
+      shippingAddress: input.shippingAddress,
+      billingAddress: input.shippingAddress,
+      shippingRateId: null,
+    },
+  })
+}
+
+/** How many items are in a cart, without pricing it. For the header's badge. */
+export async function countCartItems(
+  organizationId: string,
+  token: string
+): Promise<number> {
+  const result = await prisma.cartLine.aggregate({
+    where: { cart: { token, organizationId, completedAt: null } },
+    _sum: { quantity: true },
+  })
+  return result._sum.quantity ?? 0
 }
 
 /** Attaches a cart to a customer on login, so it survives the session. */

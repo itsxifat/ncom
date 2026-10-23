@@ -2,12 +2,18 @@ import { NextResponse } from 'next/server'
 import { cookies, headers } from 'next/headers'
 import { z } from 'zod'
 import { offerOrderSchema } from '@/lib/validation/offerOrder'
-import { placeOfferOrder } from '@/server/services/offerOrderService'
+import {
+  OrderFormAnswerError,
+  placeOfferOrder,
+} from '@/server/services/offerOrderService'
 import { getStoreForSeoRoutes } from '@/server/services/publishService'
 import { queuePurchaseConversion } from '@/server/services/trackingService'
 import { checkRateLimit, getClientIp } from '@/lib/rate-limit'
 import { tenantSubdomain } from '@/lib/tenant-host'
 import { env } from '@/lib/env'
+import { latinDigits } from '@/modules/sections/language'
+import { checkoutIssueMessage } from '@/modules/storefront/checkout-shared'
+import { storeText } from '@/modules/storefront/i18n'
 
 /**
  * Takes an order from a landing page's cash-on-delivery form.
@@ -57,6 +63,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Store not found' }, { status: 404 })
   }
 
+  // The order form shows whatever this replies, so it replies in the page's
+  // language. English keeps its precise wording; a Bangla page gets the shop
+  // dictionary's sentences, because "A valid phone number is required" in red
+  // on a Bangla form helps nobody who cannot read it.
+  const text = storeText(store.theme)
+  const errors = text.words.errors
+  const english = text.language === 'en'
+
   const ip = await getClientIp()
   const [perIp, perStore] = await Promise.all([
     checkRateLimit(`offer-order:ip:${ip}`, IP_LIMIT, IP_WINDOW_SECONDS),
@@ -71,7 +85,11 @@ export async function POST(request: Request) {
     const retryAfter =
       perIp.retryAfterSeconds ?? perStore.retryAfterSeconds ?? 60
     return NextResponse.json(
-      { error: 'Too many orders from here. Please try again shortly.' },
+      {
+        error: english
+          ? 'Too many orders from here. Please try again shortly.'
+          : errors.tooManyAttemptsWait,
+      },
       { status: 429, headers: { 'Retry-After': String(retryAfter) } }
     )
   }
@@ -81,16 +99,21 @@ export async function POST(request: Request) {
     body = await parseBody(request)
   } catch {
     return NextResponse.json(
-      { error: 'Could not read that submission' },
+      { error: english ? 'Could not read that submission' : errors.invalid },
       { status: 400 }
     )
   }
 
-  const parsed = offerOrderSchema.safeParse(body)
+  const parsed = offerOrderSchema.safeParse(withLatinPhone(body))
   if (!parsed.success) {
+    const issue = parsed.error.issues[0]
     return NextResponse.json(
       {
-        error: firstMessage(parsed.error),
+        error: issue
+          ? checkoutIssueMessage(issue, text)
+          : english
+            ? 'Please check the form and try again'
+            : errors.invalid,
         fields: z.treeifyError(parsed.error),
       },
       { status: 400 }
@@ -101,7 +124,11 @@ export async function POST(request: Request) {
   // stale cached form or someone probing, and neither should create an order.
   if (parsed.data.storeId !== store.id) {
     return NextResponse.json(
-      { error: 'This form belongs to a different store' },
+      {
+        error: english
+          ? 'This form belongs to a different store'
+          : errors.couldNotPlace,
+      },
       { status: 400 }
     )
   }
@@ -135,14 +162,49 @@ export async function POST(request: Request) {
       tracking,
     })
   } catch (cause) {
+    // One of the merchant's own questions left blank, or answered with
+    // something it does not offer. Named, in the page's language, so the buyer
+    // knows which box to fill in; nothing was reserved for them yet.
+    if (cause instanceof OrderFormAnswerError) {
+      return NextResponse.json(
+        {
+          error:
+            cause.reason === 'missing'
+              ? errors.answerQuestion(cause.question)
+              : errors.chooseAnAnswer(cause.question),
+        },
+        { status: 400 }
+      )
+    }
     // Checkout failures here are the buyer's business — "out of stock", "we do
     // not ship to that address" — so the message is passed through rather than
-    // flattened, and anything unexpected is not.
-    const message =
-      cause instanceof Error ? cause.message : 'Could not place the order'
+    // flattened, on a page that speaks the language it is written in. A Bangla
+    // page gets its own sentence instead, as the store checkout does.
+    const message = !english
+      ? errors.couldNotPlace
+      : cause instanceof Error
+        ? cause.message
+        : 'Could not place the order'
     console.error(`Offer order failed for store ${store.id}:`, cause)
     return NextResponse.json({ error: message }, { status: 400 })
   }
+}
+
+/**
+ * The submission with its phone number written in 0-9.
+ *
+ * A buyer on a Bangla keyboard types "০১৭১২৩৪৫৬৭৮". It is a real number, but
+ * stored like that the courier booking and the fraud check — which read
+ * digits as 0-9 — find no number in it at all, so it is converted before the
+ * order is validated and saved. Done here rather than in the form so a
+ * merchant's hand-written `<form method="post">` is covered too.
+ */
+function withLatinPhone(body: unknown): unknown {
+  if (!body || typeof body !== 'object') return body
+  const phone = (body as { phone?: unknown }).phone
+  return typeof phone === 'string'
+    ? { ...body, phone: latinDigits(phone) }
+    : body
 }
 
 /**
@@ -238,8 +300,4 @@ async function parseBody(request: Request): Promise<unknown> {
  */
 function subdomainFromHost(host: string): string | null {
   return tenantSubdomain(host, env.ROOT_DOMAIN)
-}
-
-function firstMessage(error: z.ZodError): string {
-  return error.issues[0]?.message ?? 'Please check the form and try again'
 }

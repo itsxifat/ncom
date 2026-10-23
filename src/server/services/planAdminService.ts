@@ -111,6 +111,8 @@ function planData(input: PlanFormInput) {
     fairUseNote: input.fairUseNote || null,
     enforceTrafficCap: input.enforceTrafficCap,
     enforceVisitorCap: input.enforceVisitorCap,
+    aiMonthlyCredits: input.aiMonthlyCredits,
+    aiStartCredits: input.aiStartCredits,
   }
 }
 

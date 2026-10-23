@@ -7,6 +7,8 @@ import { Footer } from '@/components/marketing/footer'
 import { CodeBlock } from '@/components/marketing/code-block'
 import { API_SCOPES } from '@/server/services/apiKeyService'
 import { WEBHOOK_TOPICS } from '@/server/services/webhookService'
+import { MCP_TOOLS } from '@/server/mcp/tools'
+import { HOOK_REFERENCE } from '@/modules/sections/customcode/hooks'
 
 export const metadata: Metadata = {
   title: 'Product source & API — NCOM developer documentation',
@@ -44,6 +46,8 @@ const NAV_SECTIONS = [
   { id: 'orders', label: 'Orders' },
   { id: 'courier', label: 'Courier automation' },
   { id: 'webhooks', label: 'Webhooks' },
+  { id: 'ai-editors', label: 'AI code editors (MCP)' },
+  { id: 'custom-code', label: 'Custom code that sells' },
   { id: 'errors', label: 'Errors & limits' },
 ]
 
@@ -1151,6 +1155,9 @@ v1 = hex( hmac_sha256( secret, "<timestamp>" + "." + "<raw request body>" ) )`}
     "paymentMethod": "cash_on_delivery",
     "status": "pending",
     "note": null,
+    "formAnswers": [
+      { "question": "Which size do you want?", "answer": "M" }
+    ],
     "campaign": {
       "pageId": "clx5p1q2r3000",
       "pageTitle": "Winter shirts",
@@ -1723,6 +1730,109 @@ def ncom_webhook():
                 resume. Every attempt is listed there with its status code and
                 error, and can be re-sent by hand.
               </P>
+            </Section>
+
+            <Section id="ai-editors" title="AI code editors (MCP)">
+              <P>
+                NCOM is a Model Context Protocol server. Connect Cursor, Claude
+                Code, VS Code, Windsurf or any MCP client, and its AI can read a
+                workspace&rsquo;s websites and build landing pages and store
+                pages from NCOM&rsquo;s own blocks — which the merchant then
+                keeps editing with drag and drop.
+              </P>
+              <P>
+                The server is <Code>{`${baseUrl}/api/mcp`}</Code>, over
+                Streamable HTTP (single JSON responses, no sessions).
+                Authenticate with an API key carrying <Code>SITES_READ</Code>,
+                plus <Code>SITES_WRITE</Code> to change anything.{' '}
+                <strong>Settings → AI code editors</strong> makes such a key and
+                the setup snippet for each editor in one click.
+              </P>
+              <CodeBlock
+                title="Claude Code"
+                language="bash"
+                code={`claude mcp add --transport http ncom ${baseUrl}/api/mcp \\
+  --header "Authorization: Bearer $NCOM_API_KEY"`}
+              />
+              <Callout title="Editors draft; people publish">
+                Everything an editor writes is a draft. Publishing is recorded
+                against the person who did it, so no key can publish: tools
+                return a builder link, and the merchant reviews the draft and
+                presses Publish.
+              </Callout>
+              <H3>Tools</H3>
+              <Table
+                head={['Tool', 'Needs', 'What it does']}
+                rows={MCP_TOOLS.map((tool) => [
+                  <Code key="name">{tool.name}</Code>,
+                  tool.write ? 'SITES_WRITE' : 'SITES_READ',
+                  tool.description.split('. ')[0]!.replace(/\.$/, '') + '.',
+                ])}
+              />
+              <H3>The design format</H3>
+              <P>
+                Designs are JSON: a site (<Code>ncom/site@1</Code>) or a page (
+                <Code>ncom/page@1</Code>), each a list of sections that name a
+                block and set its fields. <Code>get_design_guide</Code> returns
+                the full format, the rules and every block&rsquo;s fields,
+                generated from the blocks themselves. Designs are repaired
+                rather than rejected — an over-long headline is shortened, an
+                unknown field ignored — and every tool reports what it changed,
+                so the calling model can correct itself.
+              </P>
+              <P>
+                The same format powers the builder&rsquo;s{' '}
+                <strong>Use your own AI</strong> option: merchants copy the
+                guide as a prompt into ChatGPT, Gemini or Claude and paste the
+                answer back, with no key at all.
+              </P>
+            </Section>
+
+            <Section id="custom-code" title="Custom code that sells">
+              <P>
+                A <strong>Custom code</strong> block draws your own HTML and CSS
+                exactly as written — a designer&rsquo;s section, or one an AI
+                wrote. Scripts, forms and click handlers are removed, so a
+                design cannot run code on your shop. It stays connected to the
+                shop through <Code>data-ncom-*</Code> attributes instead: put
+                one on an ordinary element and NCOM writes the live figure into
+                it, or makes it order, add to the cart or check out.
+              </P>
+              <CodeBlock
+                title="A landing page's offer card"
+                language="html"
+                code={`<div class="card">
+  <h3 data-ncom-name="combo">Combo pack</h3>
+  <p>
+    <strong data-ncom-price="combo">৳990</strong>
+    <s data-ncom-regular-price="combo">৳1,200</s>
+  </p>
+  <a href="#order" data-ncom-order="combo">Order the combo</a>
+</div>`}
+              />
+              <P>
+                On a landing page the value is an offer&rsquo;s key (or its
+                name); leave it empty for the page&rsquo;s main offer. On a
+                store it is a product&rsquo;s handle — the last part of its
+                address — or its id. The words inside each element are a
+                fallback, shown anywhere the page is not on NCOM, such as your
+                AI&rsquo;s own preview. A value that names nothing is left as
+                written, and the builder outlines it in orange.
+              </P>
+              <Table
+                head={['Attribute', 'Landing page', 'Store']}
+                rows={HOOK_REFERENCE.map((hook) => [
+                  <Code key="attribute">{hook.attribute}</Code>,
+                  hook.landing ?? '—',
+                  hook.store ?? '—',
+                ])}
+              />
+              <Callout title="Change the words without the code">
+                In the builder, double-click any sentence in a custom-code
+                design to retype it, or a photo to swap it. The edit is written
+                into the HTML at exactly that place, and the rest of the code is
+                left as it was.
+              </Callout>
             </Section>
 
             <Section id="errors" title="Errors and limits">

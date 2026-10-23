@@ -1,16 +1,21 @@
 import { test, expect } from '@playwright/test'
 
 /**
- * The end-to-end path the whole app exists to support: register, start a
- * project from a template, edit it in the builder, publish it, and see the
- * published snapshot on the tenant's own subdomain. Depends on the seeded
- * "SaaS Launch" template (see prisma/seed.ts) — run `prisma db seed` first.
+ * The path the product exists for: a new merchant registers, makes an online
+ * store from a template, sees it in the builder, publishes it, and finds it
+ * live on its own subdomain.
+ *
+ * Needs nothing seeded. Templates are code (modules/templates), so the design
+ * the merchant picks and the headline asserted below come from the same file,
+ * and a store with no products yet still publishes — its grids simply wait.
  */
-test('register, create from template, edit, publish, view live', async ({
+test('register, make a store from a template, publish, view live', async ({
   page,
 }) => {
   const stamp = Date.now()
   const email = `e2e-${stamp}@example.com`
+  const storeName = `E2E Store ${stamp}`
+  const headline = 'Everything you need, all in one place'
 
   await test.step('register', async () => {
     await page.goto('/register')
@@ -21,51 +26,42 @@ test('register, create from template, edit, publish, view live', async ({
     await expect(page).toHaveURL(/\/dashboard/)
   })
 
-  await test.step('start a project from the seeded template', async () => {
-    await page.goto('/templates')
-    const templateCard = page
-      .locator('[data-slot="template-tile"]')
-      .filter({ hasText: 'SaaS Launch' })
-    await expect(templateCard).toBeVisible()
-
-    await templateCard.getByRole('button', { name: 'Use template' }).click()
-
-    await expect(page).toHaveURL(/\/projects\/new\?template=/)
-    await page.getByLabel('Project name').fill(`E2E Project ${stamp}`)
-    await page.getByRole('button', { name: 'Create project' }).click()
-    await expect(page).toHaveURL(/\/projects\/[a-z0-9]+$/)
+  await test.step('make an online store from the Essentials design', async () => {
+    await page.goto('/stores/new')
+    await page.getByRole('button', { name: /Online store/ }).click()
+    await expect(page.getByText('Essentials')).toBeVisible()
+    await page.getByRole('button', { name: 'Use this design' }).first().click()
+    await page.getByLabel('Store name').fill(storeName)
+    await page.getByRole('button', { name: /Create and start editing/ }).click()
+    await expect(page).toHaveURL(/\/pages\/[a-z0-9]+\/edit$/)
   })
 
-  const subdomain = await test.step('read the assigned subdomain', async () => {
-    const text = await page.getByText(/\.ncom\.app$/).textContent()
-    const value = text?.replace('.ncom.app', '').trim()
-    if (!value) throw new Error('Could not read project subdomain')
-    return value
+  await test.step('the builder shows the template, header and all', async () => {
+    const canvas = page.frameLocator('iframe[title="Page canvas"]')
+    await expect(canvas.getByText(headline)).toBeVisible()
+    await expect(canvas.getByText(storeName).first()).toBeVisible()
+    await expect(page.getByText('Top of every page')).toBeVisible()
   })
 
-  await test.step('open the builder and confirm sections render', async () => {
-    await page.getByRole('button', { name: 'Edit' }).first().click()
-    await expect(page.getByText('Hero', { exact: true })).toBeVisible()
+  await test.step('publish, past the check for unfinished parts', async () => {
+    await page.getByRole('button', { name: /^Publish/ }).click()
+    // The template's reviews are examples, and Publish says so first. A
+    // merchant may know better, so the way on is one click.
     await expect(
-      page
-        .frameLocator('iframe')
-        .getByText('Ship a landing page your customers actually believe')
+      page.getByRole('heading', { name: 'Before you publish' })
     ).toBeVisible()
-    await page.getByRole('button', { name: '← Back' }).click()
+    await expect(
+      page.getByText('The example review is still showing')
+    ).toBeVisible()
+    await page.getByRole('button', { name: 'Publish anyway' }).click()
+    await expect(page.getByRole('button', { name: 'Published' })).toBeVisible()
   })
 
-  await test.step('publish', async () => {
-    await page.getByRole('button', { name: 'Page actions' }).first().click()
-    await page.getByRole('menuitem', { name: 'Publish', exact: true }).click()
-    await expect(page.getByText('PUBLISHED')).toBeVisible()
-  })
-
-  await test.step('view the published page on its own subdomain', async () => {
+  await test.step('view the store on its own subdomain', async () => {
     const base = new URL(page.url())
-    const publicUrl = `${base.protocol}//${subdomain}.${base.host}/`
-    await page.goto(publicUrl)
-    await expect(
-      page.getByText('Ship a landing page your customers actually believe')
-    ).toBeVisible()
+    const subdomain = `e2e-store-${stamp}`
+    await page.goto(`${base.protocol}//${subdomain}.${base.host}/`)
+    await expect(page.getByText(headline)).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Shop' }).first()).toBeVisible()
   })
 })

@@ -1,6 +1,7 @@
 import 'server-only'
 import { prisma } from '@/server/db/client'
 import { env } from '@/lib/env'
+import { readFormAnswers } from '@/lib/order-form-answers'
 import type {
   HandoffAddress,
   HandoffEnvelope,
@@ -58,6 +59,7 @@ const ORDER_SELECT = {
   shippingAddress: true,
   billingAddress: true,
   note: true,
+  formAnswers: true,
   offerKey: true,
   offerLabel: true,
   offerPriceCents: true,
@@ -160,6 +162,7 @@ export async function buildHandoffEnvelope(
     status: 'pending',
 
     note: order.note,
+    formAnswers: readFormAnswers(order.formAnswers),
 
     campaign: {
       pageId: order.page?.id ?? null,

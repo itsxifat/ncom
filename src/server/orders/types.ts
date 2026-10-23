@@ -149,6 +149,12 @@ export interface HandoffOrder {
   status: 'pending'
 
   note: string | null
+  /**
+   * The landing page's own order-form questions and what the buyer answered —
+   * a size, a name for the gift card — worded as the buyer saw them. Empty
+   * when the form asked nothing extra.
+   */
+  formAnswers: { question: string; answer: string }[]
   campaign: HandoffCampaign
   store: HandoffStore
 }

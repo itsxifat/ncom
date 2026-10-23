@@ -3,6 +3,7 @@ import { prisma } from '@/server/db/client'
 import { requireOrgAccess } from '@/server/auth/rbac'
 import { orderLineImageUrl, ORDER_LINE_IMAGE_SELECT } from './orderService'
 import { orderStatus } from '@/lib/order-status'
+import { readFormAnswers, type FormAnswer } from '@/lib/order-form-answers'
 import type { OrderWorkflowState } from '@/generated/prisma/enums'
 
 /**
@@ -64,6 +65,8 @@ export interface OrderLabel {
   discountCode: string | null
   shippingMethodTitle: string | null
   note: string | null
+  /** The landing page's own questions and what this buyer answered. */
+  formAnswers: FormAnswer[]
   /** The courier's own reference, once a parcel exists. */
   consignmentId: string | null
   courier: string | null
@@ -114,6 +117,7 @@ export async function getOrdersForLabels(
       discountCode: true,
       shippingMethodTitle: true,
       note: true,
+      formAnswers: true,
       organization: { select: { name: true } },
       store: { select: { name: true } },
       shipments: {
@@ -183,6 +187,7 @@ export async function getOrdersForLabels(
       discountCode: order.discountCode,
       shippingMethodTitle: order.shippingMethodTitle,
       note: order.note,
+      formAnswers: readFormAnswers(order.formAnswers),
       consignmentId: shipment?.consignmentId ?? null,
       courier: shipment
         ? shipment.provider === 'STEADFAST'

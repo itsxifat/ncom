@@ -44,6 +44,10 @@ const PROTECTED_PREFIXES = [
   '/scan',
   '/settings',
   '/stores',
+  // The template gallery's live thumbnails. Nothing in them is a tenant's,
+  // but they render inside the dashboard's create-a-site flow and have no
+  // reason to answer anyone who is not signed in.
+  '/template-preview',
   // Note this does NOT gate `/track/<token>`, the customer's own delivery page.
   // The prefix test is an exact match or a `/`-delimited descendant, so
   // `/tracking` and `/track/abc` are unrelated paths — which is what lets the

@@ -97,6 +97,18 @@ export const API_SCOPES: {
     label: 'Write webhooks',
     description: 'Create, update and delete webhook endpoints.',
   },
+  {
+    scope: 'SITES_READ',
+    label: 'Read websites',
+    description:
+      'Read your websites, pages, designs and themes. What an AI code editor needs to connect over MCP.',
+  },
+  {
+    scope: 'SITES_WRITE',
+    label: 'Build websites',
+    description:
+      'Create websites and change pages, layouts and themes — always as drafts. Publishing stays with you.',
+  },
 ]
 
 function hashToken(token: string): string {

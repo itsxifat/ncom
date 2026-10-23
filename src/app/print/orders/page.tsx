@@ -323,10 +323,21 @@ function Invoice({ label }: { label: OrderLabel }) {
         )}
       </section>
 
-      {label.note && (
-        <p className="mt-4 border-t border-neutral-300 pt-2 text-[9pt]">
-          Note: {label.note}
-        </p>
+      {(label.formAnswers.length > 0 || label.note) && (
+        <div className="mt-4 space-y-0.5 border-t border-neutral-300 pt-2 text-[9pt]">
+          {/* The page's own questions — a size, a name for the card — are
+              what the packer reads before they pack, so they print here. */}
+          {label.formAnswers.map((entry, index) => (
+            <p key={index} className="whitespace-pre-line">
+              <span className="font-semibold">
+                {entry.question}
+                {/[?:।]\s*$/.test(entry.question) ? '' : ':'}
+              </span>{' '}
+              {entry.answer}
+            </p>
+          ))}
+          {label.note && <p>Note: {label.note}</p>}
+        </div>
       )}
 
       <p className="mt-6 text-center text-[9pt]">

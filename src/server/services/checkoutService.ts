@@ -18,6 +18,7 @@ import { forwardOrder, loadOrderTarget } from '@/server/orders'
 import { verifyPayment } from './paymentService'
 import { scheduleCourierEvaluation } from './courierService'
 import type { PlaceOrderInput } from '@/lib/validation/cart'
+import type { FormAnswer } from '@/lib/order-form-answers'
 import type { TaxLine } from '@/lib/pricing'
 import type { Prisma } from '@/generated/prisma/client'
 import type { PaymentProvider } from '@/generated/prisma/enums'
@@ -125,6 +126,11 @@ export interface CampaignContext {
    * money is already inside `discountCents`.
    */
   giftVariants?: Map<string, number>
+  /**
+   * The buyer's answers to the page's own order-form questions, already checked
+   * against the page. Copied onto the order as `formAnswers`.
+   */
+  formAnswers?: FormAnswer[]
 }
 
 export async function placeOrder(
@@ -385,7 +391,15 @@ export async function placeOrder(
           shippingAddress: shippingAddress ?? undefined,
           billingAddress: cart.billingAddress ?? shippingAddress ?? undefined,
           shippingCountryCode: readCountryCode(shippingAddress),
-          shippingMethodTitle: campaign?.shippingTitle ?? undefined,
+          // A campaign names its own delivery; an ordinary cart names the rate
+          // the buyer picked, so the packing slip says "Inside Dhaka" rather
+          // than nothing.
+          shippingMethodTitle:
+            campaign?.shippingTitle ??
+            pricing.availableShippingRates.find(
+              (rate) => rate.id === cart.shippingRateId
+            )?.name ??
+            undefined,
           discountCode:
             cart.discountCode ??
             campaign?.discountCode ??
@@ -406,6 +420,12 @@ export async function placeOrder(
               ? Math.max(0, pricing.discountTotalCents)
               : 0,
           note: cart.note,
+          formAnswers: campaign?.formAnswers?.length
+            ? campaign.formAnswers.map(({ question, answer }) => ({
+                question,
+                answer,
+              }))
+            : undefined,
           lines: {
             create: cart.lines.flatMap((line) =>
               toOrderLines(

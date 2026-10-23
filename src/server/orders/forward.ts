@@ -446,6 +446,7 @@ function sampleEnvelope(organizationId: string): HandoffEnvelope {
       paymentMethod: 'cash_on_delivery',
       status: 'pending',
       note: 'This is a test order sent by NCOM. Nothing was bought.',
+      formAnswers: [{ question: 'Which size do you want?', answer: 'M' }],
       campaign: {
         pageId: null,
         pageTitle: 'Test campaign page',

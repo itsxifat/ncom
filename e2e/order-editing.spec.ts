@@ -288,7 +288,11 @@ test('edit a placed order: change quantity, add a product, and see stock move', 
       .getByRole('button', { name: new RegExp(`Cap ${stamp}`) })
       .first()
       .click()
-    await expect(page.getByText('New', { exact: true })).toBeVisible()
+    // In the editor: the order page behind it says "New" too, as the status
+    // of an order nobody has worked on yet.
+    await expect(
+      page.getByRole('dialog').getByText('New', { exact: true })
+    ).toBeVisible()
   })
 
   await test.step('save', async () => {
@@ -426,9 +430,9 @@ test('the order list colours rows by status and changes status inline', async ({
 
   await test.step('move it to Delivered from the list', async () => {
     await page
-      .getByRole('button', { name: /Delivery status: Processing/ })
+      .getByRole('button', { name: /Delivery status: Ready to ship/ })
       .click()
-    // `exact` matters: without it this also matches "Partially delivered".
+    // `exact` matters: without it this also matches "Partly delivered".
     await page.getByRole('menuitem', { name: 'Delivered', exact: true }).click()
 
     await expect(
@@ -618,7 +622,7 @@ test('a cancelled order reads as cancelled in the list, not only on its own page
     const row = rowFor(`#OLD${stamp}`)
     await expect(row.getByText('Cancelled')).toBeVisible()
     // And not under the status the pipeline was left on.
-    await expect(row.getByText('Processing')).toHaveCount(0)
+    await expect(row.getByText('Ready to ship')).toHaveCount(0)
     // Cancelled orders are not moved along by hand, so the row offers no menu.
     await expect(
       row.getByRole('button', { name: /Delivery status/ })
@@ -764,11 +768,11 @@ test('a line can be repriced for one order without touching the catalogue', asyn
         ORDER BY "createdAt" DESC LIMIT 1`,
       [orderId]
     )
-    // Whitespace-normalised: Intl separates a currency code from its amount
-    // with U+00A0, and an assertion typed with an ordinary space fails against
-    // a string that is entirely correct.
+    // Whitespace-normalised: Intl separates a currency from its amount with
+    // U+00A0 wherever it puts a space at all, and an assertion typed with an
+    // ordinary space fails against a string that is entirely correct.
     expect(edited.message.replace(/\s/g, ' ')).toContain(
-      'BDT 500.00 → BDT 450.00 each'
+      '৳500.00 → ৳450.00 each'
     )
   })
 })
