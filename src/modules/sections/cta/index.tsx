@@ -74,10 +74,16 @@ export const ctaSection: SectionDefinition<CtaContent> = {
   key: 'cta',
   name: 'Order button',
   category: 'Commerce',
+  // It jumps to the order form, which only a landing page has; a store's
+  // buttons go to its products, and the banner blocks carry their own.
+  sites: ['LANDING'],
   description:
     'A call-to-action button that jumps to the order form. Add as many as you like.',
   schema: ctaContentSchema,
   defaultContent: ctaDefaultContent,
+  translations: {
+    bn: { text: 'অর্ডার করুন — ক্যাশ অন ডেলিভারি' },
+  },
   editorFields: [
     { type: 'richtext', name: 'text', label: 'Button text' },
     { type: 'richtext', name: 'note', label: 'Small note under the button' },

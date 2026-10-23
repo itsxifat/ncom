@@ -153,6 +153,13 @@ export const heroSection: SectionDefinition<HeroContent> = {
   description: 'Full-width banner with headline and call-to-action.',
   schema: heroContentSchema,
   defaultContent: heroDefaultContent,
+  translations: {
+    bn: {
+      title: 'এখানে আপনার মূল শিরোনাম লিখুন',
+      subtitle: 'কেন কিনবে — এক লাইনে বলুন।',
+      ctaText: 'এখনই অর্ডার করুন',
+    },
+  },
   editorFields: [
     { type: 'image', name: 'image', label: 'Background image' },
     { type: 'image', name: 'mobileImage', label: 'Mobile image' },

@@ -70,6 +70,15 @@ export const trustSection: SectionDefinition<TrustContent> = {
   description: 'A strip of reassurance points (delivery, returns, COD).',
   schema: trustContentSchema,
   defaultContent: trustDefaultContent,
+  translations: {
+    bn: {
+      items: [
+        { text: 'ক্যাশ অন ডেলিভারি' },
+        { text: '৭ দিনে সহজ রিটার্ন' },
+        { text: 'সারা বাংলাদেশে ডেলিভারি' },
+      ],
+    },
+  },
   editorFields: [
     {
       type: 'array',

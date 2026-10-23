@@ -26,6 +26,15 @@ export interface PageTheme {
   bodyScale?: string | null
   sectionSpacing?: string | null
   showStickyHeader?: boolean | null
+
+  /**
+   * The language the storefront speaks to shoppers (`'en'` | `'bn'`) and how
+   * it writes numbers (`'latin'` | `'bangla'`). See `language.ts`. Optional
+   * for the same reason as the fields above: older snapshots lack them and
+   * read as English with Latin digits.
+   */
+  language?: string | null
+  numerals?: string | null
 }
 
 /**
@@ -116,6 +125,12 @@ export interface SectionConfig {
   extras?: ExtraElement[]
 
   // ── Advanced ────────────────────────────────────────────────────────
+  /**
+   * What the merchant named this block in the layers list, for telling apart
+   * two blocks of the same kind. Only the editor reads it; the page never
+   * shows it. See `sectionLabel` in the builder.
+   */
+  label?: string
   /** Becomes the element id, so nav links can jump to this section. */
   anchorId?: string
   /** Extra class names, for use with the store's custom CSS. */

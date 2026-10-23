@@ -21,7 +21,9 @@ import { isColor } from './elementStyle'
  */
 
 /** Tag → the attributes it may keep. Everything else is dropped. */
-const ALLOWED_TAGS: Record<string, readonly string[]> = {
+type TagAllowList = Record<string, readonly string[]>
+
+const ALLOWED_TAGS: TagAllowList = {
   b: [],
   strong: [],
   i: [],
@@ -36,8 +38,31 @@ const ALLOWED_TAGS: Record<string, readonly string[]> = {
   a: ['href', 'target', 'rel', 'style'],
 }
 
+/**
+ * The inline set plus the structure a product description is written in.
+ *
+ * A description is the one piece of copy on a storefront that arrives already
+ * formatted — typed into the product form as paragraphs and lists, or sent by
+ * the merchant's own website as the HTML their shop renders. Squashing it to
+ * inline tags would run every paragraph of a size guide into one. Still an
+ * allow-list: no images, no tables, no iframes, nothing that can lay itself
+ * out over the page.
+ */
+const DESCRIPTION_TAGS: TagAllowList = {
+  ...ALLOWED_TAGS,
+  p: [],
+  ul: [],
+  ol: [],
+  li: [],
+  h2: [],
+  h3: [],
+  h4: [],
+  blockquote: [],
+  hr: [],
+}
+
 /** Tags that never have a closing partner. */
-const VOID_TAGS = new Set(['br'])
+const VOID_TAGS = new Set(['br', 'hr'])
 
 /**
  * Inline CSS properties a merchant may set on a run of text.
@@ -118,16 +143,25 @@ function sanitizeStyle(raw: string): string | undefined {
   return out.length ? out.join(';') : undefined
 }
 
-const ATTRIBUTE_RE = /([a-zA-Z-]+)\s*=\s*("([^"]*)"|'([^']*)'|([^\s"'>]+))/g
+// The value is optional in the pattern and a name without one is skipped
+// below. With `=` required, a long run of letters and no `=` was retried from
+// each of its letters in turn, which is quadratic in the run's length.
+const ATTRIBUTE_RE =
+  /([a-zA-Z-]+)(?:\s*=\s*("([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g
 
-function sanitizeAttributes(tag: string, raw: string): string {
-  const allowed = ALLOWED_TAGS[tag]!
+function sanitizeAttributes(
+  tag: string,
+  raw: string,
+  tags: TagAllowList
+): string {
+  const allowed = tags[tag]!
   if (!allowed.length) return ''
   const out: string[] = []
   let match: RegExpExecArray | null
 
   ATTRIBUTE_RE.lastIndex = 0
   while ((match = ATTRIBUTE_RE.exec(raw))) {
+    if (match[2] === undefined) continue
     const name = match[1]!.toLowerCase()
     if (!allowed.includes(name)) continue
     const value = match[3] ?? match[4] ?? match[5] ?? ''
@@ -162,6 +196,80 @@ function sanitizeAttributes(tag: string, raw: string): string {
  * before rich text existed has no tags, so it comes back as the same words.
  */
 export function sanitizeRichText(input: unknown): string {
+  return sanitizeWith(input, ALLOWED_TAGS)
+}
+
+/**
+ * Sanitised HTML for a product description.
+ *
+ * A description with no markup at all is a merchant's plain text, typed with
+ * line breaks they expect to see: blank lines become paragraphs and single
+ * breaks stay breaks, rather than the whole thing collapsing into one block.
+ */
+export function sanitizeDescription(input: unknown): string {
+  if (typeof input !== 'string' || !input.trim()) return ''
+  if (!/<[a-zA-Z]/.test(input)) {
+    return input
+      .trim()
+      .split(/\n\s*\n/)
+      .map(
+        (paragraph) =>
+          `<p>${escapeText(paragraph.trim()).replace(/\n/g, '<br>')}</p>`
+      )
+      .join('')
+  }
+  return sanitizeWith(input, DESCRIPTION_TAGS)
+}
+
+/**
+ * Where a tag ends, as a lookup: given the index just past a tag's name, the
+ * index just past its closing `>`, or -1 when it has none.
+ *
+ * Quoted attribute values are read as units so a `>` inside one cannot end
+ * the tag early — the classic way a naive `<[^>]*>` scanner is split in half
+ * and made to emit an attacker's markup — and a quote that never closes means
+ * the tag never ends. Walked by hand rather than matched by a pattern: as a
+ * pattern retried at every `<`, `<a<a<a…` with no `>` read to the end of the
+ * input once per `<`, half a second for one field. A walk from any position
+ * always takes the same path, so its answer is written down at every position
+ * on it and no later walk crosses that stretch again.
+ */
+function tagEndFinder(source: string): (from: number) => number {
+  // 0 = not walked yet, -1 = never ends, otherwise the index past the `>`.
+  const known = new Int32Array(source.length + 1)
+  return (from) => {
+    let i = from
+    let end = -1
+    while (i < source.length) {
+      if (known[i] !== 0) {
+        end = known[i]!
+        break
+      }
+      const char = source[i]
+      if (char === '>') {
+        end = i + 1
+        break
+      }
+      if (char === '"' || char === "'") {
+        const close = source.indexOf(char, i + 1)
+        if (close === -1) break
+        i = close + 1
+      } else {
+        i += 1
+      }
+    }
+    // The same path again, writing the answer down at every step of it.
+    for (let j = from; j < i;) {
+      known[j] = end
+      const char = source[j]
+      j = char === '"' || char === "'" ? source.indexOf(char, j + 1) + 1 : j + 1
+    }
+    if (i < source.length) known[i] = end
+    return end
+  }
+}
+
+function sanitizeWith(input: unknown, tags: TagAllowList): string {
   if (typeof input !== 'string' || !input) return ''
   // A cap, because this runs per element per render and the cost is linear in
   // input length. Content schemas already bound their own fields; this bounds
@@ -172,17 +280,25 @@ export function sanitizeRichText(input: unknown): string {
   const open: string[] = []
   let cursor = 0
 
-  // Quoted attribute values are matched as units so a `>` inside one cannot
-  // end the tag early — the classic way a naive `<[^>]*>` scanner is split in
-  // half and made to emit an attacker's markup.
-  const TOKEN_RE = /<\/?([a-zA-Z][a-zA-Z0-9]*)((?:[^>"']|"[^"]*"|'[^']*')*)>/g
+  // The start of a tag: `<`, an optional `/`, its name. Where it ends —
+  // quoted values and all — is `tagEnd`'s job.
+  const TAG_NAME_RE = /<\/?([a-zA-Z][a-zA-Z0-9]*)/g
+  const tagEnd = tagEndFinder(source)
   let match: RegExpExecArray | null
 
-  while ((match = TOKEN_RE.exec(source))) {
-    const token = match[0]
-    const rawName = match[1]!
-    const rawAttributes = match[2] ?? ''
+  while ((match = TAG_NAME_RE.exec(source))) {
     const index = match.index
+    const end = tagEnd(TAG_NAME_RE.lastIndex)
+    if (end === -1) {
+      // Not a tag after all, so this `<` is text; look again from just
+      // after it.
+      TAG_NAME_RE.lastIndex = index + 1
+      continue
+    }
+    TAG_NAME_RE.lastIndex = end
+    const token = source.slice(index, end)
+    const rawName = match[1]!
+    const rawAttributes = source.slice(index + match[0].length, end - 1)
 
     if (index > cursor) out.push(escapeText(source.slice(cursor, index)))
     cursor = index + token.length
@@ -191,7 +307,7 @@ export function sanitizeRichText(input: unknown): string {
     // An unknown tag is dropped entirely — including its name — rather than
     // escaped and shown. A merchant who pasted `<div>` from Word wants the
     // words inside it, not to see the markup rendered back at them.
-    if (!Object.prototype.hasOwnProperty.call(ALLOWED_TAGS, tag)) continue
+    if (!Object.prototype.hasOwnProperty.call(tags, tag)) continue
 
     if (token.startsWith('</')) {
       // A closing tag with nothing open matching it is stray markup; dropping
@@ -217,7 +333,7 @@ export function sanitizeRichText(input: unknown): string {
     // payload.
     if (open.length >= 24) continue
 
-    out.push(`<${tag}${sanitizeAttributes(tag, rawAttributes)}>`)
+    out.push(`<${tag}${sanitizeAttributes(tag, rawAttributes, tags)}>`)
     open.push(tag)
   }
 
@@ -235,7 +351,10 @@ export function richTextToPlain(input: unknown): string {
   return (
     input
       .replace(/<br\s*\/?>/gi, ' ')
-      .replace(/<[^>]*>/g, '')
+      // A tag ends at a `>`, so only the text up to the last one can hold
+      // one. Stopping there keeps a run of `<` with no `>` from sending the
+      // pattern to the end of the input once per `<`.
+      .replace(/^[\s\S]*>/, (tags) => tags.replace(/<[^>]*>/g, ''))
       .replace(/&nbsp;/g, ' ')
       .replace(/&lt;/g, '<')
       .replace(/&gt;/g, '>')

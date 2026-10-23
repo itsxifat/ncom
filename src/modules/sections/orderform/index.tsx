@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import type { SectionDefinition, SectionRendererProps } from '../registry'
 import { OrderFormClient } from './OrderFormClient'
+import { orderQuestionsSchema } from './questions'
 
 /**
  * Cash-on-delivery order form.
@@ -33,6 +34,13 @@ export const orderformContentSchema = z.object({
   // needs. These toggle the optional extras.
   askEmail: z.boolean().default(true),
   askNote: z.boolean().default(false),
+
+  /**
+   * The merchant's own questions — a size, a name for the gift card, a time
+   * someone is home — asked after the address and copied onto the order. See
+   * `questions.ts`.
+   */
+  questions: orderQuestionsSchema,
 
   /**
    * Every word the form says, as fields.
@@ -114,11 +122,81 @@ export const orderformSection: SectionDefinition<OrderformContent> = {
   // to buy is not a landing page, and two order forms is two carts on one
   // funnel.
   singleton: true,
+  // A store sells through its cart. A second way to buy on the same site is a
+  // second funnel, and the two would report against each other.
+  sites: ['LANDING'],
   schema: orderformContentSchema,
   defaultContent: orderformDefaultContent,
+  translations: {
+    bn: {
+      title: 'অর্ডার করুন — ক্যাশ অন ডেলিভারি',
+      submitText: 'অর্ডার কনফার্ম করুন',
+      packageLabel: 'আপনার প্যাকেজ বেছে নিন',
+      nameLabel: 'আপনার নাম *',
+      phoneLabel: 'মোবাইল নম্বর *',
+      emailLabel: 'ইমেইল (ঐচ্ছিক)',
+      addressLabel: 'সম্পূর্ণ ঠিকানা *',
+      addressPlaceholder: 'বাসা, রোড, এলাকা, থানা',
+      cityLabel: 'শহর / জেলা *',
+      zoneLabel: 'ডেলিভারি এলাকা',
+      noteLabel: 'বিশেষ নির্দেশনা (ঐচ্ছিক)',
+      couponLabel: 'ডিসকাউন্ট কোড (ঐচ্ছিক)',
+      couponHint: 'অর্ডার করার সময় কোডটি যোগ হবে।',
+      deliveryLabel: 'ডেলিভারি চার্জ',
+      totalLabel: 'সর্বমোট',
+      trustPrimary: 'ক্যাশ অন ডেলিভারি',
+      trustSecondary: 'অগ্রিম কোনো টাকা লাগবে না',
+      successTitle: 'ধন্যবাদ! আপনার অর্ডারটি কনফার্ম হয়েছে।',
+      successMessage:
+        'অর্ডার নিশ্চিত করতে আমরা শীঘ্রই আপনাকে কল করব। ফোনটি কাছে রাখুন।',
+      orderNumberLabel: 'অর্ডার নম্বর',
+      amountLabel: 'ডেলিভারির সময় পরিশোধ করবেন',
+    },
+  },
   editorFields: [
     { type: 'richtext', name: 'title', label: 'Heading' },
     { type: 'richtext', name: 'subtitle', label: 'Subheading' },
+
+    { type: 'heading', name: 'divider:questions', label: 'Your own questions' },
+    {
+      type: 'array',
+      name: 'questions',
+      label: 'Extra questions',
+      description:
+        'Extra questions the form asks after the address — a size, a colour, a name for a gift card, when someone is home. The answers are saved on the order. Add them only when the owner asks for them; name, phone and address are always asked already.',
+      itemFields: [
+        {
+          type: 'text',
+          name: 'label',
+          label: 'Question',
+          placeholder: 'Which size do you want?',
+        },
+        {
+          type: 'select',
+          name: 'kind',
+          label: 'How it is answered',
+          options: [
+            { value: 'text', label: 'A short answer' },
+            { value: 'longtext', label: 'A longer answer' },
+            { value: 'choice', label: 'Pick one of your options' },
+          ],
+        },
+        {
+          type: 'stringArray',
+          name: 'options',
+          label: 'Options',
+          showWhen: { field: 'kind', equals: 'choice' },
+        },
+        {
+          type: 'text',
+          name: 'placeholder',
+          label: 'Example shown in the box',
+          placeholder: 'e.g. after 6pm',
+          showWhen: { field: 'kind', equals: ['text', 'longtext'] },
+        },
+        { type: 'boolean', name: 'required', label: 'Must be answered' },
+      ],
+    },
 
     { type: 'heading', name: 'divider:copy', label: 'What the form says' },
     { type: 'text', name: 'packageLabel', label: 'Package picker heading' },
@@ -307,6 +385,21 @@ export const orderformSection: SectionDefinition<OrderformContent> = {
       label: 'Note label',
       kind: 'text',
       contentField: 'noteLabel',
+    },
+    // The merchant's own questions. Their answer boxes are `input`s like every
+    // other, numbered after the form's own seven.
+    {
+      key: 'questionLabel',
+      label: 'Question',
+      kind: 'text',
+      repeated: true,
+      contentField: 'questions[].label',
+    },
+    {
+      key: 'questionOption',
+      label: 'Answer option',
+      kind: 'button',
+      repeated: true,
     },
     // One key for every text box, so "make the inputs rounder" is one edit.
     { key: 'input', label: 'Input box', kind: 'container', repeated: true },

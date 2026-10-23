@@ -3,6 +3,7 @@ import type { Metadata } from 'next'
 import { getPageByPreviewToken } from '@/server/services/pageService'
 import { PageRenderer } from '@/modules/sections/PageRenderer'
 import { getStorefrontCommerce } from '@/server/services/offerService'
+import { StoreDraftPreview } from '@/server/storefront/preview'
 
 export const metadata: Metadata = {
   title: 'Preview',
@@ -24,6 +25,17 @@ export default async function TokenPreviewPage({
   }
 
   if (!page.store.theme) notFound()
+
+  if (page.store.kind === 'STORE') {
+    return (
+      <div className="flex min-h-screen flex-col">
+        <div className="bg-foreground text-background px-4 py-2 text-center text-xs font-medium">
+          Draft preview — not published, not indexed by search engines.
+        </div>
+        <StoreDraftPreview page={page} />
+      </div>
+    )
+  }
 
   const commerce = await getStorefrontCommerce(
     page.id,

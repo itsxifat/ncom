@@ -8,6 +8,13 @@ import type {
   PublicPromotions,
   PublicShipping,
 } from '@/lib/offers/types'
+import type {
+  PageRole,
+  SiteKind,
+  StorefrontContext,
+  StorefrontProductQuery,
+} from './storefront'
+import type { SiteLanguage } from './language'
 
 export interface SectionRendererProps<T> {
   content: T
@@ -45,6 +52,14 @@ export interface SectionRendererProps<T> {
    * will a customer see", so it must show exactly what the live page shows.
    */
   editing?: boolean
+  /**
+   * The shop around this block, on an online store.
+   *
+   * Undefined on a landing page, which has no catalogue to browse. A block
+   * that only makes sense in a store (a product grid, the header's cart) must
+   * still render something honest without it rather than assume it is there.
+   */
+  storefront?: StorefrontContext
 }
 
 /**
@@ -86,8 +101,61 @@ export interface SectionDefinition<T = unknown> {
    * order forms means two carts on one funnel.
    */
   singleton?: boolean
+  /**
+   * Which kinds of site offer this block. Unset means both.
+   *
+   * The order form is landing-only: a store sells through its cart, and a
+   * second, separate way to buy on the same site is two funnels that report
+   * against each other. The product blocks are store-only, because a landing
+   * page has no catalogue pages for them to link into.
+   */
+  sites?: SiteKind[]
+  /**
+   * Which pages it can be placed on. Unset means every page a visitor sees —
+   * standard pages, the product page and the catalogue page — but never the
+   * layout, which holds only the blocks made for it.
+   */
+  pageRoles?: PageRole[]
+  /**
+   * For layout blocks: whether it is drawn above every page or below it. The
+   * header and announcement bar sit on top, the footer underneath; that is
+   * decided by what the block is, not by where a merchant dragged it.
+   */
+  placement?: 'top' | 'bottom'
+  /**
+   * A block a page of this role cannot do without — the product page's
+   * product details, the catalogue page's product grid. It can be restyled and
+   * moved but not removed, because the page is meaningless without it.
+   */
+  requiredOn?: PageRole
+  /**
+   * The products this block shows, so the page can load them before it
+   * renders. See `StorefrontProductQuery` for why a block cannot fetch its own.
+   */
+  productQuery?: (content: T) => StorefrontProductQuery | null
+  /**
+   * Classes for the element that holds the block on the page.
+   *
+   * For the rare block whose behaviour belongs to its slot rather than its own
+   * markup: a sticky header has to stick its *container*, because a sticky
+   * element is confined to its parent and the parent here is exactly as tall
+   * as the header.
+   */
+  wrapperClassName?: (content: T) => string | undefined
+  /** Words people might search the block library with — "carousel", "banner". */
+  keywords?: string[]
   schema: ZodType<T>
   defaultContent: T
+  /**
+   * The block's starting words in another language, laid over
+   * `defaultContent` when the block is added to a site in that language.
+   *
+   * Only words: a translation that changed a layout or a number would make
+   * the same block look different depending on the language it was added in.
+   * Anything a translation leaves out keeps the English default, so a partial
+   * translation still produces a valid block.
+   */
+  translations?: Partial<Record<SiteLanguage, Partial<T>>>
   editorFields: FieldConfig[]
   /**
    * The individually styleable things this block draws.
@@ -126,6 +194,17 @@ import { trustSection } from './trust'
 import { faqSection } from './faq'
 import { orderformSection } from './orderform'
 import { dividerSection } from './divider'
+import { headerSection } from './header'
+import { announcementSection } from './announcement'
+import { footerSection } from './footer'
+import { productsSection } from './products'
+import { productDetailsSection } from './productdetails'
+import { productListingSection } from './productlisting'
+import { relatedProductsSection } from './relatedproducts'
+import { sliderSection } from './slider'
+import { categoriesSection } from './categories'
+import { promosSection } from './promos'
+import { customcodeSection } from './customcode'
 
 /**
  * The block library.
@@ -154,6 +233,21 @@ export const sectionRegistry = {
   faq: faqSection,
   orderform: orderformSection,
   divider: dividerSection,
+  // Both kinds of site: the merchant's own HTML and CSS, sanitised and
+  // drawn in a shadow root. See customcode/index.tsx.
+  customcode: customcodeSection,
+  // Online store blocks. Store-only (`sites`), and the layout, product and
+  // catalogue blocks are further limited to their own page (`pageRoles`).
+  announcement: announcementSection,
+  header: headerSection,
+  footer: footerSection,
+  slider: sliderSection,
+  categories: categoriesSection,
+  promos: promosSection,
+  products: productsSection,
+  productdetails: productDetailsSection,
+  productlisting: productListingSection,
+  relatedproducts: relatedProductsSection,
   // Each entry is a SectionDefinition<T> for its own content type; a
   // uniform type parameter here is structurally impossible (Renderer's
   // prop position is contravariant), so this is the standard escape hatch
@@ -209,9 +303,49 @@ export function isSectionKey(key: string): key is SectionKey {
   return Object.prototype.hasOwnProperty.call(sectionRegistry, key)
 }
 
+/**
+ * Whether a block belongs in the library for this page.
+ *
+ * One rule for the library, the canvas's "+" menus and the server-side check
+ * that refuses a section the page cannot hold, so the three cannot disagree.
+ */
+export function blockFitsPage(
+  definition: SectionDefinition,
+  site: SiteKind,
+  role: PageRole
+): boolean {
+  if (definition.sites && !definition.sites.includes(site)) return false
+  if (role === 'LAYOUT')
+    return definition.pageRoles?.includes('LAYOUT') ?? false
+  if (definition.pageRoles) return definition.pageRoles.includes(role)
+  return true
+}
+
+/**
+ * A block's defaults in a site's language: the English defaults with the
+ * block's translation for that language laid over them. A fresh copy, safe to
+ * mutate.
+ */
+export function localizedDefaults(
+  definition: Pick<SectionDefinition, 'defaultContent' | 'translations'>,
+  language: SiteLanguage = 'en'
+): Record<string, unknown> {
+  const base = structuredClone(definition.defaultContent) as Record<
+    string,
+    unknown
+  >
+  const translation =
+    language === 'en' ? undefined : definition.translations?.[language]
+  if (!translation) return base
+  return { ...base, ...structuredClone(translation as object) }
+}
+
 /** A fresh copy of a block's defaults, safe to mutate. */
-export function sectionDefaults(key: string): Record<string, unknown> {
+export function sectionDefaults(
+  key: string,
+  language: SiteLanguage = 'en'
+): Record<string, unknown> {
   const definition = getSectionDefinition(key)
   if (!definition) return {}
-  return structuredClone(definition.defaultContent) as Record<string, unknown>
+  return localizedDefaults(definition, language)
 }

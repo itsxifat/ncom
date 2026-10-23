@@ -56,6 +56,17 @@ export const faqSection: SectionDefinition<FaqContent> = {
   description: 'Expandable questions and answers.',
   schema: faqContentSchema,
   defaultContent: faqDefaultContent,
+  translations: {
+    bn: {
+      title: 'সচরাচর জিজ্ঞাসা',
+      items: [
+        {
+          q: 'ডেলিভারি পেতে কত দিন লাগে?',
+          a: 'ঢাকার ভেতরে ২–৩ দিন, ঢাকার বাইরে ৩–৫ দিন।',
+        },
+      ],
+    },
+  },
   editorFields: [
     { type: 'richtext', name: 'title', label: 'Heading' },
     {

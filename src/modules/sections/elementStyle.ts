@@ -365,8 +365,11 @@ export function styleDeclarations(style: ElementStyle | undefined): Decl[] {
   if (!style || typeof style !== 'object') return []
   const out: Decl[] = []
 
-  // Typography
-  if (style.fontFamily) out.push(['font-family', fontStack(style.fontFamily)])
+  // Typography. The type check is the grammar here: a family name is a string,
+  // and anything else in this field would otherwise reach `fontStack` and take
+  // the whole page down with it rather than just losing the one declaration.
+  if (typeof style.fontFamily === 'string' && style.fontFamily)
+    out.push(['font-family', fontStack(style.fontFamily)])
   const fontSize = num(style.fontSize, 1, 400)
   if (fontSize !== undefined) out.push(['font-size', `${fontSize}px`])
   const fontWeight = num(style.fontWeight, 100, 900)
@@ -833,6 +836,33 @@ const ANIMATION_KEYFRAMES = `
 @keyframes ncom-zoom-out{from{opacity:0;scale:1.15}to{opacity:1;scale:1}}
 @keyframes ncom-rise{from{opacity:0;translate:0 60px;scale:0.96}to{opacity:1;translate:0 0;scale:1}}
 `.replace(/\n/g, '')
+
+/**
+ * Every font family the element designs of these sections name, at any
+ * breakpoint or on hover — so the page can load the ones that are not bundled
+ * (see `FontStylesheet` in `theme.tsx`).
+ *
+ * The values are read from untrusted JSON, so anything that is not a string is
+ * skipped here; whether a string is a family worth loading is decided by
+ * `fontStylesheetHref`, the same rule that decides what `fontStack` resolves.
+ */
+export function elementFontFamilies(
+  sections: { elements?: ElementDesignMap | null }[]
+): string[] {
+  const names: string[] = []
+  for (const section of sections) {
+    const elements = section.elements
+    if (!elements || typeof elements !== 'object') continue
+    for (const design of Object.values(elements)) {
+      if (!design || typeof design !== 'object') continue
+      for (const state of [...STYLE_BREAKPOINTS, 'hover'] as const) {
+        const name = design[state]?.fontFamily
+        if (typeof name === 'string' && name) names.push(name)
+      }
+    }
+  }
+  return names
+}
 
 /** Whether any element on the page asked for an entrance animation. */
 export function pageUsesAnimation(

@@ -94,3 +94,80 @@ Two consequences worth remembering while writing a block:
   produces no declaration at all, so the block's classes and the page theme keep
   painting it — which is what makes the whole design layer safe to ship onto
   pages that already exist.
+
+## Online store blocks
+
+A site is a landing page or an online store (`SiteKind`), and a store page has
+a role (`PageRole`): a standard page, the shared layout, the product page
+design or the catalogue design. Four optional fields on a definition say where a
+block belongs; the block library, the canvas's "+" menus and the layers list
+all read them through `blockFitsPage` and `modules/builder/rules.ts`.
+
+- **`sites`** — which kinds of site offer it. The order form is landing-only;
+  the product blocks are store-only.
+- **`pageRoles`** — which pages it can be added to. Unset means every page a
+  visitor sees, never the layout.
+- **`placement`** — for layout blocks only: drawn above every page (`top`, the
+  header and announcement bar) or below it (`bottom`, the footer).
+- **`requiredOn`** — the page cannot do without it (product details on the
+  product page, the product list on the catalogue page). It can be moved and
+  restyled, never removed.
+
+A block that shows products declares **`productQuery(content)`** instead of
+fetching. The page — the live site on the server, the builder canvas through a
+server action — runs every block's query once and hands the answers over as
+`storefront.sectionProducts[sectionId]`. Blocks render synchronously in both
+places, so this is the only way a grid gets its products.
+
+Product cards are drawn by `modules/storefront/ProductCard.tsx` for every block
+that shows them. Its parts (`card`, `cardImage`, `cardBadge`, `cardTitle`,
+`cardPrice`, `cardButton`) are declared in each such block's own `elements`;
+`pnpm check:elements` follows imports from `@/modules/storefront/` so the
+declarations and the shared markup are checked together.
+
+## Bangla and English
+
+A site speaks to its shoppers in English or Bangla (`theme.language`, see
+`language.ts`), and writes its numbers as `1,250` or `১,২৫০`
+(`theme.numerals`). Two things follow from it:
+
+- **Words a block lets the merchant type** start in the site's language. Give
+  the definition a `translations: { bn: { … } }` with the Bangla for every
+  default that is words — only words, never a layout or a number. The builder
+  adds blocks through `localizedDefaults(definition, language)`, and templates
+  and starters go through `materializeSection(section, language)`.
+- **Words nobody types** — "Sold out", the cart's "Subtotal", a countdown's
+  unit labels — come from the storefront dictionary in
+  `modules/storefront/i18n.ts`: `storeText(theme)` in a server component,
+  `useStoreText()` in a client one. Prices and counts go through its `price()`
+  and `number()` so the site's digits follow. A string added to a block that a
+  shopper reads and the merchant cannot change belongs there, in both languages.
+
+Letter-spacing breaks Bangla shaping, so `globals.css` switches the blocks'
+`tracking-*` classes off on a Bangla site; a spacing the merchant sets in the
+element panel still applies.
+
+## Custom code
+
+`customcode` draws a merchant's own HTML and CSS — a section a designer built,
+or one an AI wrote from the prompt NCOM hands merchants. It is the one block
+whose insides are not React, so two rules hold it in:
+
+- **Sanitised on every render** by `customcode/sanitize.ts`: an allow-list
+  tokeniser like the rich-text one, wider (layout, images, tables, inline SVG,
+  `<video>`), with no scripts, `on*` handlers, forms, `javascript:` URLs or
+  framing beyond YouTube, Vimeo, Google Maps and Facebook embeds, which get a
+  forced sandbox. The CSS is sanitised too (`@import`, `expression()`,
+  non-HTTPS `url()`s dropped) and has every `<` escaped, so nothing in it can
+  close its `<style>`. `<style>` blocks inside pasted HTML move into the CSS;
+  `html`/`body`/`:root` selectors become `:host`.
+- **Drawn in a shadow root** by `customcode/CustomCodeFrame.tsx`, so its CSS
+  touches only itself. Server renders emit a declarative shadow root (works
+  with JavaScript off); browser renders — the builder canvas — attach one.
+  Inherited values cross the boundary, so a design follows the theme with
+  `var(--page-primary)`, `var(--page-text)`, `var(--page-background)` and
+  `var(--page-font-heading)`. Tailwind classes do nothing in there: pasted
+  code needs real CSS.
+
+`#section` links inside the code jump to sections of the page; the builder
+selects the whole block on click and never reaches inside it.

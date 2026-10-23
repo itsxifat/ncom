@@ -81,6 +81,12 @@ export const countdownSection: SectionDefinition<CountdownContent> = {
     'Urgency timer counting down to a deadline, or a fresh window per visitor.',
   schema: countdownContentSchema,
   defaultContent: countdownDefaultContent,
+  translations: {
+    bn: {
+      title: 'অফার শেষ হতে বাকি',
+      expiredText: 'অফারটি শেষ হয়ে গেছে।',
+    },
+  },
   editorFields: [
     { type: 'heading', name: 'group:timer', label: 'Timer' },
     {

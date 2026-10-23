@@ -128,6 +128,19 @@ export const testimonialsSection: SectionDefinition<TestimonialsContent> = {
   description: 'Customer reviews with star ratings.',
   schema: testimonialsContentSchema,
   defaultContent: testimonialsDefaultContent,
+  translations: {
+    bn: {
+      title: 'ক্রেতারা যা বলছেন',
+      items: [
+        {
+          name: 'রহিম',
+          text: 'ছবিতে যেমন দেখেছি, ঠিক তেমনই পেয়েছি। ডেলিভারিও খুব দ্রুত!',
+          rating: '5',
+          image: '',
+        },
+      ],
+    },
+  },
   editorFields: [
     { type: 'richtext', name: 'title', label: 'Heading' },
     {

@@ -1,8 +1,13 @@
 import { getSectionDefinition, type StorefrontCommerce } from './registry'
-import { PageThemeProvider } from './theme'
-import { buildElementStylesheet, pageUsesAnimation } from './elementStyle'
+import { FontStylesheet, PageThemeProvider } from './theme'
+import {
+  buildElementStylesheet,
+  elementFontFamilies,
+  pageUsesAnimation,
+} from './elementStyle'
 import { ScrollAnimations } from './ScrollAnimations'
 import type { PageTheme, SectionConfig } from './types'
+import type { StorefrontContext } from './storefront'
 
 export interface RenderablePageSection {
   id: string
@@ -45,10 +50,21 @@ export function PageRenderer({
   sections,
   storeId,
   commerce,
+  storefront,
   editing,
+  bare = false,
 }: {
   theme: PageTheme
   sections: RenderablePageSection[]
+  /** The shop around the page, on an online store. */
+  storefront?: StorefrontContext
+  /**
+   * Render the blocks without a theme wrapper of their own, because the
+   * caller already provides one. A store page is several runs of blocks — the
+   * header, the page, the footer — inside one themed document, and giving
+   * each run its own wrapper would let them stretch apart on a short page.
+   */
+  bare?: boolean
   /** Passed down to blocks that call the commerce API (the order form). */
   storeId?: string
   /** What this page sells. Absent where there is no real page behind it. */
@@ -79,10 +95,33 @@ export function PageRenderer({
   // they are styling, not watch it play.
   const animates = !editing && pageUsesAnimation(elementConfigs)
 
-  return (
-    // `scroll-smooth` is what makes every CTA on the page glide to the order
-    // form from a plain `#order` anchor, with no script involved.
-    <PageThemeProvider theme={theme} className="scroll-smooth">
+  // The fonts these blocks name themselves — a section's typeface overrides,
+  // and any element given a family of its own — loaded the way the theme's
+  // are, in one stylesheet for the whole run of blocks (or a few, past the
+  // number of families the proxy serves from one). The theme's two are left
+  // out, whatever their letter case: `PageThemeProvider` already asks for
+  // them, and naming them again here would only make a second stylesheet for
+  // faces already loading. Names that are not Google families are dropped by
+  // `fontStylesheetHrefs`, so they cost no request.
+  const fontKey = (name: unknown) =>
+    typeof name === 'string'
+      ? name.trim().replace(/\s+/g, ' ').toLowerCase()
+      : ''
+  const themeFonts = new Set([
+    fontKey(theme.headingFont),
+    fontKey(theme.bodyFont),
+  ])
+  const sectionFonts = [
+    ...visible.flatMap((section) => {
+      const config = section.config as SectionConfig | null
+      return [config?.headingFont, config?.bodyFont]
+    }),
+    ...elementFontFamilies(elementConfigs),
+  ].filter((name) => fontKey(name) && !themeFonts.has(fontKey(name)))
+
+  const blocks = (
+    <>
+      <FontStylesheet fonts={sectionFonts} />
       {elementCss && <style>{elementCss}</style>}
       {animates && <ScrollAnimations />}
       {visible.map((section) => {
@@ -98,7 +137,11 @@ export function PageRenderer({
 
         const Renderer = definition.Renderer
         return (
-          <div key={section.id} data-section-id={section.id}>
+          <div
+            key={section.id}
+            data-section-id={section.id}
+            className={definition.wrapperClassName?.(content)}
+          >
             <Renderer
               content={content}
               config={config}
@@ -106,11 +149,22 @@ export function PageRenderer({
               sectionId={section.id}
               storeId={storeId}
               commerce={commerce}
+              storefront={storefront}
               editing={editing}
             />
           </div>
         )
       })}
+    </>
+  )
+
+  if (bare) return blocks
+
+  return (
+    // `scroll-smooth` is what makes every CTA on the page glide to the order
+    // form from a plain `#order` anchor, with no script involved.
+    <PageThemeProvider theme={theme} className="scroll-smooth">
+      {blocks}
     </PageThemeProvider>
   )
 }

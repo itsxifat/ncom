@@ -117,6 +117,17 @@ export const featuresSection: SectionDefinition<FeaturesContent> = {
   description: 'Selling points as a tick-list or icon grid.',
   schema: featuresContentSchema,
   defaultContent: featuresDefaultContent,
+  translations: {
+    bn: {
+      title: 'কেন আপনার ভালো লাগবে',
+      items: [
+        {
+          title: 'প্রিমিয়াম কাপড়',
+          text: 'নরম, আরামদায়ক আর অনেক দিন টেকে।',
+        },
+      ],
+    },
+  },
   editorFields: [
     { type: 'richtext', name: 'title', label: 'Heading' },
     {

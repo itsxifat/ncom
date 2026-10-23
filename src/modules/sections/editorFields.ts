@@ -55,6 +55,16 @@ export type FieldConfig =
   // instead, because a lock would be asserting a frame that does not exist.
   | (FieldBase & { type: 'image'; aspect?: number })
   | (FieldBase & { type: 'textarea'; placeholder?: string })
+  // Source a block draws as its own design — markup or a stylesheet. Edited
+  // as plain monospace text, never through the rich-text editor, which would
+  // reformat it; sanitised at render by the block that holds it.
+  | (FieldBase & {
+      type: 'code'
+      language: 'html' | 'css'
+      placeholder?: string
+      /** Shown as a running count, so a paste that is too long says so. */
+      maxLength?: number
+    })
   | (FieldBase & { type: 'boolean' })
   | (FieldBase & { type: 'select'; options: SelectOption[] })
   | (FieldBase & { type: 'stringArray' })
@@ -77,6 +87,19 @@ export type FieldConfig =
   // every visitor at once, and a naive "2026-09-01T18:00" means a different
   // moment to a buyer in Dhaka than to one in London.
   | (FieldBase & { type: 'datetime' })
+  // Somewhere on the site — a page, a category, the cart — or any address.
+  // Stored as the href itself, so a link a merchant typed by hand and one they
+  // picked from the list are the same value. Picking is the point: a merchant
+  // should never have to know that their bags category lives at
+  // `/categories/bags` to link to it.
+  | (FieldBase & { type: 'link'; placeholder?: string })
+  // One of the store's categories or collections, by id. An id rather than a
+  // handle so renaming a category does not quietly empty every grid that
+  // shows it.
+  | (FieldBase & { type: 'category' })
+  | (FieldBase & { type: 'collection' })
+  // Products chosen by hand, by id, in the order the merchant put them.
+  | (FieldBase & { type: 'products'; max?: number })
   // A labelled break in the form. Purely presentational — it holds no value,
   // and its `name` exists only to key the list.
   | (FieldBase & { type: 'heading' })

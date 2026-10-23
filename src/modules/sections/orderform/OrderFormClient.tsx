@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Check,
   Gift,
@@ -18,6 +18,11 @@ import type { SectionConfig } from '../types'
 import type { StorefrontCommerce } from '../registry'
 import type { OrderformContent } from './index'
 import {
+  askedQuestions,
+  MAX_ANSWER_LENGTH,
+  type AskedQuestion,
+} from './questions'
+import {
   fixedSelection,
   priceVariesByVariant,
   quantityBounds,
@@ -26,10 +31,12 @@ import {
 import { applyPromotions, promotionHints } from '@/lib/offers/promotions'
 import { mirrorPurchaseToPixel } from '@/lib/tracking/browser'
 import { formatMoney } from '@/lib/money'
+import { useStoreText } from '@/modules/storefront/StoreTextProvider'
 import type {
   OfferLine,
   OfferSelectionItem,
   OfferVariantChoice,
+  PublicDiscountRule,
   PublicOffer,
 } from '@/lib/offers/types'
 import { cn } from '@/lib/utils'
@@ -57,6 +64,13 @@ const fieldClass =
 const labelClass =
   'block text-[12px] font-medium text-[color:var(--lp-text)]/70 mb-1.5'
 
+/**
+ * The form's own text boxes are `input` 0–6 (name, phone, email, address,
+ * city, note, code); the merchant's questions' boxes are numbered after them,
+ * so styling one box on the canvas never lands on another.
+ */
+const OWN_INPUTS = 7
+
 type Status =
   | { state: 'idle' }
   | { state: 'sending' }
@@ -76,9 +90,13 @@ export function OrderFormClient({
 }) {
   const offers = useMemo(() => commerce?.offers ?? [], [commerce])
   const currencyCode = commerce?.currencyCode ?? 'BDT'
+  const text = useStoreText()
+  const { words } = text
+  // Every amount on the form goes through here, so a Bangla page writes ৳১,২৫০
+  // in the summary, the offer cards and the promotion nudges alike.
   const money = useMemo(
-    () => (cents: number) => formatMoney(cents, currencyCode),
-    [currencyCode]
+    () => (cents: number) => text.number(formatMoney(cents, currencyCode)),
+    [currencyCode, text]
   )
 
   const [status, setStatus] = useState<Status>({ state: 'idle' })
@@ -102,6 +120,12 @@ export function OrderFormClient({
     city: '',
     note: '',
   })
+  /** Answers to the merchant's own questions, by question id. */
+  const [answers, setAnswers] = useState<Record<string, string>>({})
+  const questions = useMemo(
+    () => askedQuestions(content.questions),
+    [content.questions]
+  )
   /**
    * A code the buyer typed.
    *
@@ -129,11 +153,43 @@ export function OrderFormClient({
   const isPool = offer !== null && offer.kind !== 'FIXED'
 
   // Changing offer invalidates every pick that belonged to the previous one.
-  function chooseOffer(next: string) {
+  const chooseOffer = useCallback((next: string) => {
     setOfferKey(next)
     setVariantChoices({})
     setPoolPicks({})
-  }
+  }, [])
+
+  // Other parts of the page choose a package too: a "Get the combo" button in
+  // a custom-code design dispatches `ncom:choose-offer` with the offer's key.
+  // Only ever among this page's own offers — a key the page does not sell is
+  // ignored rather than emptying the form — and choosing the package already
+  // chosen keeps the sizes the buyer has picked in it.
+  const currentOfferKey = offer?.key ?? null
+  useEffect(() => {
+    function onChooseOffer(event: Event) {
+      const detail = (event as CustomEvent<{ offerKey?: unknown } | null>)
+        .detail
+      const key = detail?.offerKey
+      if (typeof key !== 'string' || key === currentOfferKey) return
+      if (!offers.some((candidate) => candidate.key === key)) return
+      chooseOffer(key)
+    }
+    window.addEventListener('ncom:choose-offer', onChooseOffer)
+    return () => window.removeEventListener('ncom:choose-offer', onChooseOffer)
+  }, [offers, currentOfferKey, chooseOffer])
+
+  // An ad can link straight to a package: `…/?offer=combo`. Read once, after
+  // hydration — the server drew the default package, and starting from another
+  // one in the first render would not match the page it sent.
+  useEffect(() => {
+    const key = new URLSearchParams(window.location.search).get('offer')
+    if (key && offers.some((candidate) => candidate.key === key)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- browser-only value
+      chooseOffer(key)
+    }
+    // Once, on arrival: later changes of package are the buyer's own.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const selections = useMemo(
     () => buildSelections(offer, variantChoices, poolPicks),
@@ -147,6 +203,21 @@ export function OrderFormClient({
 
   const rate = commerce?.shipping.rates.find((r) => r.id === rateId) ?? null
 
+  // An unnamed discount rule is named in the page's language, so a Bangla
+  // page does not nudge "Spend ৳১,০০০+ — 10% off" in English.
+  const ruleLabel = useCallback(
+    (rule: PublicDiscountRule) =>
+      words.spendRule(
+        rule.basis === 'QUANTITY'
+          ? words.itemsOrMore(Math.max(0, rule.thresholdQuantity))
+          : words.amountOrMore(money(Math.max(0, rule.thresholdCents))),
+        rule.reward === 'PERCENT'
+          ? words.percentOff(Math.max(0, rule.valueBps) / 100)
+          : words.amountOff(money(Math.max(0, rule.valueCents)))
+      ),
+    [words, money]
+  )
+
   const promo = useMemo(() => {
     if (!commerce || !quote || quote.error) return null
     return applyPromotions({
@@ -155,8 +226,9 @@ export function OrderFormClient({
       shippingCents: rate?.priceCents ?? 0,
       promotions: commerce.promotions,
       formatMoney: money,
+      ruleLabel,
     })
-  }, [commerce, quote, rate, money])
+  }, [commerce, quote, rate, money, ruleLabel])
 
   const hints = useMemo(() => {
     if (!commerce || !quote || quote.error) return null
@@ -165,8 +237,9 @@ export function OrderFormClient({
       quantity: quote.quantity,
       promotions: commerce.promotions,
       formatMoney: money,
+      ruleLabel,
     })
-  }, [commerce, quote, money])
+  }, [commerce, quote, money, ruleLabel])
 
   const setField = (field: keyof typeof values, value: string) =>
     setValues((prev) => ({ ...prev, [field]: value }))
@@ -205,6 +278,12 @@ export function OrderFormClient({
           address: values.street,
           city: values.city,
           note: values.note || undefined,
+          answers: questions
+            .map((question) => ({
+              id: question.id,
+              answer: (answers[question.id] ?? '').trim(),
+            }))
+            .filter((entry) => entry.answer),
         }),
       })
       const result = await response.json()
@@ -212,7 +291,7 @@ export function OrderFormClient({
       if (!response.ok) {
         setStatus({
           state: 'failed',
-          message: result.error ?? 'Could not place the order.',
+          message: result.error ?? words.couldNotPlaceOrder,
         })
         return
       }
@@ -241,7 +320,7 @@ export function OrderFormClient({
     } catch {
       setStatus({
         state: 'failed',
-        message: 'Could not reach the store. Please try again.',
+        message: words.couldNotReachStore,
       })
     }
   }
@@ -332,8 +411,8 @@ export function OrderFormClient({
             className="text-center text-[14px] text-[color:var(--lp-text)]/50"
           >
             {commerce?.catalogUnavailable
-              ? 'Ordering is unavailable for a moment. Please try again shortly.'
-              : 'Add an offer in the Offers tab to see the order form.'}
+              ? words.orderingUnavailable
+              : 'Choose what this page sells under Delivery & offers, and the order form appears here.'}
           </El>
         </section>
       </SectionWrapper>
@@ -602,6 +681,17 @@ export function OrderFormClient({
                 )}
               </div>
 
+              {questions.map((question) => (
+                <QuestionField
+                  key={question.id}
+                  question={question}
+                  value={answers[question.id] ?? ''}
+                  onChange={(answer) =>
+                    setAnswers((prev) => ({ ...prev, [question.id]: answer }))
+                  }
+                />
+              ))}
+
               {content.askNote && (
                 <div>
                   <El
@@ -679,7 +769,7 @@ export function OrderFormClient({
                   {isPool && (quote?.quantity ?? 0) > 0 && (
                     <span className="text-[color:var(--lp-text)]/45">
                       {' '}
-                      · {quote?.quantity} pcs
+                      · {words.piecesShort(quote?.quantity ?? 0)}
                     </span>
                   )}
                 </span>
@@ -691,7 +781,7 @@ export function OrderFormClient({
                   className="flex justify-between text-[13px]"
                   style={{ color: 'var(--lp-accent)' }}
                 >
-                  <span>Offer saving</span>
+                  <span>{words.offerSaving}</span>
                   <span>−{money(offerSavings)}</span>
                 </div>
               )}
@@ -703,8 +793,7 @@ export function OrderFormClient({
                   the offer was never on. */}
               {outsideOfferCents > 0 && priced && (
                 <p className="text-[11px] leading-snug text-amber-700">
-                  Includes {money(outsideOfferCents)} of sizes that are not in
-                  this offer, at their regular price.
+                  {words.includesOutsideOffer(money(outsideOfferCents))}
                 </p>
               )}
 
@@ -715,10 +804,11 @@ export function OrderFormClient({
                 >
                   <span className="flex items-center gap-1">
                     <Gift size={12} />
-                    {offer.gift.quantity > 1 && `${offer.gift.quantity} × `}
+                    {offer.gift.quantity > 1 &&
+                      `${text.number(offer.gift.quantity)} × `}
                     {offer.gift.title}
                   </span>
-                  <span className="font-semibold">FREE</span>
+                  <span className="font-semibold">{words.freeTag}</span>
                 </div>
               )}
 
@@ -728,7 +818,7 @@ export function OrderFormClient({
                   style={{ color: 'var(--lp-accent)' }}
                 >
                   <span className="flex items-center gap-1">
-                    <Tag size={12} /> {promo?.label || 'Discount'}
+                    <Tag size={12} /> {promo?.label || words.discount}
                   </span>
                   <span>−{money(discountCents)}</span>
                 </div>
@@ -751,10 +841,10 @@ export function OrderFormClient({
                       <span className="mr-1 line-through opacity-50">
                         {money(baseShipping)}
                       </span>
-                      Free
+                      {words.free}
                     </>
                   ) : shippingCents === 0 ? (
-                    'Free'
+                    words.free
                   ) : (
                     money(shippingCents)
                   )}
@@ -771,8 +861,12 @@ export function OrderFormClient({
                     >
                       <Truck size={12} />
                       {hints.freeShipping.amountMoreCents > 0
-                        ? `Add ${money(hints.freeShipping.amountMoreCents)} more for FREE delivery`
-                        : `Add ${hints.freeShipping.quantityMore} more item(s) for FREE delivery`}
+                        ? words.freeDeliveryAmountMore(
+                            money(hints.freeShipping.amountMoreCents)
+                          )
+                        : words.freeDeliveryItemsMore(
+                            hints.freeShipping.quantityMore
+                          )}
                     </p>
                   )}
                   {hints.discount && (
@@ -782,8 +876,14 @@ export function OrderFormClient({
                     >
                       <Gift size={12} />
                       {hints.discount.amountMoreCents > 0
-                        ? `Add ${money(hints.discount.amountMoreCents)} more — ${hints.discount.label}`
-                        : `Add ${hints.discount.quantityMore} more item(s) — ${hints.discount.label}`}
+                        ? words.discountAmountMore(
+                            money(hints.discount.amountMoreCents),
+                            hints.discount.label
+                          )
+                        : words.discountItemsMore(
+                            hints.discount.quantityMore,
+                            hints.discount.label
+                          )}
                     </p>
                   )}
                 </div>
@@ -802,7 +902,7 @@ export function OrderFormClient({
 
               {quote?.error && (
                 <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
-                  {quote.error}
+                  {quote.issue ? words.quoteIssue(quote.issue) : quote.error}
                 </p>
               )}
 
@@ -823,7 +923,7 @@ export function OrderFormClient({
                 className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-[var(--lp-accent)] py-4 text-[15px] font-semibold tracking-wide text-white shadow-lg transition-transform hover:scale-[1.01] active:scale-[0.99] disabled:opacity-60 disabled:hover:scale-100"
               >
                 {sending && <Loader2 size={16} className="animate-spin" />}
-                {sending ? 'Placing your order…' : content.submitText}
+                {sending ? words.placingYourOrder : content.submitText}
               </El>
 
               <El
@@ -856,6 +956,137 @@ export function OrderFormClient({
   )
 }
 
+const questionLabelClass =
+  'text-[12px] font-medium text-[color:var(--lp-text)]/70'
+
+/**
+ * One of the merchant's own questions, drawn like the form's own fields.
+ *
+ * A choice is a row of options to tap rather than a dropdown: a buyer on a
+ * phone sees every size at once and answers with one tap, the way they pick a
+ * delivery area above. Underneath they are real radio buttons, so the group is
+ * announced and arrowed through as one, and a required question is enforced
+ * by the browser exactly as the name and phone are.
+ *
+ * A required question gets its asterisk drawn beside the label rather than
+ * typed into it, so making a question optional again never leaves a stray
+ * "*" in the merchant's words.
+ */
+function QuestionField({
+  question,
+  value,
+  onChange,
+}: {
+  question: AskedQuestion
+  value: string
+  onChange: (answer: string) => void
+}) {
+  const inputId = `lp-q-${question.id}`
+  const labelId = `${inputId}-label`
+  const marker = question.required && !/\*\s*$/.test(question.label)
+  const label = (
+    <div className="mb-1.5 flex items-baseline gap-1">
+      <El
+        as={question.kind === 'choice' ? 'p' : 'label'}
+        part="questionLabel"
+        index={question.index}
+        id={labelId}
+        htmlFor={question.kind === 'choice' ? undefined : inputId}
+        html={question.label}
+        className={questionLabelClass}
+      />
+      {marker && (
+        <span aria-hidden="true" className={questionLabelClass}>
+          *
+        </span>
+      )}
+    </div>
+  )
+
+  if (question.kind === 'choice') {
+    return (
+      <div>
+        {label}
+        <div
+          role="radiogroup"
+          aria-labelledby={labelId}
+          aria-required={question.required || undefined}
+          className="flex flex-wrap gap-1.5"
+        >
+          {question.options.map((option, optionIndex) => {
+            const active = value === option
+            return (
+              <El
+                as="label"
+                part="questionOption"
+                index={optionIndex}
+                key={option}
+                className="relative cursor-pointer rounded-xl border px-3.5 py-2.5 text-[13px] leading-tight font-medium transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-[color:var(--lp-accent)]/25"
+                style={{
+                  borderColor: active ? 'var(--lp-accent)' : 'rgba(0,0,0,0.12)',
+                  background: active
+                    ? 'color-mix(in srgb, var(--lp-accent) 8%, white)'
+                    : 'white',
+                  color: active ? 'var(--lp-accent)' : 'inherit',
+                }}
+              >
+                <input
+                  type="radio"
+                  className="sr-only"
+                  name={inputId}
+                  value={option}
+                  checked={active}
+                  required={question.required}
+                  onChange={() => onChange(option)}
+                />
+                {option}
+              </El>
+            )
+          })}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      {label}
+      {question.kind === 'longtext' ? (
+        <El
+          as="textarea"
+          part="input"
+          index={OWN_INPUTS + question.index}
+          id={inputId}
+          rows={3}
+          className={cn(fieldClass, 'resize-none')}
+          required={question.required}
+          maxLength={MAX_ANSWER_LENGTH}
+          placeholder={question.placeholder || undefined}
+          value={value}
+          onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+            onChange(e.target.value)
+          }
+        />
+      ) : (
+        <El
+          as="input"
+          part="input"
+          index={OWN_INPUTS + question.index}
+          id={inputId}
+          className={fieldClass}
+          required={question.required}
+          maxLength={MAX_ANSWER_LENGTH}
+          placeholder={question.placeholder || undefined}
+          value={value}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+            onChange(e.target.value)
+          }
+        />
+      )}
+    </div>
+  )
+}
+
 /**
  * One package card.
  *
@@ -884,6 +1115,7 @@ function OfferCard({
   onSelect: () => void
   money: (cents: number) => string
 }) {
+  const { words } = useStoreText()
   const exactPrice = offer.kind === 'FIXED' && !priceVariesByVariant(offer)
   const hasPrice = offer.headlinePriceCents > 0
   const savings = Math.max(0, offer.compareAtCents - offer.headlinePriceCents)
@@ -940,7 +1172,7 @@ function OfferCard({
           >
             {!exactPrice && (
               <span className="mr-1 text-[11px] font-normal opacity-70">
-                from
+                {words.fromLower}
               </span>
             )}
             {money(offer.headlinePriceCents)}
@@ -961,7 +1193,7 @@ function OfferCard({
             index={index}
             className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-[color:var(--lp-text)]/60"
           >
-            <Gift size={11} /> Free {offer.gift.title}
+            <Gift size={11} /> {words.freeGift(offer.gift.title)}
           </El>
         )}
       </div>
@@ -1034,9 +1266,9 @@ function ProductThumb({
 /**
  * "S, M and L" — a few option names, as a buyer would read them out.
  */
-function listNames(names: string[]): string {
+function listNames(names: string[], and: string): string {
   if (names.length <= 1) return names[0] ?? ''
-  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
+  return `${names.slice(0, -1).join(', ')} ${and} ${names[names.length - 1]}`
 }
 
 /**
@@ -1064,6 +1296,7 @@ function OfferScopeNote({
   selectedId: string | null | undefined
   money: (cents: number) => string
 }) {
+  const { words } = useStoreText()
   const excluded = variants.filter((variant) => variant.excluded)
   if (excluded.length === 0) return null
 
@@ -1073,10 +1306,20 @@ function OfferScopeNote({
   return (
     <p className="mt-1 text-[11px] leading-snug text-amber-700">
       {chosen?.excluded
-        ? `${chosen.title} is not part of this offer — it is sold at its regular price, ${money(chosen.priceCents)}.`
+        ? words.notInOffer(chosen.title, money(chosen.priceCents))
         : included.length > 0
-          ? `Offer applies to ${listNames(included.map((variant) => variant.title))} only. ${listNames(excluded.map((variant) => variant.title))} ${excluded.length === 1 ? 'is' : 'are'} sold at the regular price.`
-          : 'These sizes are outside this offer — they are sold at their regular price.'}
+          ? words.offerAppliesOnly(
+              listNames(
+                included.map((variant) => variant.title),
+                words.and
+              ),
+              listNames(
+                excluded.map((variant) => variant.title),
+                words.and
+              ),
+              excluded.length > 1
+            )
+          : words.sizesOutsideOffer}
     </p>
   )
 }
@@ -1096,6 +1339,7 @@ function FixedLine({
   onChoose: (variantId: string) => void
   money: (cents: number) => string
 }) {
+  const { words, number } = useStoreText()
   const pinned = line.pinnedVariantId
     ? line.variants.find((v) => v.id === line.pinnedVariantId)
     : null
@@ -1124,12 +1368,12 @@ function FixedLine({
           {line.quantity > 1 && (
             <span className="text-[color:var(--lp-text)]/45">
               {' '}
-              × {line.quantity}
+              × {number(line.quantity)}
             </span>
           )}
           {soldOut && (
             <span className="ml-1.5 align-middle text-[11px] font-semibold tracking-wide text-amber-700 uppercase">
-              Out of stock
+              {words.outOfStock}
             </span>
           )}
         </El>
@@ -1147,7 +1391,7 @@ function FixedLine({
                 className="mt-0.5 text-[11.5px] font-medium"
                 style={{ color: 'var(--lp-accent)' }}
               >
-                Select an option
+                {words.selectAnOption}
               </p>
             )}
             <El
@@ -1173,9 +1417,9 @@ function FixedLine({
                     // reason: the dashed border below is invisible to a reader.
                     aria-label={
                       !variant.available
-                        ? `${variant.title} — out of stock`
+                        ? words.variantOutOfStock(variant.title)
                         : variant.excluded
-                          ? `${variant.title} — not in this offer, regular price`
+                          ? words.variantNotInOffer(variant.title)
                           : undefined
                     }
                     onClick={() => onChoose(variant.id)}
@@ -1208,7 +1452,7 @@ function FixedLine({
             {!soldOut &&
               line.variants.some((variant) => !variant.available) && (
                 <p className="mt-1 text-[11px] text-[color:var(--lp-text)]/45">
-                  Crossed-out options are out of stock.
+                  {words.crossedOutOfStock}
                 </p>
               )}
           </>
@@ -1249,6 +1493,7 @@ function PoolPicker({
   money: (cents: number) => string
   bounds: { min: number; max: number }
 }) {
+  const { words, number } = useStoreText()
   const isCollection = offer.kind === 'COLLECTION'
   const totalQty = Object.values(picks).reduce((n, x) => n + x, 0)
 
@@ -1282,10 +1527,11 @@ function PoolPicker({
       ? ([...offer.tiers].reverse().find((t) => t.quantity <= offerQty)
           ?.quantity ?? 0)
       : (offer.tiers.find((t) => t.quantity === offerQty)?.quantity ?? 0)
-  const rangeLabel =
+  const rangeLabel = number(
     bounds.min === bounds.max && bounds.max
       ? `${bounds.max}`
       : `${bounds.min || 1}${bounds.max ? `–${bounds.max}` : '+'}`
+  )
 
   return (
     <El as="div" part="items" className="border-b border-black/[0.06]">
@@ -1293,8 +1539,8 @@ function PoolPicker({
         <div className="px-5 pt-5 sm:px-6">
           <El as="p" part="poolHint" className={labelClass}>
             {offer.tierMode === 'THRESHOLD'
-              ? `Pick ${bounds.min || 1} or more — price drops as you add`
-              : `Pick any ${rangeLabel} — price drops as you add`}
+              ? words.pickOrMore(bounds.min || 1)
+              : words.pickAny(rangeLabel)}
           </El>
           <El as="div" part="tierChips" className="flex flex-wrap gap-1.5">
             {offer.tiers.map((t, tierIndex) => {
@@ -1316,9 +1562,9 @@ function PoolPicker({
                     color: active ? 'var(--lp-accent)' : 'inherit',
                   }}
                 >
-                  {t.quantity} pcs ·{' '}
+                  {words.piecesShort(t.quantity)} ·{' '}
                   {t.reward === 'PERCENT'
-                    ? `${t.discountBps / 100}% off`
+                    ? words.percentOff(t.discountBps / 100)
                     : money(t.priceCents)}
                 </El>
               )
@@ -1328,8 +1574,8 @@ function PoolPicker({
       ) : (
         <div className="px-5 pt-5 sm:px-6">
           <El as="p" part="poolHint" className={labelClass}>
-            Pick what you want
-            {bounds.min > 1 || bounds.max ? ` (${rangeLabel} items)` : ''}
+            {words.pickWhatYouWant}
+            {bounds.min > 1 || bounds.max ? words.itemsRange(rangeLabel) : ''}
           </El>
         </div>
       )}
@@ -1355,16 +1601,20 @@ function PoolPicker({
           style={{ color: atMax ? 'var(--lp-accent)' : 'var(--lp-text)' }}
         >
           {totalQty === 0
-            ? `Add ${bounds.min || 1} or more to see your price`
+            ? words.addToSeePrice(bounds.min || 1)
             : atMax
-              ? `Maximum ${bounds.max} items selected${
-                  extraQty > 0 ? ` · ${extraQty} at the regular price` : ''
+              ? `${words.maxSelected(bounds.max)}${
+                  extraQty > 0 ? words.atRegularPrice(extraQty) : ''
                 }`
-              : `${offerQty}${extraQty > 0 ? ' in this offer' : ' selected'}${
+              : `${
+                  extraQty > 0
+                    ? words.countInOffer(offerQty)
+                    : words.countSelected(offerQty)
+                }${
                   offerQty > 0 && offerQty < (bounds.min || 1)
-                    ? ` — add ${(bounds.min || 1) - offerQty} more`
+                    ? words.addMore((bounds.min || 1) - offerQty)
                     : ''
-                }${extraQty > 0 ? ` · ${extraQty} at the regular price` : ''}`}
+                }${extraQty > 0 ? words.atRegularPrice(extraQty) : ''}`}
         </El>
       </div>
     </El>
@@ -1403,6 +1653,7 @@ function PoolRow({
   priced: boolean
   atMax: boolean
 }) {
+  const { words, number } = useStoreText()
   const sellable = line.variants.filter((variant) => variant.available)
   // One option is not a choice — there is nothing to get wrong, so it stays
   // selected. Two or more start empty and wait for the buyer.
@@ -1439,7 +1690,7 @@ function PoolRow({
             {line.title}
           </El>
           <span className="flex-shrink-0 text-[11px] font-semibold tracking-wide text-amber-700 uppercase">
-            Out of stock
+            {words.outOfStock}
           </span>
         </div>
       </El>
@@ -1527,7 +1778,9 @@ function PoolRow({
               className="mt-0.5 text-[12.5px] font-semibold text-[color:var(--lp-text)]/70"
             >
               {!variant && varies && (
-                <span className="font-normal opacity-70">from </span>
+                <span className="font-normal opacity-70">
+                  {words.fromLower}{' '}
+                </span>
               )}
               {money(variant?.priceCents ?? fromCents)}
               {/* A size on its own terms says so on the row it is chosen from.
@@ -1536,7 +1789,7 @@ function PoolRow({
               {(variant?.excluded || variant?.pricing?.mode === 'AUTO') && (
                 <span className="font-normal text-[color:var(--lp-text)]/45">
                   {' '}
-                  · {variant.excluded ? 'not in this offer' : 'no offer'}
+                  · {variant.excluded ? words.notInThisOffer : words.noOffer}
                 </span>
               )}
             </El>
@@ -1549,7 +1802,7 @@ function PoolRow({
               )}
               style={needsChoice ? undefined : { color: 'var(--lp-accent)' }}
             >
-              {needsChoice ? 'Please select a size first' : 'Select a size'}
+              {needsChoice ? words.selectSizeFirst : words.selectSize}
             </p>
           )}
           {/* Only the sizes that can actually be bought: naming a sold-out one
@@ -1587,7 +1840,7 @@ function PoolRow({
                     aria-pressed={active}
                     aria-label={
                       choice.excluded
-                        ? `${choice.title} — not in this offer, regular price`
+                        ? words.variantNotInOffer(choice.title)
                         : undefined
                     }
                     onClick={() => choose(choice)}
@@ -1616,7 +1869,7 @@ function PoolRow({
                     }}
                   >
                     {choice.title}
-                    {chosenQty > 0 ? ` ×${chosenQty}` : ''}
+                    {chosenQty > 0 ? ` ×${number(chosenQty)}` : ''}
                   </El>
                 )
               })}
@@ -1635,12 +1888,12 @@ function PoolRow({
               onClick={() => bump(-1)}
               disabled={!qty}
               className="flex h-8 w-8 items-center justify-center rounded-full border border-black/15 text-[color:var(--lp-text)]/70 disabled:opacity-30"
-              aria-label="Remove one"
+              aria-label={words.removeOne}
             >
               <Minus size={15} />
             </button>
             <span className="w-6 text-center text-[13px] font-semibold text-[color:var(--lp-text)] tabular-nums">
-              {qty}
+              {number(qty)}
             </span>
             {/* Stays live with no option chosen: it is the buyer's most likely
                 way in, and it has to be able to tell them why it did nothing. */}
@@ -1650,7 +1903,7 @@ function PoolRow({
               disabled={Boolean(variant) && capped(variant)}
               className="flex h-8 w-8 items-center justify-center rounded-full text-white disabled:opacity-30"
               style={{ background: 'var(--lp-accent)' }}
-              aria-label="Add one"
+              aria-label={words.addOne}
             >
               <Plus size={15} />
             </button>

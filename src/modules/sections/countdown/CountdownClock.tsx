@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { El } from '../elements'
 import { cn } from '@/lib/utils'
 import type { CountdownContent } from './content'
+import { useStoreText } from '@/modules/storefront/StoreTextProvider'
 
 /**
  * The ticking half of the countdown block.
@@ -67,7 +68,8 @@ function resolveEvergreenDeadline(
 }
 
 interface Part {
-  label: string
+  /** Which unit — named at render, in the storefront's language. */
+  label: 'days' | 'hours' | 'mins' | 'secs'
   value: number
 }
 
@@ -91,20 +93,20 @@ function splitParts(ms: number, units: CountdownContent['units']): Part[] {
   let rest = total
 
   if (showDays) {
-    parts.push({ label: 'Days', value: days })
+    parts.push({ label: 'days', value: days })
     rest -= days * DAY
   }
   if (showHours) {
     const hours = Math.floor(rest / HOUR)
-    parts.push({ label: 'Hours', value: hours })
+    parts.push({ label: 'hours', value: hours })
     rest -= hours * HOUR
   }
 
   const minutes = Math.floor(rest / MINUTE)
-  parts.push({ label: 'Mins', value: minutes })
+  parts.push({ label: 'mins', value: minutes })
   rest -= minutes * MINUTE
 
-  parts.push({ label: 'Secs', value: Math.floor(rest / SECOND) })
+  parts.push({ label: 'secs', value: Math.floor(rest / SECOND) })
   return parts
 }
 
@@ -159,6 +161,7 @@ export function CountdownClock({
 }) {
   const durationMs = Math.max(1, content.durationMinutes) * MINUTE
   const evergreen = content.mode === 'evergreen'
+  const { words, number } = useStoreText()
 
   const [left, setLeft] = useState<number | null>(null)
 
@@ -209,7 +212,7 @@ export function CountdownClock({
       <El
         as="p"
         part="expired"
-        html={content.expiredText || 'This offer has ended.'}
+        html={content.expiredText || words.offerEnded}
         className={cn('text-lg font-semibold', digitTone)}
       />
     )
@@ -268,7 +271,7 @@ export function CountdownClock({
               urgent ? 'text-[color:var(--lp-countdown-urgent)]' : digitTone
             )}
           >
-            {left === null ? '--' : pad(part.value)}
+            {left === null ? '--' : number(pad(part.value))}
             {/* In the minimal style there are no boxes to imply the grouping,
                 so the colon has to do that work. */}
             {minimal && index < parts.length - 1 && (
@@ -288,7 +291,7 @@ export function CountdownClock({
                 labelTone
               )}
             >
-              {part.label}
+              {words.timeUnits[part.label]}
             </El>
           )}
         </El>

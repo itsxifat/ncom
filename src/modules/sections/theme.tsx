@@ -1,9 +1,12 @@
 import type { CSSProperties } from 'react'
 
 import { cn } from '@/lib/utils'
-import { fontStack } from '@/lib/fonts'
+import { BANGLA_COMPANION_PROPERTIES, fontStack } from '@/lib/fonts'
+import { fontStylesheetHrefs } from '@/lib/font-stylesheet'
 import { isLightColor } from '@/lib/color'
+import { StoreTextProvider } from '@/modules/storefront/StoreTextProvider'
 import type { PageTheme } from './types'
+import { htmlLang, siteLanguage, siteNumerals } from './language'
 
 const RADIUS_VALUES: Record<string, string> = {
   none: '0px',
@@ -37,6 +40,12 @@ export function themeToCssProperties(theme: PageTheme): CSSProperties {
     // at a family name the visitor's device probably does not have installed.
     '--page-font-heading': fontStack(theme.headingFont),
     '--page-font-body': fontStack(theme.bodyFont),
+    // The Bangla faces every Latin stack falls back to for Bangla letters
+    // (see `Companion` in lib/fonts). Set on every storefront, not only Bangla
+    // ones: an English shop with one Bangla line in its hero — the normal
+    // Bangladeshi page — should set that line in a real Bangla face too, and a
+    // companion costs nothing until a Bangla letter is on screen.
+    ...BANGLA_COMPANION_PROPERTIES,
     '--page-radius': RADIUS_VALUES[theme.borderRadius] ?? theme.borderRadius,
     '--page-space-unit': SPACE_UNIT_VALUES[theme.spacingScale] ?? '1',
     '--page-container-width': theme.containerWidth,
@@ -45,6 +54,12 @@ export function themeToCssProperties(theme: PageTheme): CSSProperties {
     '--page-section-spacing':
       SPACE_UNIT_VALUES[theme.sectionSpacing ?? 'comfortable'] ?? '1',
     '--page-logo-width': `${theme.logoWidth ?? 140}px`,
+    // Text drawn on the brand colour. Derived, not chosen: a merchant who picks
+    // a pale yellow for their buttons should not also have to know to pick dark
+    // button text, and white on yellow is unreadable.
+    '--page-on-primary': isLightColor(theme.primaryColor)
+      ? '#111111'
+      : '#ffffff',
 
     // The landing-page block aliases. Every block reads `--lp-accent` /
     // `--lp-text` rather than a `--page-*` token, which is what lets a block's
@@ -57,6 +72,33 @@ export function themeToCssProperties(theme: PageTheme): CSSProperties {
   } as CSSProperties
 }
 
+/**
+ * Loads whichever of these fonts are Google Fonts families outside the
+ * self-hosted catalogue, through NCOM's own font proxy.
+ *
+ * Catalogue families need nothing here — `next/font` already bundles them —
+ * and neither does a name that is not on Google Fonts at all, so for most
+ * pages this renders nothing. For the rest, React 19 hoists a
+ * `<link rel="stylesheet" precedence>` into the document head from wherever
+ * it is rendered, during server rendering and in the client-rendered builder
+ * canvas alike, and renders one link per address however many components ask
+ * for it. That is what lets each place a font name comes from simply ask for
+ * its own: the live page, the previews and the canvas all load the same
+ * faces without any of them knowing which head they will end up in.
+ *
+ * Usually one link; more only when there are more families than the proxy
+ * serves from one stylesheet (see `fontStylesheetHrefs`).
+ */
+export function FontStylesheet({
+  fonts,
+}: {
+  fonts: (string | null | undefined)[]
+}) {
+  return fontStylesheetHrefs(fonts).map((href) => (
+    <link key={href} rel="stylesheet" href={href} precedence="default" />
+  ))
+}
+
 export function PageThemeProvider({
   theme,
   children,
@@ -66,8 +108,14 @@ export function PageThemeProvider({
   children: React.ReactNode
   className?: string
 }) {
+  const language = siteLanguage(theme)
   return (
     <div
+      data-page-theme=""
+      // Screen readers pick their voice from this, and browsers their
+      // line-breaking and hyphenation rules — Bangla read in an English voice
+      // is gibberish to the shopper who needs it read aloud.
+      lang={htmlLang(language)}
       style={{
         ...themeToCssProperties(theme),
         backgroundColor: 'var(--page-background)',
@@ -98,8 +146,11 @@ export function PageThemeProvider({
       // panes), since `flex: 1` does nothing without a flex parent.
       className={cn('flex-1', className)}
     >
+      <FontStylesheet fonts={[theme.headingFont, theme.bodyFont]} />
       {theme.customCss && <style>{theme.customCss}</style>}
-      {children}
+      <StoreTextProvider language={language} numerals={siteNumerals(theme)}>
+        {children}
+      </StoreTextProvider>
     </div>
   )
 }

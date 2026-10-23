@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation'
 import { getPageForRawPreview } from '@/server/services/pageService'
 import { PageRenderer } from '@/modules/sections/PageRenderer'
 import { getStorefrontCommerce } from '@/server/services/offerService'
+import { StoreDraftPreview } from '@/server/storefront/preview'
 
 export default async function PreviewRenderPage({
   params,
@@ -20,6 +21,8 @@ export default async function PreviewRenderPage({
   if (!page.store.theme) {
     notFound()
   }
+
+  if (page.store.kind === 'STORE') return <StoreDraftPreview page={page} />
 
   // The builder canvas is the merchant's only view of the form before it goes
   // live, so it has to be fed the same offers the public page would be.
