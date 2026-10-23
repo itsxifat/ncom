@@ -8,6 +8,7 @@ import { collectText } from '../sections/editorFields'
 import { SectionInspectorForm } from './SectionInspectorForm'
 import { SectionDesignPanel } from './SectionDesignPanel'
 import { ElementPanel } from './ElementPanel'
+import { CustomCodeConnect } from './CustomCodeConnect'
 import { cn } from '@/lib/utils'
 
 /**
@@ -100,12 +101,17 @@ export function InspectorPanel() {
           }
         />
       ) : definition ? (
-        <SectionInspectorForm
-          key={section.id}
-          definition={definition as SectionDefinition<Record<string, unknown>>}
-          value={section.content}
-          onChange={(content) => updateSectionContent(section.id, content)}
-        />
+        <>
+          <SectionInspectorForm
+            key={section.id}
+            definition={
+              definition as SectionDefinition<Record<string, unknown>>
+            }
+            value={section.content}
+            onChange={(content) => updateSectionContent(section.id, content)}
+          />
+          {section.type === 'customcode' && <CustomCodeConnect />}
+        </>
       ) : (
         <p className="text-muted-foreground px-2 py-8 text-center text-sm">
           Unknown section type “{section.type}”.

@@ -1,12 +1,30 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   PageRenderer,
   type RenderablePageSection,
 } from '@/modules/sections/PageRenderer'
 import type { PageTheme } from '@/modules/sections/types'
-import type { StorefrontCommerce } from '@/modules/sections/registry'
+import {
+  getSectionDefinition,
+  type StorefrontCommerce,
+} from '@/modules/sections/registry'
+import {
+  productQueryKey,
+  type StoreProductCard,
+  type StorefrontContext,
+  type StorefrontProductQuery,
+} from '@/modules/sections/storefront'
+import { canvasProductsAction } from '@/app/(dashboard)/stores/[storeId]/pages/[pageId]/edit/actions'
+import { SOURCE_POSITION_ATTRIBUTE } from '@/modules/sections/customcode/sanitize'
+import {
+  EDITABLE_IMAGE_ATTRIBUTE,
+  EDITABLE_TEXT_ATTRIBUTE,
+  collapse,
+  liveHookOf,
+  serializeEditedText,
+} from '@/modules/sections/customcode/editable'
 import {
   elementSelector,
   type CanvasElementInfo,
@@ -36,9 +54,23 @@ export function CanvasClient({
   initialTheme,
   initialSections,
   commerce,
+  storeId,
+  storefront: initialStorefront,
+  initialProducts = {},
 }: {
   initialTheme: PageTheme
   initialSections: RenderablePageSection[]
+  /** The store being edited, for fetching products as blocks change. */
+  storeId?: string
+  /**
+   * The shop around the page, on an online store: categories, the product a
+   * product page shows, the list a catalogue page shows. Product grids are
+   * filled from `initialProducts` and then by asking the server as the
+   * merchant points them at other products.
+   */
+  storefront?: StorefrontContext
+  /** Answers to the page's product questions, keyed by query. */
+  initialProducts?: Record<string, StoreProductCard[]>
   /**
    * What the page sells. Resolved on the server and passed through unchanged —
    * the canvas is where a merchant checks their offers actually appear, so
@@ -51,6 +83,64 @@ export function CanvasClient({
 }) {
   const [theme, setTheme] = useState(initialTheme)
   const [sections, setSections] = useState(initialSections)
+  const [products, setProducts] =
+    useState<Record<string, StoreProductCard[]>>(initialProducts)
+  const asked = useRef(new Set(Object.keys(initialProducts)))
+
+  // What each block wants, from its block definition and current content.
+  const queries = useMemo(() => {
+    const out: {
+      sectionId: string
+      key: string
+      query: StorefrontProductQuery
+    }[] = []
+    if (!initialStorefront) return out
+    for (const section of sections) {
+      const definition = section.type
+        ? getSectionDefinition(section.type)
+        : undefined
+      if (!definition?.productQuery) continue
+      const parsed = definition.schema.safeParse(section.content)
+      const query = definition.productQuery(
+        parsed.success ? parsed.data : definition.defaultContent
+      )
+      if (query)
+        out.push({ sectionId: section.id, key: productQueryKey(query), query })
+    }
+    return out
+  }, [sections, initialStorefront])
+
+  // Questions nobody has asked yet go to the server, a beat after the merchant
+  // stops changing them — choosing a category from a list is several changes
+  // in quick succession, and only the last one is worth a round trip.
+  useEffect(() => {
+    if (!storeId) return
+    const missing = queries.filter((entry) => !asked.current.has(entry.key))
+    if (missing.length === 0) return
+    const timer = setTimeout(() => {
+      for (const entry of missing) asked.current.add(entry.key)
+      canvasProductsAction(
+        storeId,
+        missing.map((entry) => entry.query)
+      )
+        .then((answers) =>
+          setProducts((current) => ({ ...current, ...answers }))
+        )
+        .catch(() => {
+          for (const entry of missing) asked.current.delete(entry.key)
+        })
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [queries, storeId])
+
+  const storefront = useMemo<StorefrontContext | undefined>(() => {
+    if (!initialStorefront) return undefined
+    const sectionProducts: Record<string, StoreProductCard[]> = {}
+    for (const entry of queries) {
+      sectionProducts[entry.sectionId] = products[entry.key] ?? []
+    }
+    return { ...initialStorefront, sectionProducts }
+  }, [initialStorefront, queries, products])
   // Kept in a ref rather than state: it changes on every selection and is only
   // ever read inside event handlers, so putting it in state would re-render the
   // whole page preview for something nothing renders.
@@ -74,9 +164,91 @@ export function CanvasClient({
     index?: number
   } | null>(null)
 
+  /**
+   * Words in a custom-code design being retyped, if any — the same idea as
+   * `editing`, for the merchant's own HTML. Kept apart because it ends
+   * differently: there is no element key to report, only where in the HTML
+   * the element was written and the words it showed before, which the shell
+   * checks before it writes. `original` is its markup when the edit began,
+   * put back if the shell refuses the edit.
+   */
+  const codeEditing = useRef<{
+    node: HTMLElement
+    sectionId: string
+    at: number
+    before: string
+    original: string
+  } | null>(null)
+  const lastCodeEdit = useRef<{ node: HTMLElement; original: string } | null>(
+    null
+  )
+
   const post = useCallback((message: CanvasToShellMessage) => {
     window.parent.postMessage(message, window.location.origin)
   }, [])
+
+  const stopCodeEditing = useCallback(() => {
+    const current = codeEditing.current
+    if (!current) return
+    codeEditing.current = null
+    current.node.removeAttribute('contenteditable')
+    current.node.blur()
+    lastCodeEdit.current = { node: current.node, original: current.original }
+    post({
+      type: 'ncom:code-text',
+      sectionId: current.sectionId,
+      at: current.at,
+      before: current.before,
+      html: serializeEditedText(current.node),
+    })
+  }, [post])
+
+  /**
+   * A double-click inside a custom-code design: retype the words under the
+   * pointer, swap the photo, or — for anything else — let the shell say
+   * where that part is changed instead.
+   */
+  const beginCodeEdit = useCallback(
+    (sectionId: string, target: Element) => {
+      const image = target.closest(`[${EDITABLE_IMAGE_ATTRIBUTE}]`)
+      if (image) {
+        const at = Number(image.getAttribute(SOURCE_POSITION_ATTRIBUTE))
+        if (Number.isInteger(at)) {
+          post({ type: 'ncom:code-image', sectionId, at })
+        }
+        return
+      }
+      const hook = liveHookOf(target)
+      if (hook) {
+        post({ type: 'ncom:code-hint', sectionId, hint: 'live', hook })
+        return
+      }
+      const node = target.closest(`[${EDITABLE_TEXT_ATTRIBUTE}]`)
+      const at = Number(node?.getAttribute(SOURCE_POSITION_ATTRIBUTE))
+      if (!(node instanceof HTMLElement) || !Number.isInteger(at)) {
+        post({ type: 'ncom:code-hint', sectionId, hint: 'locked' })
+        return
+      }
+
+      codeEditing.current = {
+        node,
+        sectionId,
+        at,
+        before: collapse(node.textContent ?? ''),
+        original: node.innerHTML,
+      }
+      post({ type: 'ncom:code-edit-start', sectionId })
+      node.contentEditable = 'true'
+      node.spellcheck = false
+      node.focus({ preventScroll: true })
+      const range = document.createRange()
+      range.selectNodeContents(node)
+      const selectionApi = window.getSelection()
+      selectionApi?.removeAllRanges()
+      selectionApi?.addRange(range)
+    },
+    [post]
+  )
 
   /**
    * Ends an inline edit and hands the final markup to the shell.
@@ -153,8 +325,16 @@ export function CanvasClient({
         return
       }
 
+      if (data.type === 'ncom:code-revert') {
+        const last = lastCodeEdit.current
+        if (last?.node.isConnected) last.node.innerHTML = last.original
+        lastCodeEdit.current = null
+        return
+      }
+
       if (data.type === 'ncom:edit-element') {
         stopEditing()
+        stopCodeEditing()
         if (!data.elementKey) return
         const node = findElement(data.sectionId, data.elementKey)
         if (!node) return
@@ -180,10 +360,23 @@ export function CanvasClient({
         return
       }
 
+      if (data.type === 'ncom:scroll-by') {
+        window.scrollBy({ top: data.dy })
+        return
+      }
+
       if (data.type === 'ncom:reveal') {
-        document
-          .querySelector(`[data-section-id="${cssEscape(data.sectionId)}"]`)
-          ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        // A block just added is asked for in the same breath as the update
+        // that draws it, which React has not put on the page yet — so it is
+        // looked for again over the next few frames rather than given up on.
+        const selector = `[data-section-id="${cssEscape(data.sectionId)}"]`
+        let frames = 0
+        const reveal = () => {
+          const node = document.querySelector(selector)
+          if (node) node.scrollIntoView({ behavior: 'smooth', block: 'start' })
+          else if (++frames < 20) requestAnimationFrame(reveal)
+        }
+        reveal()
       }
     }
 
@@ -194,7 +387,7 @@ export function CanvasClient({
       window.location.origin
     )
     return () => window.removeEventListener('message', handleMessage)
-  }, [measure, stopEditing])
+  }, [measure, stopEditing, stopCodeEditing])
 
   // The selected element moves whenever anything above it reflows — a style
   // edit, an image loading, the merchant scrolling. Each of these re-reports
@@ -213,6 +406,40 @@ export function CanvasClient({
       observer.disconnect()
     }
   }, [measure])
+
+  // Where every section sits, for the shell's insertion lines, drop targets
+  // and section toolbar. Reported on the next frame after anything that can
+  // move them — a scroll, a resize, an edit — and at most once per frame.
+  useEffect(() => {
+    let frame = 0
+    const report = () => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => {
+        const rects = [
+          ...document.querySelectorAll<HTMLElement>('[data-section-id]'),
+        ].map((node) => {
+          const box = node.getBoundingClientRect()
+          return {
+            id: node.getAttribute('data-section-id') ?? '',
+            top: box.top,
+            height: box.height,
+          }
+        })
+        post({ type: 'ncom:sections', sections: rects })
+      })
+    }
+    report()
+    window.addEventListener('scroll', report, { passive: true })
+    window.addEventListener('resize', report)
+    const observer = new ResizeObserver(report)
+    observer.observe(document.body)
+    return () => {
+      cancelAnimationFrame(frame)
+      window.removeEventListener('scroll', report)
+      window.removeEventListener('resize', report)
+      observer.disconnect()
+    }
+  }, [post, sections])
 
   // Re-measured after every draft change, because the edit that just arrived is
   // usually the one that moved the element.
@@ -238,6 +465,18 @@ export function CanvasClient({
     }
 
     function onKeyDown(event: KeyboardEvent) {
+      if (codeEditing.current) {
+        // Shift+Enter is a line break inside the sentence; Enter alone, or
+        // Escape, is done — as on any other block.
+        if (
+          event.key === 'Escape' ||
+          (event.key === 'Enter' && !event.shiftKey)
+        ) {
+          event.preventDefault()
+          stopCodeEditing()
+        }
+        return
+      }
       if (!editing.current) return
       // Escape and Enter both mean "done". Enter would otherwise split a
       // headline into two paragraphs, which no block's content field can hold.
@@ -248,6 +487,10 @@ export function CanvasClient({
     }
 
     function onPointerDownOutside(event: PointerEvent) {
+      // Inside a design the event's target is the design's host, so whether
+      // the pointer went down in the words being typed is read from the path.
+      const code = codeEditing.current
+      if (code && !event.composedPath().includes(code.node)) stopCodeEditing()
       const current = editing.current
       if (!current) return
       if (event.target instanceof Node && current.node.contains(event.target)) {
@@ -256,15 +499,28 @@ export function CanvasClient({
       stopEditing()
     }
 
+    // Pasted into a design's words: plain text only. The design is the
+    // merchant's HTML, and a paste from a web page would otherwise splice
+    // somebody else's styled spans into it.
+    function onPaste(event: ClipboardEvent) {
+      const code = codeEditing.current
+      if (!code || !event.composedPath().includes(code.node)) return
+      event.preventDefault()
+      const text = event.clipboardData?.getData('text/plain') ?? ''
+      document.execCommand('insertText', false, text.replace(/\s+/g, ' '))
+    }
+
     document.addEventListener('input', onInput)
     document.addEventListener('keydown', onKeyDown, true)
     document.addEventListener('pointerdown', onPointerDownOutside, true)
+    document.addEventListener('paste', onPaste, true)
     return () => {
       document.removeEventListener('input', onInput)
       document.removeEventListener('keydown', onKeyDown, true)
       document.removeEventListener('pointerdown', onPointerDownOutside, true)
+      document.removeEventListener('paste', onPaste, true)
     }
-  }, [post, stopEditing])
+  }, [post, stopEditing, stopCodeEditing])
 
   useEffect(() => {
     function elementAt(target: EventTarget | null): CanvasElementInfo | null {
@@ -276,12 +532,26 @@ export function CanvasClient({
       return sectionId ? describe(node, sectionId) : null
     }
 
+    let hoveredSection: string | null = null
+
     function onPointerMove(event: PointerEvent) {
       post({ type: 'ncom:element-hover', element: elementAt(event.target) })
+      const section =
+        event.target instanceof Element
+          ? (event.target
+              .closest('[data-section-id]')
+              ?.getAttribute('data-section-id') ?? null)
+          : null
+      if (section !== hoveredSection) {
+        hoveredSection = section
+        post({ type: 'ncom:section-hover', sectionId: section })
+      }
     }
 
     function onPointerLeave() {
       post({ type: 'ncom:element-hover', element: null })
+      hoveredSection = null
+      post({ type: 'ncom:section-hover', sectionId: null })
     }
 
     function onMouseDown(event: MouseEvent) {
@@ -290,6 +560,12 @@ export function CanvasClient({
         editing.current &&
         event.target instanceof Node &&
         editing.current.node.contains(event.target)
+      ) {
+        return
+      }
+      if (
+        codeEditing.current &&
+        event.composedPath().includes(codeEditing.current.node)
       ) {
         return
       }
@@ -316,6 +592,26 @@ export function CanvasClient({
       ) {
         return
       }
+      if (
+        codeEditing.current &&
+        event.composedPath().includes(codeEditing.current.node)
+      ) {
+        return
+      }
+      // A double-click inside a custom-code design is about the words or the
+      // photo under the pointer, which only this side can see. Its first
+      // click has already selected the design as a whole.
+      if (event.detail >= 2) {
+        const code = codeTargetOf(event)
+        if (code) {
+          event.preventDefault()
+          event.stopPropagation()
+          stopEditing()
+          stopCodeEditing()
+          beginCodeEdit(code.sectionId, code.target)
+          return
+        }
+      }
       const element = elementAt(event.target)
       if (!element) return
       // A click in the canvas is a selection, not a visit. Without this, every
@@ -340,16 +636,42 @@ export function CanvasClient({
       document.removeEventListener('mousedown', onMouseDown, true)
       document.removeEventListener('click', onClick, true)
     }
-  }, [post])
+  }, [post, stopEditing, stopCodeEditing, beginCodeEdit])
 
   return (
     <PageRenderer
       theme={theme}
       sections={sections}
       commerce={commerce}
+      storefront={storefront}
       editing
     />
   )
+}
+
+/**
+ * The element under a click inside a custom-code design, and the section the
+ * design belongs to, or null for a click anywhere else.
+ *
+ * The design is in a shadow root, so at the document the click's target is
+ * the design's host; the element actually clicked comes first in the event's
+ * path, before the host.
+ */
+function codeTargetOf(
+  event: Event
+): { sectionId: string; target: Element } | null {
+  const path = event.composedPath()
+  const hostIndex = path.findIndex(
+    (node) => node instanceof HTMLElement && node.hasAttribute('data-ncom-code')
+  )
+  if (hostIndex <= 0) return null
+  const target = path
+    .slice(0, hostIndex)
+    .find((node): node is Element => node instanceof Element)
+  const sectionId = (path[hostIndex] as HTMLElement)
+    .closest('[data-section-id]')
+    ?.getAttribute('data-section-id')
+  return target && sectionId ? { sectionId, target } : null
 }
 
 /** `getBoundingClientRect` as a plain object the structured clone can carry. */

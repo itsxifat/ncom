@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { toast } from 'sonner'
 import { useBuilderStore, styleBreakpoint, type Breakpoint } from './store'
 import { getSectionDefinition } from '../sections/registry'
 import { sectionExtras } from '../sections/elements'
@@ -12,6 +13,19 @@ import {
 import { sanitizeRichText, richTextToPlain } from '../sections/sanitizeHtml'
 import { fieldAtPath } from '../sections/editorFields'
 import { FloatingToolbar, duplicableAs } from './FloatingToolbar'
+import {
+  DropCatcher,
+  SectionChrome,
+  type SectionRect,
+} from './CanvasSectionChrome'
+import { useBuilderSite } from './SiteContext'
+import { ImagePickerDialog } from './ImagePicker'
+import { MAX_HTML_LENGTH } from '../sections/customcode/sanitize'
+import {
+  replaceElementContent,
+  replaceImageSource,
+} from '../sections/customcode/source-edit'
+import { collapse, wordsOf } from '../sections/customcode/editable'
 import {
   instanceKey,
   parseElementKey,
@@ -113,6 +127,23 @@ export function Canvas({
    * re-ran when the flag changed would do exactly that on the first keystroke.
    */
   const editingRef = useRef(false)
+  /** A photo in a custom-code design the merchant asked to swap. */
+  const [codeImage, setCodeImage] = useState<{
+    sectionId: string
+    at: number
+  } | null>(null)
+  // The "double-click a word or a photo" hint, said once a session: it is
+  // help the first time and nagging the fifth.
+  const hintedLocked = useRef(false)
+
+  // Where each section sits in the canvas, and which one the pointer was last
+  // over. The last one rather than the current one, so the section toolbar
+  // stays put while the pointer travels from the page onto the toolbar — which
+  // is drawn out here, over the frame, where the frame reports no hover at all.
+  const [sectionRects, setSectionRects] = useState<SectionRect[]>([])
+  const [chromeSection, setChromeSection] = useState<string | null>(null)
+  const site = useBuilderSite()
+  const reveal = useBuilderStore((s) => s.reveal)
 
   const breakpoint = useBuilderStore((s) => s.breakpoint)
   const sections = useBuilderStore((s) => s.sections)
@@ -243,6 +274,74 @@ export function Canvas({
     [post]
   )
 
+  /**
+   * Writes a custom-code design back with one element's words retyped.
+   *
+   * The canvas says where the element was written and what it said; the HTML
+   * at that place must still say it, or the edit is refused and the canvas
+   * puts the old words back — a position from a render before some other
+   * change would otherwise splice the new words into the wrong place.
+   */
+  const applyCodeText = useCallback(
+    (sectionId: string, at: number, before: string, html: string) => {
+      const section = useBuilderStore
+        .getState()
+        .sections.find((candidate) => candidate.id === sectionId)
+      const source =
+        section?.type === 'customcode' &&
+        typeof section.content.html === 'string'
+          ? section.content.html
+          : null
+      // Nothing typed: nothing to write, and no reason to reformat the HTML.
+      if (source !== null && collapse(wordsOf(html)) === before) return
+      const next =
+        source === null
+          ? null
+          : replaceElementContent(
+              source,
+              at,
+              html,
+              (current) => wordsOf(current) === before
+            )
+      if (!section || next === null || next.length > MAX_HTML_LENGTH) {
+        post({ type: 'ncom:code-revert' })
+        toast.error(
+          next === null
+            ? 'That text can only be changed in the design’s HTML.'
+            : 'The design is too long to save that change.',
+          {
+            description:
+              next === null
+                ? 'Open the Content tab to edit it there, or ask your AI to change it.'
+                : undefined,
+          }
+        )
+        return
+      }
+      updateSectionContent(sectionId, { ...section.content, html: next })
+    },
+    [post, updateSectionContent]
+  )
+
+  /** Writes a custom-code design back showing a different photo. */
+  const applyCodeImage = useCallback(
+    (sectionId: string, at: number, url: string) => {
+      const section = useBuilderStore
+        .getState()
+        .sections.find((candidate) => candidate.id === sectionId)
+      if (section?.type !== 'customcode') return
+      const source =
+        typeof section.content.html === 'string' ? section.content.html : ''
+      const next = replaceImageSource(source, at, url)
+      if (next === null || next.length > MAX_HTML_LENGTH) {
+        toast.error('That photo can only be changed in the design’s HTML.')
+        return
+      }
+      updateSectionContent(sectionId, { ...section.content, html: next })
+    },
+    [updateSectionContent]
+  )
+
   useEffect(() => {
     function handleMessage(event: MessageEvent<CanvasToShellMessage>) {
       // The canvas is same-origin; anything else posting here is not ours.
@@ -260,6 +359,16 @@ export function Canvas({
         return
       }
 
+      if (data.type === 'ncom:sections') {
+        setSectionRects(data.sections)
+        return
+      }
+
+      if (data.type === 'ncom:section-hover') {
+        if (data.sectionId) setChromeSection(data.sectionId)
+        return
+      }
+
       if (data.type === 'ncom:element-geometry') {
         setGeometry(data.element)
         return
@@ -270,6 +379,51 @@ export function Canvas({
         if (data.done) {
           editingRef.current = false
           setEditing(false)
+        }
+        return
+      }
+
+      if (data.type === 'ncom:code-edit-start') {
+        editingRef.current = true
+        setEditing(true)
+        return
+      }
+
+      if (data.type === 'ncom:code-text') {
+        applyCodeText(data.sectionId, data.at, data.before, data.html)
+        editingRef.current = false
+        setEditing(false)
+        return
+      }
+
+      if (data.type === 'ncom:code-image') {
+        setCodeImage({ sectionId: data.sectionId, at: data.at })
+        return
+      }
+
+      if (data.type === 'ncom:code-hint') {
+        if (data.hint === 'live') {
+          toast(
+            data.hook === 'delivery'
+              ? 'This delivery charge comes from your page’s delivery settings'
+              : site?.kind === 'STORE'
+                ? 'This comes from your product'
+                : 'This comes from your offer',
+            {
+              description:
+                data.hook === 'delivery'
+                  ? 'Change it under Delivery & offers — the design updates on its own.'
+                  : site?.kind === 'STORE'
+                    ? 'Change it on the product in Products — the design updates on its own.'
+                    : 'Change it under Delivery & offers — the design updates on its own.',
+            }
+          )
+        } else if (!hintedLocked.current) {
+          hintedLocked.current = true
+          toast('Double-click a piece of text or a photo to change it', {
+            description:
+              'The rest of this design — its layout, colours and icons — is in its HTML, under Content.',
+          })
         }
         return
       }
@@ -290,7 +444,7 @@ export function Canvas({
 
     window.addEventListener('message', handleMessage)
     return () => window.removeEventListener('message', handleMessage)
-  }, [selectElement, applyText, beginTextEdit])
+  }, [selectElement, applyText, beginTextEdit, applyCodeText, site?.kind])
 
   // Skipped on mount — the iframe has just fetched the current offers by
   // definition.
@@ -319,6 +473,12 @@ export function Canvas({
       })),
     })
   }, [readyToken, sections, theme, post])
+
+  // A click in the layers list asks to see that section.
+  useEffect(() => {
+    if (!reveal || readyToken === 0) return
+    post({ type: 'ncom:reveal', sectionId: reveal.id })
+  }, [reveal, readyToken, post])
 
   useEffect(() => {
     if (readyToken === 0) return
@@ -460,24 +620,44 @@ export function Canvas({
     pasteElementStyle,
   ])
 
-  const viewport = DEVICE_VIEWPORTS[breakpoint]
+  const device = DEVICE_VIEWPORTS[breakpoint]
 
   // Shrink to fit, never enlarge: scaling a 375px phone up to fill a wide pane
   // would be just as much of a lie as the old stretched desktop frame, only in
   // the other direction. Before the first measurement there is nothing to fit
   // against, so the frame starts at 1:1 and settles on the same tick.
+  //
+  // A phone is shown whole, at its real proportions. A computer or tablet
+  // frame is fitted by width and then runs the full height of the pane: fitted
+  // by height as well, a 1440×900 screen beside two panels is a postcard with
+  // the rest of the pane empty, and the merchant scrolls a letterbox.
+  const fitHeight = breakpoint === 'mobile'
   const scale =
     shell.width > 0 && shell.height > 0
       ? Math.min(
           1,
-          shell.width / viewport.width,
-          shell.height / viewport.height
+          shell.width / device.width,
+          fitHeight ? shell.height / device.height : 1
         )
       : 1
+  const viewport = {
+    width: device.width,
+    height:
+      fitHeight || shell.height === 0
+        ? device.height
+        : Math.max(device.height * 0.6, Math.floor(shell.height / scale)),
+  }
 
   const label = selectedElementKey
     ? elementLabel(selectedSection, selectedElementKey)
     : null
+  // A custom-code design selected as a whole gets no move surface. Its
+  // insides are where a double-click means something — a word to retype, a
+  // photo to swap — and a surface over it would take that double-click
+  // before the canvas could see what was under the pointer.
+  const selectedCodeArea =
+    selectedSection?.type === 'customcode' &&
+    parseElementKey(selectedElementKey ?? '').base === 'frame'
 
   // The hover outline is suppressed on the element already selected — two boxes
   // on the same element reads as a rendering bug, not as feedback.
@@ -521,6 +701,45 @@ export function Canvas({
           }}
         />
 
+        {!editing &&
+          (() => {
+            const id = chromeSection ?? selectedSectionId
+            const rect = sectionRects.find((candidate) => candidate.id === id)
+            const index = sections.findIndex((candidate) => candidate.id === id)
+            if (!rect || index === -1) return null
+            // An element of this section is selected: its own toolbar is on
+            // screen, and the section's would sit on top of it.
+            if (selectedElementKey && selectedSectionId === id) return null
+            // Clipped to the frame, so the chrome of a section that runs past
+            // the bottom of the screen does not spill out over the editor.
+            return (
+              <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-lg">
+                <SectionChrome
+                  key={rect.id}
+                  rect={rect}
+                  index={index}
+                  scale={scale}
+                  width={viewport.width}
+                  context={
+                    site ? { site: site.kind, role: site.pageRole } : null
+                  }
+                  selected={
+                    selectedSectionId === rect.id && !selectedElementKey
+                  }
+                />
+              </div>
+            )
+          })()}
+
+        <DropCatcher
+          rects={sectionRects}
+          sectionIds={sections.map((section) => section.id)}
+          scale={scale}
+          width={viewport.width}
+          height={viewport.height}
+          onScroll={(dy) => post({ type: 'ncom:scroll-by', dy })}
+        />
+
         {showHover && hover && (
           <Box
             rect={hover.rect}
@@ -554,7 +773,7 @@ export function Canvas({
             {/* No drag surface while typing: the merchant is inside the text,
                 and a layer over it would swallow every click meant for the
                 caret. */}
-            {!editing && (
+            {!editing && !selectedCodeArea && (
               <DragLayer
                 element={geometry}
                 elementKey={selectedElementKey}
@@ -585,6 +804,16 @@ export function Canvas({
           </>
         )}
       </div>
+      <ImagePickerDialog
+        open={codeImage !== null}
+        onOpenChange={(open) => {
+          if (!open) setCodeImage(null)
+        }}
+        onSelect={(url) => {
+          if (codeImage) applyCodeImage(codeImage.sectionId, codeImage.at, url)
+          setCodeImage(null)
+        }}
+      />
     </div>
   )
 }

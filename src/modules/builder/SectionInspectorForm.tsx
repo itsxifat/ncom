@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import {
   useForm,
   useFieldArray,
@@ -10,7 +10,7 @@ import {
   type UseFormRegister,
 } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Plus, Trash2, GripVertical } from 'lucide-react'
+import { Plus, Trash2, GripVertical, Maximize2 } from 'lucide-react'
 import {
   fieldIsVisible,
   optionLabel,
@@ -25,11 +25,23 @@ import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import { Button } from '@/components/ui/button'
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { FormSelect } from '@/components/ui/form-select'
 import { FontPicker } from '@/components/ui/font-picker'
 import { ColorField } from '@/components/ui/color-picker'
 import { RichTextEditor } from '@/components/ui/rich-text-editor'
 import { DateTimeField } from './DateTimeField'
+import {
+  CategoryFieldControl,
+  CollectionFieldControl,
+  LinkFieldControl,
+  ProductsFieldControl,
+} from './StoreFields'
 import { ProductPickerDialog } from '@/components/store/product-picker'
 import type { PickerProduct } from '@/server/services/productService'
 import { formatMoneyAmount } from '@/lib/money'
@@ -45,6 +57,7 @@ function emptyValueForField(field: FieldConfig): unknown {
   switch (field.type) {
     case 'array':
     case 'stringArray':
+    case 'products':
       return []
     case 'boolean':
       return false
@@ -298,6 +311,23 @@ function FieldRenderer({
     )
   }
 
+  if (field.type === 'code') {
+    return (
+      <Controller
+        name={name}
+        control={control}
+        render={({ field: controllerField }) => (
+          <CodeField
+            field={field}
+            value={(controllerField.value as string) ?? ''}
+            onChange={controllerField.onChange}
+            hint={hint}
+          />
+        )}
+      />
+    )
+  }
+
   if (field.type === 'color') {
     return (
       <Controller
@@ -366,6 +396,53 @@ function FieldRenderer({
 
   if (field.type === 'product') {
     return <ProductField name={name} label={field.label} control={control} />
+  }
+
+  if (
+    field.type === 'link' ||
+    field.type === 'category' ||
+    field.type === 'collection' ||
+    field.type === 'products'
+  ) {
+    return (
+      <Controller
+        name={name}
+        control={control}
+        render={({ field: controllerField }) => (
+          <Field>
+            <FieldLabel>{field.label}</FieldLabel>
+            {field.type === 'link' ? (
+              <LinkFieldControl
+                value={(controllerField.value as string) ?? ''}
+                onChange={controllerField.onChange}
+                placeholder={field.placeholder}
+              />
+            ) : field.type === 'category' ? (
+              <CategoryFieldControl
+                value={(controllerField.value as string) ?? ''}
+                onChange={controllerField.onChange}
+              />
+            ) : field.type === 'collection' ? (
+              <CollectionFieldControl
+                value={(controllerField.value as string) ?? ''}
+                onChange={controllerField.onChange}
+              />
+            ) : (
+              <ProductsFieldControl
+                value={
+                  Array.isArray(controllerField.value)
+                    ? (controllerField.value as string[])
+                    : []
+                }
+                onChange={controllerField.onChange}
+                max={field.max}
+              />
+            )}
+            {hint}
+          </Field>
+        )}
+      />
+    )
   }
 
   if (field.type === 'select') {
@@ -585,6 +662,91 @@ function StringArrayField({
         <Plus className="size-3.5" /> Add
       </Button>
     </div>
+  )
+}
+
+const CODE_BOX =
+  'border-input bg-background focus-visible:ring-ring/40 w-full resize-y rounded-lg border px-3 py-2 font-mono text-[12px] leading-relaxed whitespace-pre outline-none focus-visible:ring-2'
+
+/**
+ * Pasted code, edited as text.
+ *
+ * A plain monospace box, deliberately: a merchant using this has code an AI
+ * or a designer gave them, and the one thing they need is to paste it and see
+ * it on the canvas. Spell-check, autocorrect and line wrapping are off because
+ * each of them quietly changes code. The larger editor is the same value in a
+ * dialog, for when the pasted design is long enough that a sidebar box makes
+ * it impossible to find anything.
+ */
+function CodeField({
+  field,
+  value,
+  onChange,
+  hint,
+}: {
+  field: Extract<FieldConfig, { type: 'code' }>
+  value: string
+  onChange: (value: string) => void
+  hint: ReactNode
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const count = field.maxLength ? (
+    <span
+      className={
+        value.length > field.maxLength
+          ? 'text-destructive'
+          : 'text-muted-foreground'
+      }
+    >
+      {value.length.toLocaleString()} / {field.maxLength.toLocaleString()}
+    </span>
+  ) : null
+  const box = (rows: number, className?: string) => (
+    <textarea
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      rows={rows}
+      placeholder={field.placeholder}
+      spellCheck={false}
+      autoCapitalize="off"
+      autoCorrect="off"
+      autoComplete="off"
+      wrap="off"
+      aria-label={field.label}
+      className={className ? `${CODE_BOX} ${className}` : CODE_BOX}
+    />
+  )
+
+  return (
+    <Field>
+      <div className="flex items-center justify-between gap-2">
+        <FieldLabel>{field.label}</FieldLabel>
+        <Button
+          type="button"
+          variant="ghost"
+          size="xs"
+          onClick={() => setExpanded(true)}
+        >
+          <Maximize2 />
+          Bigger editor
+        </Button>
+      </div>
+      {box(8)}
+      {count && <p className="text-xs tabular-nums">{count}</p>}
+      {hint}
+      <Dialog open={expanded} onOpenChange={setExpanded}>
+        <DialogContent className="flex h-[85svh] flex-col gap-3 sm:max-w-[min(96vw,1100px)]">
+          <div className="flex flex-col gap-1 pr-8">
+            <DialogTitle>{field.label}</DialogTitle>
+            <DialogDescription>
+              Changes show on the page as you type.
+              {count && <> · {count}</>}
+            </DialogDescription>
+          </div>
+          {box(20, 'min-h-0 flex-1 resize-none')}
+        </DialogContent>
+      </Dialog>
+    </Field>
   )
 }
 

@@ -23,9 +23,9 @@ import { useBuilderStore, styleBreakpoint } from './store'
 import { useThemeSwatches } from './themeSwatches'
 import { parseElementKey, type CanvasElementInfo } from './canvasBridge'
 import { getSectionDefinition } from '../sections/registry'
+import { collectText } from '../sections/editorFields'
 import type { ElementStyle } from '../sections/elementStyle'
-import { FONT_GROUPS } from '@/lib/fonts'
-import { FormSelect } from '@/components/ui/form-select'
+import { FontPicker } from '@/components/ui/font-picker'
 import { ColorSwatchButton } from '@/components/ui/color-picker'
 import {
   DropdownMenu,
@@ -55,7 +55,7 @@ import { cn } from '@/lib/utils'
  * paints it as light-on-white; `<input type="color">` hands the whole
  * interaction over and, on a machine where that picker cannot open, silently
  * does nothing at all. Both are replaced by components we own — see
- * `components/ui/form-select.tsx` and `components/ui/color-picker.tsx`.
+ * `components/ui/font-picker.tsx` and `components/ui/color-picker.tsx`.
  */
 export function FloatingToolbar({
   element,
@@ -142,26 +142,22 @@ export function FloatingToolbar({
 
       {textual && (
         <>
-          <FormSelect
+          {/* The same searchable picker as the Style panel's, Google Fonts
+              and all, in a trigger small enough for the bar; its list opens
+              at full width. "Theme font" at the top is the way back. */}
+          <FontPicker
             aria-label="Font"
             size="sm"
+            inheritLabel="Theme font"
             value={style.fontFamily ?? ''}
-            onChange={(event) =>
-              set({ fontFamily: event.target.value || undefined })
+            onValueChange={(font) => set({ fontFamily: font || undefined })}
+            sampleText={
+              section && definition
+                ? collectText(definition.editorFields, section.content)
+                : undefined
             }
             className="h-7 w-28 rounded-md px-1.5 text-[11px]"
-          >
-            <option value="">Theme font</option>
-            {FONT_GROUPS.map((group) => (
-              <optgroup key={group.label} label={group.label}>
-                {group.fonts.map((font) => (
-                  <option key={font.name} value={font.name}>
-                    {font.name}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
-          </FormSelect>
+          />
 
           <input
             type="number"

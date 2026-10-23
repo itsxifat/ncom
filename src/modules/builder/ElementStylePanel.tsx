@@ -29,8 +29,9 @@ import {
   type ElementStyle,
 } from '../sections/elementStyle'
 import type { ElementKind } from '../sections/elementDescriptors'
-import { FONT_GROUPS } from '@/lib/fonts'
-import { FormSelect } from '@/components/ui/form-select'
+import { getSectionDefinition } from '../sections/registry'
+import { collectText } from '../sections/editorFields'
+import { FontPicker } from '@/components/ui/font-picker'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
@@ -100,6 +101,13 @@ export function ElementStylePanel({
   const bp = styleBreakpoint(breakpoint)
   const section = sections.find((s) => s.id === sectionId)
   const design = section?.config?.elements?.[elementKey]
+  // The block's own words, so the font list leads with faces that can write
+  // them — Bangla ones first on a Bangla page — as the section's pickers do.
+  const definition = section ? getSectionDefinition(section.type) : undefined
+  const sampleText =
+    section && definition
+      ? collectText(definition.editorFields, section.content)
+      : undefined
   const editingHover = target === 'hover'
   const style: ElementStyle =
     (editingHover ? design?.hover : design?.[bp]) ?? {}
@@ -184,29 +192,17 @@ export function ElementStylePanel({
             set={has('fontFamily')}
             onReset={() => reset('fontFamily')}
           >
-            {/* Not a native `<select>`: its option list is drawn by the
-                operating system, which never sees this page's theme and paints
-                a dark-mode dropdown as white text on a white sheet. */}
-            <FormSelect
+            {/* The same picker as the theme's and the section's fonts, so one
+                headline can have any Google font too, not only the bundled
+                ones. "Theme font" at the top of its list is the way back. */}
+            <FontPicker
               aria-label="Font"
               size="sm"
+              inheritLabel="Theme font"
               value={style.fontFamily ?? ''}
-              onChange={(event) =>
-                set({ fontFamily: event.target.value || undefined })
-              }
-              className="border-input bg-card h-8 w-full rounded-[0.625rem] border px-2 text-xs"
-            >
-              <option value="">Theme font</option>
-              {FONT_GROUPS.map((group) => (
-                <optgroup key={group.label} label={group.label}>
-                  {group.fonts.map((font) => (
-                    <option key={font.name} value={font.name}>
-                      {font.name}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </FormSelect>
+              onValueChange={(font) => set({ fontFamily: font || undefined })}
+              sampleText={sampleText}
+            />
           </Row>
 
           <div className="grid grid-cols-2 gap-2">

@@ -117,7 +117,7 @@ export function ImagePicker({
   )
 }
 
-function ImagePickerDialog({
+export function ImagePickerDialog({
   open,
   onOpenChange,
   onSelect,

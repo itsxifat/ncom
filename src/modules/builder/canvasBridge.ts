@@ -77,12 +77,36 @@ export interface CanvasEditMessage {
   elementKey: string | null
 }
 
+/**
+ * Scrolls the canvas by a distance, in canvas pixels.
+ *
+ * Sent while a block is dragged near the frame's top or bottom edge, so the
+ * merchant can drop it below the fold without letting go to scroll.
+ */
+export interface CanvasScrollMessage {
+  type: 'ncom:scroll-by'
+  dy: number
+}
+
+/**
+ * Puts back the words of a custom-code edit the shell could not store.
+ *
+ * The canvas already shows what the merchant typed when it hands the edit
+ * over, so an edit refused (see `CanvasCodeTextMessage`) would otherwise stay
+ * on screen, looking saved, until the next reload.
+ */
+export interface CanvasCodeRevertMessage {
+  type: 'ncom:code-revert'
+}
+
 export type ShellToCanvasMessage =
   | CanvasUpdateMessage
   | CanvasSelectMessage
   | CanvasMeasureMessage
   | CanvasRevealMessage
   | CanvasEditMessage
+  | CanvasScrollMessage
+  | CanvasCodeRevertMessage
 
 // ── Canvas → shell ────────────────────────────────────────────────────
 
@@ -172,12 +196,82 @@ export interface CanvasTextMessage {
   done: boolean
 }
 
+/** Where every section sits, top to bottom, in canvas viewport pixels. */
+export interface CanvasSectionsMessage {
+  type: 'ncom:sections'
+  sections: { id: string; top: number; height: number }[]
+}
+
+/**
+ * Which section the pointer is over, including the parts of it no element
+ * covers — padding, a background — which element hover cannot report.
+ */
+export interface CanvasSectionHoverMessage {
+  type: 'ncom:section-hover'
+  sectionId: string | null
+}
+
+// ── Custom code ───────────────────────────────────────────────────────
+//
+// A custom-code design has no element keys inside it — it is the merchant's
+// own HTML, in a shadow root — so its words and photos are addressed by where
+// they were written in that HTML instead: `at`, the index the sanitiser
+// marked each element with on the canvas. The canvas starts and ends these
+// edits itself, since only it can see inside the design; the shell writes
+// them into the block's HTML (see `customcode/source-edit.ts`).
+
+/** The merchant started retyping words in a design. Holds canvas updates. */
+export interface CanvasCodeEditStartMessage {
+  type: 'ncom:code-edit-start'
+  sectionId: string
+}
+
+/** The words of one element of a design, retyped, on the way to its HTML. */
+export interface CanvasCodeTextMessage {
+  type: 'ncom:code-text'
+  sectionId: string
+  at: number
+  /**
+   * The element's words before the edit, as the canvas showed them. The
+   * shell checks the HTML at `at` still says this before it writes there.
+   */
+  before: string
+  /** The new contents, escaped, with the formatting the words kept. */
+  html: string
+}
+
+/** A double-click on a photo in a design: the merchant wants another one. */
+export interface CanvasCodeImageMessage {
+  type: 'ncom:code-image'
+  sectionId: string
+  at: number
+}
+
+/**
+ * A double-click on something in a design that cannot be typed over — a
+ * figure a hook fills in (`live`), or layout (`locked`) — so the shell can
+ * say where it is changed instead of the click doing nothing.
+ */
+export interface CanvasCodeHintMessage {
+  type: 'ncom:code-hint'
+  sectionId: string
+  hint: 'live' | 'locked'
+  /** For `live`: which hook, e.g. `price`. */
+  hook?: string
+}
+
 export type CanvasToShellMessage =
   | CanvasReadyMessage
   | CanvasHoverMessage
   | CanvasClickMessage
   | CanvasGeometryMessage
   | CanvasTextMessage
+  | CanvasSectionsMessage
+  | CanvasSectionHoverMessage
+  | CanvasCodeEditStartMessage
+  | CanvasCodeTextMessage
+  | CanvasCodeImageMessage
+  | CanvasCodeHintMessage
 
 // ── Element keys ──────────────────────────────────────────────────────
 
