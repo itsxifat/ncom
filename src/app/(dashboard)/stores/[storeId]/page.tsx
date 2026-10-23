@@ -165,7 +165,13 @@ export default async function StoreOverviewPage({
                     {page.title}
                   </Link>
                 }
-                meta={`/${page.isHome ? '' : page.slug}`}
+                meta={
+                  page.role === 'PRODUCT'
+                    ? 'Design for every product'
+                    : page.role === 'CATALOG'
+                      ? 'Design for categories and search'
+                      : `/${page.isHome ? '' : page.slug}`
+                }
                 badges={
                   <>
                     {page.isHome && <Badge variant="outline">Home</Badge>}
@@ -176,7 +182,7 @@ export default async function StoreOverviewPage({
                 }
               />
               <ListRowActions>
-                {page.status === 'PUBLISHED' && (
+                {page.status === 'PUBLISHED' && page.role === 'STANDARD' && (
                   <Button
                     variant="ghost"
                     size="sm"

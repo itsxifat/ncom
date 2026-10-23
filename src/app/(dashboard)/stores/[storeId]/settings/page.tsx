@@ -95,22 +95,22 @@ export default async function StoreSettingsPage({
 
       <SettingsSection
         title="Elsewhere"
-        description="Tracking is set up for every store together under Tracking. Currency, tax, shipping, payments and order numbering are shared by every store in this workspace."
+        description="Ad tracking, currency, payments, delivery charges and taxes are shared by every website in this workspace, so they live in Settings."
       >
         <div className="flex flex-wrap gap-2">
           {[
             // Tracking first: it used to be edited on this page, and this is
             // the pointer for anyone who came here looking for it.
-            { href: '/tracking', label: 'Pixels & tracking' },
-            { href: '/settings/payments', label: 'Payments' },
-            { href: '/settings/shipping', label: 'Shipping' },
-            { href: '/settings/locations', label: 'Locations' },
-            { href: '/settings/taxes', label: 'Taxes' },
+            { href: '/tracking', label: 'Facebook & Google ad tracking' },
+            { href: '/settings/business', label: 'Business & currency' },
+            { href: '/settings/payments', label: 'How customers pay' },
+            { href: '/settings/shipping', label: 'Delivery charges' },
+            { href: '/settings/taxes', label: 'VAT & taxes' },
           ].map((item) => (
             <Link
               key={item.href}
               href={item.href}
-              className="bg-card ring-foreground/6 hover:ring-foreground/12 rounded-full px-4 py-2 text-sm font-medium ring-1 transition"
+              className="bg-card ring-border hover:ring-foreground/20 rounded-lg px-4 py-2 text-sm font-medium ring-1 transition"
             >
               {item.label}
             </Link>

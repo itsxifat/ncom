@@ -1,13 +1,13 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { ArrowLeft, ExternalLink } from 'lucide-react'
+import { ArrowLeft, ExternalLink, Pencil } from 'lucide-react'
 import { getActiveOrganization } from '@/server/services/organizationService'
 import { getStore } from '@/server/services/storeService'
 import { prisma } from '@/server/db/client'
 import { env } from '@/lib/env'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { PillTabs } from '@/components/app/pill-tabs'
+import { SectionTabs } from '@/components/app/section-tabs'
 
 /**
  * The store shell.
@@ -40,7 +40,7 @@ export default async function StoreLayout({
   // the button sends the user to a 404 with no explanation of why.
   const home = await prisma.page.findFirst({
     where: { storeId, isHome: true },
-    select: { status: true },
+    select: { id: true, status: true },
   })
   const isLive = home?.status === 'PUBLISHED'
 
@@ -56,7 +56,7 @@ export default async function StoreLayout({
             className="text-muted-foreground hover:text-foreground mb-2 inline-flex items-center gap-1.5 text-sm font-medium transition-colors"
           >
             <ArrowLeft className="size-4" />
-            Stores
+            All websites
           </Link>
           <h1 className="font-display truncate text-2xl leading-tight font-semibold tracking-tight">
             {store.name}
@@ -71,28 +71,40 @@ export default async function StoreLayout({
           </p>
         </div>
 
-        {isLive ? (
-          <Button
-            variant="outline"
-            render={<a href={liveUrl} target="_blank" rel="noreferrer" />}
-            nativeButton={false}
-          >
-            <ExternalLink />
-            View store
-          </Button>
-        ) : (
-          <Button variant="outline" disabled>
-            <ExternalLink />
-            View store
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          {home && (
+            <Button
+              render={<Link href={`${base}/pages/${home.id}/edit`} />}
+              nativeButton={false}
+            >
+              <Pencil />
+              {store.kind === 'STORE' ? 'Edit store' : 'Edit page'}
+            </Button>
+          )}
+          {isLive ? (
+            <Button
+              variant="outline"
+              render={<a href={liveUrl} target="_blank" rel="noreferrer" />}
+              nativeButton={false}
+            >
+              <ExternalLink />
+              Visit
+            </Button>
+          ) : (
+            <Button variant="outline" disabled>
+              <ExternalLink />
+              Visit
+            </Button>
+          )}
+        </div>
       </div>
 
-      <PillTabs
+      <SectionTabs
+        label="Store"
         items={[
-          { href: base, label: 'Home' },
-          { href: `${base}/pages`, label: 'Pages' },
-          { href: `${base}/theme`, label: 'Design' },
+          { href: base, label: 'Overview' },
+          { href: `${base}/pages`, label: 'Pages', nested: true },
+          { href: `${base}/theme`, label: 'Colours & fonts' },
           { href: `${base}/settings`, label: 'Settings' },
         ]}
       />

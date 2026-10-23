@@ -16,12 +16,7 @@ import {
   ListRowText,
 } from '@/components/app/list-panel'
 import { PageActionsMenu } from '@/components/dashboard/page-actions-menu'
-
-const STATUS_VARIANT = {
-  PUBLISHED: 'lime',
-  DRAFT: 'secondary',
-  UNPUBLISHED: 'outline',
-} as const
+import { PageStatusBadge } from '@/components/dashboard/page-status-badge'
 
 export default async function StoreDetailPage({
   params,
@@ -79,19 +74,29 @@ export default async function StoreDetailPage({
           {pages.map((page) => (
             <ListRow key={page.id}>
               <ListRowText
-                title={page.title}
-                meta={`/${page.isHome ? '' : page.slug}`}
+                title={
+                  page.role === 'PRODUCT'
+                    ? 'Product page'
+                    : page.role === 'CATALOG'
+                      ? 'Category page'
+                      : page.title
+                }
+                meta={
+                  page.role === 'PRODUCT'
+                    ? 'Design for every product'
+                    : page.role === 'CATALOG'
+                      ? 'Design for categories and search'
+                      : `/${page.isHome ? '' : page.slug}`
+                }
                 badges={
                   <>
                     {page.isHome && <Badge variant="outline">Home</Badge>}
-                    <Badge variant={STATUS_VARIANT[page.status]}>
-                      {page.status}
-                    </Badge>
+                    <PageStatusBadge status={page.status} />
                   </>
                 }
               />
               <ListRowActions>
-                {page.status === 'PUBLISHED' && (
+                {page.status === 'PUBLISHED' && page.role === 'STANDARD' && (
                   <Button
                     variant="ghost"
                     size="sm"

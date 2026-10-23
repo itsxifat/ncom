@@ -29,6 +29,13 @@ export async function updateThemeAction(
     sectionSpacing: formData.get('sectionSpacing') || 'comfortable',
     showStickyHeader: formData.get('showStickyHeader') === 'on',
     customCss: formData.get('customCss') || undefined,
+    language: formData.get('language') === 'bn' ? 'bn' : 'en',
+    // Bangla digits beside English words read as a mistake, so English
+    // always writes Latin digits whatever the second menu says.
+    numerals:
+      formData.get('language') === 'bn' && formData.get('numerals') === 'bangla'
+        ? 'bangla'
+        : 'latin',
   })
 
   if (!parsed.success) {
