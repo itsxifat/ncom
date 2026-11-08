@@ -63,7 +63,7 @@ const banglaSans = Google_Sans({
   adjustFontFallback: false,
 })
 
-// Money is written with NCOM's own taka sign, Google Sans's ৳: see
+// Money is written with NCOM's own taka sign, the ERP's ৳: see
 // lib/taka-font.ts, which the storefront's font stacks use too.
 
 // `icon.png`, `apple-icon.png` and `favicon.ico` in this directory are picked up

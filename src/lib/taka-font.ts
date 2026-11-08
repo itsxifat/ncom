@@ -6,11 +6,12 @@ import localFont from 'next/font/local'
  * storefront and builder canvas (lib/fonts.ts puts it at the front of every
  * theme font's stack).
  *
- * It is Google Sans's taka — see scripts/generate-taka-font.py for how the
- * files are made and why one sign everywhere beats each font's own. The
- * `unicode-range` makes this a font for exactly one character, so it can lead
- * any stack and the browser still only ever reaches for it on a "৳". The four
- * files are about 1.2KB each, which is why they are left to preload: a price
+ * It is the Elysium ERP's taka, Hind Siliguri's at the ERP's size — see
+ * scripts/generate-taka-font.py for how the files are made and why one sign
+ * everywhere beats each font's own. The `unicode-range` makes this a font for
+ * exactly one character, so it can lead any stack and the browser still only
+ * ever reaches for it on a "৳". The four files are about 2.5KB each, which is
+ * why they are left to preload: a price
  * should not paint once in some other taka and then jump.
  *
  * Its own module so the root layout and the font catalogue load the same

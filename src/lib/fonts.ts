@@ -454,8 +454,8 @@ export type FontScript = 'latin' | 'bangla'
 /**
  * NCOM's taka sign, first in every stack below. It covers "৳" and nothing
  * else (see lib/taka-font.ts), so a price reads the same on every storefront
- * whichever fonts the merchant chose — Hind Siliguri's knotted sign, a Latin
- * face with none at all — and matches the dashboard's.
+ * whichever fonts the merchant chose — Baloo's soft blob, a Latin face with
+ * none at all — and matches the dashboard's.
  *
  * Read defensively. In a route handler the local font is not compiled at all
  * (Turbopack leaves `lib/taka-font.ts` with no exports in that layer). In dev
