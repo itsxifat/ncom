@@ -18,25 +18,24 @@ import { ensureSubscription } from '@/server/services/entitlementService'
 /**
  * Subscribing to a plan, and changing one.
  *
- * There is no payment gateway yet, and which one NCOM will use is undecided.
- * The flow is still a real checkout — quote, coupon, order record, activation —
- * because the part that is missing is exactly one step in the middle. What is
- * built here:
+ * A real checkout — quote, coupon, order record, activation — paid through
+ * Enfinito Pay, the one way NCOM takes money from its own workspaces:
  *
  *   total === 0  ->  the order is AUTO_ACTIVATED and access is granted in the
- *                    same transaction. This is every tenant today: they are
- *                    onboarded with a 100%-off code, so checkout genuinely
- *                    costs nothing and asking for a card would be theatre.
+ *                    same transaction. This is every tenant onboarded with a
+ *                    100%-off code: checkout genuinely costs nothing, and
+ *                    sending them to a payment page would be theatre.
  *
  *   total  >  0  ->  the order is AWAITING_PAYMENT and access is NOT granted.
- *                    The subscription keeps whatever plan it already had. A
- *                    platform admin can activate the order by hand (a bank
- *                    transfer, an invoice), which is the same call a gateway
- *                    webhook will make once there is one.
+ *                    The subscription keeps whatever plan it already had. The
+ *                    owner is sent to Enfinito Pay (`billingPaymentService`),
+ *                    and the plan switches on when the payment is confirmed
+ *                    server to server. A platform admin can still activate an
+ *                    order by hand, for one settled some other way.
  *
  * The important property is that entitlements are never granted by the checkout
- * page — only by `activateOrder`. When a gateway is added it calls that one
- * function and nothing else about this file needs to change.
+ * page — only by `activateOrder`, which a confirmed payment and the admin's
+ * button both call.
  */
 
 export class CheckoutError extends Error {
@@ -455,29 +454,33 @@ async function applyActivation(
 /**
  * Grants access for an order that was awaiting payment.
  *
- * The seam a payment gateway will call from its webhook. Until then it is the
- * platform admin's "mark as paid" button, which is why it takes the money
+ * The seam payment comes through: Enfinito Pay's confirmation
+ * (`billingPaymentService`), and the platform admin's "mark as paid" button
+ * for an order settled some other way — which is why it takes the money
  * details as arguments rather than inventing them.
  *
  * Authorization is the caller's job — a webhook has no session to check, so
  * this function cannot do it itself. The admin action calls
- * `requirePlatformAdmin()` first and passes the resulting user as `actorUserId`.
+ * `requirePlatformAdmin()` first and passes the resulting user as
+ * `actorUserId`; a confirmed payment passes the person who placed the order.
  */
 export async function activateOrder(
   orderId: string,
   input: {
-    actorUserId: string
+    actorUserId: string | null
     provider?: string
     providerReference?: string
     markPaid?: boolean
   }
-): Promise<void> {
+): Promise<boolean> {
   const order = await prisma.planOrder.findUnique({
     where: { id: orderId },
     include: { subscription: { include: { addons: true } } },
   })
   if (!order) throw new CheckoutError('Order not found.')
-  if (order.status === 'ACTIVATED' || order.status === 'AUTO_ACTIVATED') return
+  if (order.status === 'ACTIVATED' || order.status === 'AUTO_ACTIVATED') {
+    return false
+  }
   if (order.status === 'CANCELED' || order.status === 'FAILED') {
     throw new CheckoutError('That order is closed and cannot be activated.')
   }
@@ -489,7 +492,21 @@ export async function activateOrder(
     .filter((line) => line.kind === 'ADDON')
     .map((line) => ({ addonId: line.refId, quantity: line.quantity }))
 
-  await prisma.$transaction(async (tx) => {
+  const activated = await prisma.$transaction(async (tx) => {
+    // Claimed first, from a state that can still be activated: a payment's
+    // webhook and the owner's return from the payment page can arrive at
+    // once, and only one of them may switch the plan on.
+    const { count } = await tx.planOrder.updateMany({
+      where: { id: order.id, status: { in: ['AWAITING_PAYMENT', 'PAID'] } },
+      data: {
+        status: 'ACTIVATED',
+        paidAt: input.markPaid ? new Date() : order.paidAt,
+        provider: input.provider ?? order.provider,
+        providerReference: input.providerReference ?? order.providerReference,
+      },
+    })
+    if (count === 0) return false
+
     await applyActivation(tx, {
       organizationId: order.organizationId,
       order,
@@ -501,17 +518,9 @@ export async function activateOrder(
         order.subscription?.couponPeriodsRemaining ?? null,
       trialDays: 0,
     })
-
-    await tx.planOrder.update({
-      where: { id: order.id },
-      data: {
-        status: 'ACTIVATED',
-        paidAt: input.markPaid ? new Date() : order.paidAt,
-        provider: input.provider ?? order.provider,
-        providerReference: input.providerReference ?? order.providerReference,
-      },
-    })
+    return true
   })
+  if (!activated) return false
 
   await logAudit(
     input.actorUserId,
@@ -522,6 +531,7 @@ export async function activateOrder(
       provider: input.provider ?? null,
     }
   )
+  return true
 }
 
 export async function cancelOrder(

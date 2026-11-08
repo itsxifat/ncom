@@ -32,8 +32,10 @@ import {
   FEATURE_LABELS,
   SUPPORT_TIER_LABELS,
 } from '@/lib/plans'
+import { onlinePaymentAvailable } from '@/server/services/enfinitoPaySettingsService'
 import { SubscriptionControls } from './SubscriptionControls'
 import { AiCreditsSection } from './AiCreditsSection'
+import { PayOrderButton } from './PayOrderButton'
 
 export const metadata = { title: 'Plan & billing' }
 
@@ -46,12 +48,32 @@ const ORDER_STATUS_LABELS: Record<string, string> = {
   FAILED: 'Failed',
 }
 
+/**
+ * What the owner is told on coming back from Enfinito Pay without a paid
+ * order (`?payment=`). Paid ones land on `?activated=1` or `?credits=added`.
+ */
+const PAYMENT_NOTICES: Record<string, string> = {
+  cancelled:
+    'Payment was cancelled, so nothing was charged. You can pay the order below whenever you’re ready.',
+  failed:
+    'The payment didn’t go through and nothing was charged. Try again, or pay another way.',
+  processing:
+    'Your payment is being confirmed. Refresh this page in a minute — there’s no need to pay again.',
+  unavailable:
+    'Your order is saved, but the payment page couldn’t be opened. Try Pay now below in a minute.',
+}
+
 export default async function BillingPage({
   searchParams,
 }: {
-  searchParams: Promise<{ activated?: string; pending?: string }>
+  searchParams: Promise<{
+    activated?: string
+    pending?: string
+    payment?: string
+    credits?: string
+  }>
 }) {
-  const { activated, pending } = await searchParams
+  const { activated, pending, payment, credits } = await searchParams
   const { organization, role } = await getActiveOrganization()
 
   const [
@@ -81,6 +103,7 @@ export default async function BillingPage({
     listCreditPacks(),
     listCreditOrders(organization.id),
   ])
+  const payOnline = await onlinePaymentAvailable()
   // After the summary, not beside it: reading the summary is what gives a
   // workspace its plan's one-time credits, and the history should show them.
   const creditEntries = await listAiCreditEntries(organization.id, 10)
@@ -120,13 +143,27 @@ export default async function BillingPage({
           Your new plan is active. The limits below are already in effect.
         </p>
       )}
-      {pending && (
+      {credits === 'added' && (
+        <p className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400">
+          <Check className="mr-1 inline size-4" />
+          Payment received — your AI credits are ready to use.
+        </p>
+      )}
+      {payment && PAYMENT_NOTICES[payment] ? (
         <p className="bg-muted rounded-xl p-3 text-sm">
           <Info className="mr-1 inline size-4" />
-          We&apos;ve recorded your request. Online payment isn&apos;t open yet,
-          so our team will contact you to finish it — nothing has changed on
-          your workspace in the meantime.
+          {PAYMENT_NOTICES[payment]}
         </p>
+      ) : (
+        pending &&
+        !payOnline && (
+          <p className="bg-muted rounded-xl p-3 text-sm">
+            <Info className="mr-1 inline size-4" />
+            We&apos;ve recorded your request. Online payment isn&apos;t open
+            yet, so our team will contact you to finish it — nothing has changed
+            on your workspace in the meantime.
+          </p>
+        )
       )}
 
       <SettingsSection
@@ -270,6 +307,7 @@ export default async function BillingPage({
           orders={creditOrders}
           entries={creditEntries}
           canBuy={canManage}
+          payOnline={payOnline}
         />
       )}
 
@@ -309,6 +347,11 @@ export default async function BillingPage({
                   <Money>
                     {formatMoney(order.totalCents, order.currencyCode)}
                   </Money>
+                  {canManage &&
+                    payOnline &&
+                    order.status === 'AWAITING_PAYMENT' && (
+                      <PayOrderButton kind="plan" orderId={order.id} />
+                    )}
                 </ListRowActions>
               </ListRow>
             ))}

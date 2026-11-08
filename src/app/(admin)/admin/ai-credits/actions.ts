@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import {
   CreditError,
+  MAX_CREDIT_BALANCE,
   adjustAiCreditsAsAdmin,
   cancelCreditOrder,
   deleteCreditPack,
@@ -82,7 +83,17 @@ export async function cancelCreditOrderAction(
 
 const adjustSchema = z.object({
   organizationId: z.string().min(1),
-  credits: z.coerce.number().int('Credits are a whole number.'),
+  credits: z.coerce
+    .number()
+    .int('Credits are a whole number.')
+    .min(
+      -MAX_CREDIT_BALANCE,
+      `Remove at most ${MAX_CREDIT_BALANCE.toLocaleString('en')} credits.`
+    )
+    .max(
+      MAX_CREDIT_BALANCE,
+      `Add at most ${MAX_CREDIT_BALANCE.toLocaleString('en')} credits.`
+    ),
   note: z.string().trim().max(200).default(''),
 })
 

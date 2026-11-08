@@ -1,7 +1,14 @@
 'use client'
 
 import { useActionState, useState } from 'react'
-import { Check, Info, Loader2, Lock, TicketPercent } from 'lucide-react'
+import {
+  Check,
+  CreditCard,
+  Info,
+  Loader2,
+  Lock,
+  TicketPercent,
+} from 'lucide-react'
 import { checkoutAction, quoteCheckoutAction } from '../actions'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -67,6 +74,7 @@ export function PlanPicker({
   currentInterval,
   couponsEnabled,
   showPaymentStep,
+  payOnline,
 }: {
   plans: PickerPlan[]
   addons: PickerAddon[]
@@ -74,6 +82,8 @@ export function PlanPicker({
   currentInterval: 'MONTHLY' | 'ANNUAL'
   couponsEnabled: boolean
   showPaymentStep: boolean
+  /** Enfinito Pay is set up: a paid plan is paid for on the spot. */
+  payOnline: boolean
 }) {
   const [selectedPlanId, setSelectedPlanId] = useState(currentPlanId)
   const [interval, setInterval] = useState<'MONTHLY' | 'ANNUAL'>(
@@ -457,6 +467,13 @@ export function PlanPicker({
                           Nothing to pay — no payment details needed. Your plan
                           switches on as soon as you confirm.
                         </p>
+                      ) : payOnline ? (
+                        <p className="text-muted-foreground mt-1">
+                          <CreditCard className="mr-1 inline size-3.5" />
+                          You&apos;ll pay securely with Enfinito Pay — bKash,
+                          Nagad, Rocket, cards and more. Your new plan switches
+                          on as soon as the payment is confirmed.
+                        </p>
                       ) : (
                         <p className="text-muted-foreground mt-1">
                           <Info className="mr-1 inline size-3.5" />
@@ -479,7 +496,9 @@ export function PlanPicker({
                         ? 'Confirming…'
                         : quote.isFree
                           ? 'Confirm and switch on'
-                          : 'Confirm request'}
+                          : payOnline
+                            ? 'Continue to payment'
+                            : 'Confirm request'}
                     </Button>
                   </form>
 

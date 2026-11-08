@@ -29,6 +29,12 @@ export function BuyCreditPackButton({
             toast.error(result.error)
             return
           }
+          // Paid on Enfinito Pay, another site: a full navigation, and back
+          // to /billing/payment/return when the owner is done.
+          if (result.payUrl) {
+            window.location.assign(result.payUrl)
+            return
+          }
           toast.success(
             result.paid ? 'Credits added' : 'We’ve recorded your order',
             {

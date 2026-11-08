@@ -16,6 +16,7 @@ import { Money } from '@/components/store/form-controls'
 import { formatMoney } from '@/lib/money'
 import { cn } from '@/lib/utils'
 import { BuyCreditPackButton } from './BuyCreditPackButton'
+import { PayOrderButton } from './PayOrderButton'
 
 const ORDER_STATUS_LABELS: Record<string, string> = {
   AWAITING_PAYMENT: 'Awaiting payment',
@@ -47,12 +48,15 @@ export function AiCreditsSection({
   orders,
   entries,
   canBuy,
+  payOnline,
 }: {
   summary: AiCreditSummary
   packs: CreditPackRow[]
   orders: CreditOrderRow[]
   entries: AiCreditEntryRow[]
   canBuy: boolean
+  /** Enfinito Pay is set up: a pack is paid for on the spot. */
+  payOnline: boolean
 }) {
   const refreshes = new Date(summary.refreshesAt).toLocaleDateString('en-GB', {
     day: 'numeric',
@@ -123,9 +127,11 @@ export function AiCreditsSection({
                 ))}
               </div>
               <p className="text-muted-foreground text-xs">
-                {canBuy
-                  ? 'Online payment isn’t open yet: after you order, our team contacts you to finish the payment, and the credits are added as soon as it’s paid.'
-                  : 'Only a workspace owner can buy credits.'}
+                {!canBuy
+                  ? 'Only a workspace owner can buy credits.'
+                  : payOnline
+                    ? 'Pay with Enfinito Pay — bKash, Nagad, Rocket, cards and more. The credits are added as soon as the payment is confirmed.'
+                    : 'Online payment isn’t open yet: after you order, our team contacts you to finish the payment, and the credits are added as soon as it’s paid.'}
               </p>
             </>
           )}
@@ -156,6 +162,11 @@ export function AiCreditsSection({
                     <Money>
                       {formatMoney(order.totalCents, order.currencyCode)}
                     </Money>
+                    {canBuy &&
+                      payOnline &&
+                      order.status === 'AWAITING_PAYMENT' && (
+                        <PayOrderButton kind="credits" orderId={order.id} />
+                      )}
                   </ListRowActions>
                 </ListRow>
               ))}

@@ -15,6 +15,11 @@ import {
 } from '@/server/services/planCheckoutService'
 import { getPlatformFlag } from '@/server/services/platformFlagService'
 import { CreditError, orderCreditPack } from '@/server/services/aiCreditService'
+import {
+  BillingPaymentError,
+  startPayment,
+} from '@/server/services/billingPaymentService'
+import { onlinePaymentAvailable } from '@/server/services/enfinitoPaySettingsService'
 import { sendEmail } from '@/server/services/emailService'
 import {
   planActivatedEmail,
@@ -123,6 +128,20 @@ export async function checkoutAction(
     return { error: messageFor(error, 'Could not complete the change.') }
   }
 
+  // Something to pay: straight on to Enfinito Pay. The plan switches on when
+  // the payment is confirmed, and that sends its own email. A payment page
+  // that will not open leaves the order waiting, with a Pay button on Billing.
+  if (!result.activated && (await onlinePaymentAvailable())) {
+    let payUrl: string
+    try {
+      payUrl = (await startPayment(organization.id, 'plan', result.orderId)).url
+    } catch (error) {
+      console.error('[billing] could not open the payment page', error)
+      redirect(`/billing?pending=${result.orderId}&payment=unavailable`)
+    }
+    redirect(payUrl)
+  }
+
   // Confirmation mail is best effort — the plan is already live (or already
   // recorded), and failing the action over an SMTP problem would tell the
   // customer their upgrade did not happen when it did.
@@ -206,21 +225,55 @@ function messageFor(error: unknown, fallback: string): string {
 }
 
 /**
- * Orders an AI credit pack. Paid packs wait for the platform team to confirm
- * payment, as plan orders do; a free pack is added at once.
+ * Orders an AI credit pack. A paid pack comes back with the Enfinito Pay page
+ * to send the owner to, and its credits are added once the payment is
+ * confirmed; a free pack is added at once. Without online payment, the order
+ * waits for the platform team, as it always did.
  */
 export async function orderCreditPackAction(
   packId: string
-): Promise<{ ok: true; paid: boolean } | { ok: false; error: string }> {
+): Promise<
+  { ok: true; paid: boolean; payUrl?: string } | { ok: false; error: string }
+> {
   const { organization } = await getActiveOrganization()
   try {
     const result = await orderCreditPack(organization.id, packId)
     revalidatePath('/billing')
-    return { ok: true, paid: result.paid }
+    if (result.paid || !(await onlinePaymentAvailable())) {
+      return { ok: true, paid: result.paid }
+    }
+    const { url } = await startPayment(
+      organization.id,
+      'credits',
+      result.orderId
+    )
+    return { ok: true, paid: false, payUrl: url }
   } catch (cause) {
-    if (cause instanceof CreditError) return { ok: false, error: cause.message }
+    if (cause instanceof CreditError || cause instanceof BillingPaymentError)
+      return { ok: false, error: cause.message }
     if (cause instanceof AuthorizationError) {
       return { ok: false, error: 'Only the workspace owner can buy credits.' }
+    }
+    throw cause
+  }
+}
+
+/**
+ * Pays an order still waiting for payment — one whose payment page was
+ * closed, or that expired. Goes to Enfinito Pay, back to the open checkout if
+ * there is one.
+ */
+export async function payOrderAction(
+  kind: 'plan' | 'credits',
+  orderId: string
+): Promise<{ url: string } | { error: string }> {
+  const { organization } = await getActiveOrganization()
+  try {
+    return await startPayment(organization.id, kind, orderId)
+  } catch (cause) {
+    if (cause instanceof BillingPaymentError) return { error: cause.message }
+    if (cause instanceof AuthorizationError) {
+      return { error: 'Only the workspace owner can pay for the workspace.' }
     }
     throw cause
   }

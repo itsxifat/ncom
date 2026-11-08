@@ -19,6 +19,7 @@ import {
   Mail,
   Coins,
   Sparkles,
+  Wallet,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -62,6 +63,7 @@ const NAV_GROUPS = [
     items: [
       { href: '/admin/domains', label: 'Domains', icon: Globe2 },
       { href: '/admin/email', label: 'Email', icon: Mail },
+      { href: '/admin/payments', label: 'Payments', icon: Wallet },
       { href: '/admin/ai', label: 'AI builder', icon: Sparkles },
       { href: '/admin/settings', label: 'Settings', icon: Settings },
     ],

@@ -124,12 +124,34 @@ changed in the admin.
   Sites past a traffic cap serve a holding page — gated on both the plan's
   `enforceTrafficCap` and the platform flag, since taking a customer's site
   offline automatically is the most damaging thing here.
-- **Billing without a gateway**: checkout is real (quote → coupon → order), but no
-  provider is wired. A ৳0 total (free plan, or a 100%-off coupon) is
-  `AUTO_ACTIVATED` and access is granted immediately; anything above ৳0 becomes
-  `AWAITING_PAYMENT` and grants nothing until an admin activates it from
-  `/admin/subscriptions`. `activateOrder` is the single seam a future gateway
-  webhook calls — nothing else grants entitlements.
+- **Paying NCOM — Enfinito Pay only**: checkout is quote → coupon → order. A ৳0
+  total (free plan, or a 100%-off coupon) is `AUTO_ACTIVATED` and access is
+  granted immediately; anything above ৳0 becomes `AWAITING_PAYMENT` and the owner
+  is sent to an [Enfinito Pay](https://pay.enfinito.com) checkout. AI credit
+  packs work the same way. `billingPaymentService` is the whole flow:
+  - `startPayment` makes the checkout for exactly the order's total in BDT, or
+    goes back to the order's still-open one, so an owner cannot pay twice.
+  - `confirmPayment` runs both when the owner lands on
+    `/billing/payment/return` and on the signed webhook at
+    `/api/billing/enfinito-pay`. Neither is trusted on its own: the checkout is
+    fetched from Enfinito Pay, and only a `paid` one for the order's exact
+    amount, reference and key mode (test or live) calls `activateOrder` or
+    `settleCreditOrderPayment`. Both claim the order atomically, so the webhook
+    and the return arriving together grant it once.
+  - A payment for an order closed meanwhile, or that does not match its order,
+    grants nothing and is written to the audit log (`billing.payment.unapplied`
+    / `billing.payment.mismatch`) for the team. So is a refund
+    (`billing.payment.refunded`); access is never taken away by itself.
+
+  Connect it in Admin → Payments: the product's secret key (`sk_test_…` takes
+  test payments only, `sk_live_…` real ones) and webhook secret, both stored
+  encrypted. That page also shows the webhook URL and return domain to set on
+  the product in the Enfinito Pay admin. Until a key is saved, paid orders wait
+  for an admin to activate them from `/admin/subscriptions` or Admin → AI
+  credits, which also remains the way to settle an order paid some other way.
+
+  Enfinito Pay is how workspaces pay NCOM, nothing else: shoppers pay a
+  merchant's store with the methods that store sets up (see "Payments" below).
 
 The seeded `NCOMEXPLORE` coupon is 100% off, forever, restricted to workspaces
 that existed when it was created — the onboarding offer, without handing the same

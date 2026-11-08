@@ -321,6 +321,14 @@ export async function refundAiCredits(
   })
 }
 
+/**
+ * The most credits a balance can hold: the largest number its column (a
+ * Postgres integer) stores. Past it, the write fails with a database error
+ * instead of a sentence — a grant typed with three zeros too many took the
+ * admin page down rather than saying so.
+ */
+export const MAX_CREDIT_BALANCE = 2_147_483_647
+
 /** Adds to (or, with a negative amount, takes from) the balance, once per dedupe key. */
 async function changeBalance(
   tx: Prisma.TransactionClient,
@@ -346,6 +354,11 @@ async function changeBalance(
   if (balance < 0) {
     throw new CreditError(
       `This workspace has only ${account.balance} bought or granted credits to remove.`
+    )
+  }
+  if (balance > MAX_CREDIT_BALANCE) {
+    throw new CreditError(
+      `That would put the balance at ${balance.toLocaleString('en')} credits; a workspace can hold at most ${MAX_CREDIT_BALANCE.toLocaleString('en')}.`
     )
   }
   await tx.aiCreditAccount.update({
@@ -517,9 +530,9 @@ export async function deleteCreditPack(packId: string): Promise<void> {
 /**
  * A workspace asking for a pack.
  *
- * No payment gateway is connected yet, so like a plan order it is recorded as
- * waiting for payment and the platform team marks it paid — which is what
- * puts the credits on the balance. A pack priced at 0 is given at once.
+ * Like a plan order it is recorded as waiting for payment; the owner pays it
+ * through Enfinito Pay (`billingPaymentService`), and the confirmed payment is
+ * what puts the credits on the balance. A pack priced at 0 is given at once.
  */
 export async function orderCreditPack(
   organizationId: string,
@@ -572,17 +585,23 @@ export async function orderCreditPack(
 
 async function settleOrder(
   orderId: string,
-  input: { actorUserId: string; provider?: string; providerReference?: string }
-): Promise<void> {
-  await prisma.$transaction(async (tx) => {
+  input: {
+    actorUserId: string | null
+    provider?: string
+    providerReference?: string
+  }
+): Promise<boolean> {
+  return prisma.$transaction(async (tx) => {
     const order = await tx.aiCreditOrder.findUnique({ where: { id: orderId } })
     if (!order) throw new CreditError('Order not found.')
-    if (order.status === 'PAID') return
+    if (order.status === 'PAID') return false
     if (order.status === 'CANCELED') {
       throw new CreditError('That order was cancelled and cannot be paid.')
     }
-    await tx.aiCreditOrder.update({
-      where: { id: orderId },
+    // Only from waiting: a payment's webhook and the owner's return can
+    // settle the same order at once, and only one of them may count.
+    const { count } = await tx.aiCreditOrder.updateMany({
+      where: { id: orderId, status: 'AWAITING_PAYMENT' },
       data: {
         status: 'PAID',
         paidAt: new Date(),
@@ -590,6 +609,7 @@ async function settleOrder(
         providerReference: input.providerReference ?? order.providerReference,
       },
     })
+    if (count === 0) return false
     await changeBalance(tx, order.organizationId, order.credits, {
       kind: 'PURCHASE',
       description: `Bought ${order.packName} (${order.credits} credits) for ${formatMoney(order.totalCents, order.currencyCode)}`,
@@ -597,13 +617,44 @@ async function settleOrder(
       orderId: order.id,
       createdById: input.actorUserId,
     })
+    return true
   })
 }
 
 /**
- * Marks an order paid and adds its credits. The manual half of the payment
- * seam, as `activateOrder` is for plans: today the platform team's button,
- * later a gateway's webhook.
+ * Puts a paid order's credits on the balance once Enfinito Pay has confirmed
+ * the payment. Once per order however often it is called — a webhook and the
+ * owner's return from the payment page both arrive for the same payment — and
+ * true only for the call that did it.
+ *
+ * Authorization is the caller's: the payment was checked with Enfinito Pay,
+ * and a webhook has no session to check. `actorUserId` is the person who
+ * placed the order.
+ */
+export async function settleCreditOrderPayment(
+  orderId: string,
+  input: {
+    actorUserId: string | null
+    provider: string
+    providerReference?: string
+  }
+): Promise<boolean> {
+  const settled = await settleOrder(orderId, input)
+  if (settled) {
+    await logAudit(
+      input.actorUserId,
+      'ai.order.paid',
+      'AiCreditOrder',
+      orderId,
+      { provider: input.provider }
+    )
+  }
+  return settled
+}
+
+/**
+ * Marks an order paid and adds its credits: the platform team's button, for
+ * an order settled some other way than Enfinito Pay.
  */
 export async function markCreditOrderPaid(
   orderId: string,

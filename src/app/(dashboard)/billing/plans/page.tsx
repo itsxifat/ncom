@@ -6,6 +6,7 @@ import {
   listSelectablePlans,
 } from '@/server/services/planCheckoutService'
 import { getPlatformFlag } from '@/server/services/platformFlagService'
+import { onlinePaymentAvailable } from '@/server/services/enfinitoPaySettingsService'
 import { PageHeader } from '@/components/app/page-header'
 import { FEATURE_KEYS, FEATURE_PLAN_COLUMN, formatQuota } from '@/lib/plans'
 import { PlanPicker, type PickerAddon, type PickerPlan } from './PlanPicker'
@@ -114,6 +115,7 @@ export default async function ChangePlanPage() {
         currentInterval={entitlements.interval}
         couponsEnabled={await getPlatformFlag('billing.couponsEnabled')}
         showPaymentStep={await getPlatformFlag('billing.showPaymentStep')}
+        payOnline={await onlinePaymentAvailable()}
       />
     </div>
   )
