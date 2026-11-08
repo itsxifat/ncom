@@ -2,8 +2,10 @@ import 'server-only'
 import type Anthropic from '@anthropic-ai/sdk'
 import type { SiteLanguage } from '@/modules/sections/language'
 import type { PageRole, SiteKind } from '@/modules/sections/storefront'
+import { sectionRegistry } from '@/modules/sections/registry'
 import {
   briefText,
+  CHANGE_PAGE_RULES,
   designGuide,
   type BusinessBrief,
 } from '@/modules/sitespec/guide'
@@ -31,18 +33,28 @@ export interface Progress {
   sections: number
 }
 
+/**
+ * A `"type"` naming a block. Elements added to a block carry a `"type"` too
+ * ("button", "text"), and counting those made a six-section page read
+ * "Designing section 14…".
+ */
+const SECTION_TYPE = new RegExp(
+  `"type"\\s*:\\s*"(?:${Object.keys(sectionRegistry).join('|')})"`,
+  'g'
+)
+
 function progressCounter(onProgress?: (progress: Progress) => void) {
   let characters = 0
   let sections = 0
   let tail = ''
   return (delta: string) => {
     characters += delta.length
-    // Count `"type"` keys across chunk boundaries: each section has one.
+    // Count block types across chunk boundaries: each section has one.
     const window = tail + delta
     sections +=
-      (window.match(/"type"\s*:/g) ?? []).length -
-      (tail.match(/"type"\s*:/g) ?? []).length
-    tail = window.slice(-12)
+      (window.match(SECTION_TYPE) ?? []).length -
+      (tail.match(SECTION_TYPE) ?? []).length
+    tail = window.slice(-40)
     onProgress?.({ characters, sections })
   }
 }
@@ -122,7 +134,7 @@ export async function designPageWithAi(input: {
   effort?: Effort
 }) {
   const current = input.current
-    ? `\n\nThe page as it is now:\n${JSON.stringify(input.current)}\n\nReturn the whole page after the change. Keep each section's "id" for sections you keep or change, leave "id" out of new sections, and leave out sections that should go. Change only what the owner asked for.`
+    ? `\n\nThe page as it is now:\n${JSON.stringify(input.current)}\n\n${CHANGE_PAGE_RULES} Change only what the owner asked for.`
     : '\n\nWrite this page now.'
   return askWithRetry({
     system: designGuide({

@@ -48,7 +48,12 @@ import {
   type DesignIssue,
   type NormalizedSection,
 } from '@/modules/sitespec/normalize'
-import { isStyleKey } from '@/modules/sitespec/style-keys'
+import {
+  isStyleKey,
+  mergeElementConfig,
+  withoutElements,
+} from '@/modules/sitespec/style-keys'
+import { patchElementDesigns } from '@/modules/sitespec/element-design'
 import { extractJson } from '@/modules/sitespec/parse'
 import {
   readPageDesign,
@@ -304,27 +309,34 @@ function prepareDesign(input: unknown) {
 }
 
 /**
- * A rewritten section's config. What a design cannot see is kept — per-element
- * styling, extras the merchant added — and the section style is the design's:
- * a style it left out, or set to null, is removed. That is safe for a round
- * trip, because a section NCOM sends out carries every style it has
- * (export.ts), so one that comes back without a style had it taken off. A
- * style the design did send but that was not valid was ignored — the notes say
- * so — and keeps the value it had.
+ * A rewritten section's config. The section style is the design's: a style it
+ * left out, or set to null, is removed. That is safe for a round trip, because
+ * a section NCOM sends out carries every style it has (export.ts), so one that
+ * comes back without a style had it taken off. A style the design did send but
+ * that was not valid was ignored — the notes say so — and keeps the value it
+ * had. Element designs are laid over the section's own, and its added
+ * elements replaced only when the design sent a list (`mergeElementConfig`);
+ * what a design cannot see is kept.
  */
 function restyle(
   saved: unknown,
-  style: SectionConfig,
+  design: Pick<NormalizedSection, 'config' | 'clearedElements'>,
   sent: ReadonlySet<string> | undefined
 ): SectionConfig {
-  const config: Record<string, unknown> = {
-    ...((saved ?? {}) as Record<string, unknown>),
-  }
+  const config = withoutElements(saved as SectionConfig | null)
   for (const key of STYLE_KEYS) {
-    if (sent?.has(key) && !(key in style)) continue
+    if (sent?.has(key) && !(key in design.config)) continue
     delete config[key]
   }
-  return { ...config, ...style } as SectionConfig
+  return {
+    ...config,
+    ...withoutElements(design.config),
+    ...mergeElementConfig(
+      saved as SectionConfig | null,
+      design.config,
+      design.clearedElements
+    ),
+  }
 }
 
 /**
@@ -436,7 +448,7 @@ function sectionRows(
       type: section.type,
       content: section.content,
       config: keep
-        ? restyle(keep.config, section.config, styles.get(`id:${keep.id}`))
+        ? restyle(keep.config, section, styles.get(`id:${keep.id}`))
         : section.config,
       isVisible: section.isVisible,
     })
@@ -1083,7 +1095,7 @@ export const MCP_TOOLS: McpTool[] = [
     name: 'update_section',
     title: 'Change one section',
     description:
-      'Changes one section of a page: the content fields you pass are merged over what is there (others are kept), and the style fields likewise — set a style field to null to remove it, so the section follows the theme again. Use get_page for section ids.',
+      'Changes one section of a page: the content fields you pass are merged over what is there (others are kept), and the style fields likewise — set a style field to null to remove it, so the section follows the theme again. "elements" designs the block\'s elements by name (get_block_type lists them), laid over each element\'s design property by property and screen by screen; set an element, a screen or a property to null to remove it. "extras" replaces the block\'s list of added elements. Use get_page for section ids.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1091,6 +1103,18 @@ export const MCP_TOOLS: McpTool[] = [
         sectionId: { type: 'string' },
         content: { type: 'object', additionalProperties: true },
         style: { type: 'object', additionalProperties: true },
+        elements: {
+          type: 'object',
+          additionalProperties: true,
+          description:
+            'Element designs by element name, e.g. { "title": { "fontSize": 48 }, "button": { "hover": { "scale": 105 } } }.',
+        },
+        extras: {
+          type: 'array',
+          items: { type: 'object', additionalProperties: true },
+          description:
+            'The block\'s whole list of added elements: { "id", "type", "html", "href", "src", "icon", "slot", "style" }.',
+        },
         hidden: { type: 'boolean' },
       },
       required: ['pageId', 'sectionId'],
@@ -1149,6 +1173,15 @@ export const MCP_TOOLS: McpTool[] = [
             ...(isObject(args.content) ? args.content : {}),
           },
           style,
+          // Each element passed, laid over its design property by property;
+          // restyle below keeps the elements not passed.
+          ...(isObject(args.elements) && {
+            elements: patchElementDesigns(
+              (existing.config as SectionConfig | null)?.elements,
+              args.elements
+            ),
+          }),
+          ...(args.extras !== undefined && { extras: args.extras }),
           hidden:
             typeof args.hidden === 'boolean'
               ? args.hidden
@@ -1179,7 +1212,7 @@ export const MCP_TOOLS: McpTool[] = [
                 content: merged.content,
                 config: restyle(
                   section.config,
-                  merged.config,
+                  merged,
                   new Set(Object.keys(style))
                 ),
                 isVisible: merged.isVisible,
@@ -1376,7 +1409,7 @@ export const MCP_TOOLS: McpTool[] = [
     name: 'update_site_theme',
     title: "Change a site's colours, fonts or language",
     description:
-      'Changes a site\'s draft theme: colours (hex), fonts (headingFont, bodyFont: a name from the guide\'s font list or any Google Fonts family by its exact name; "Google Sans" is the default for Bangla sites), buttonStyle, borderRadius, headingWeight, and the language shoppers read (en | bn) with its numerals (latin | bangla — Bangla digits only on a Bangla site; switching to English switches the digits to Latin). Only the fields you pass change.',
+      'Changes a site\'s draft theme: colours (hex), fonts (headingFont, bodyFont: a name from the guide\'s font list or any Google Fonts family by its exact name; "Google Sans" is the default for Bangla sites), buttonStyle, borderRadius, headingWeight, containerWidth, spacingScale and sectionSpacing (compact | comfortable | spacious), bodyScale (0.9 | 1 | 1.1 | 1.2), showStickyHeader, logoUrl, logoWidth, faviconUrl, customCss (site-wide CSS — it replaces what is there; scope rules to sections by their customClassName style), and the language shoppers read (en | bn) with its numerals (latin | bangla — Bangla digits only on a Bangla site; switching to English switches the digits to Latin). Only the fields you pass change.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1501,7 +1534,7 @@ async function mergeLayout(
         config: replacement
           ? restyle(
               section.config,
-              replacement.config,
+              replacement,
               styles.get(`type:${section.type}`)
             )
           : ((section.config ?? {}) as object),

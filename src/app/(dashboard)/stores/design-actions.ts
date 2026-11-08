@@ -22,7 +22,7 @@ import {
   saveSiteDraft,
   SiteDraftTooLargeError,
 } from '@/server/services/designDraftService'
-import { chatPrompt } from '@/modules/sitespec/guide'
+import { CHANGE_PAGE_RULES, chatPrompt } from '@/modules/sitespec/guide'
 import { exportPage } from '@/modules/sitespec/export'
 import {
   readPageDesign,
@@ -30,7 +30,7 @@ import {
   type PageDesignResult,
 } from '@/modules/sitespec/read'
 import type { DesignIssue } from '@/modules/sitespec/normalize'
-import type { SectionConfig } from '@/modules/sections/types'
+import type { PageTheme, SectionConfig } from '@/modules/sections/types'
 
 /**
  * "Use your own AI": the prompt a merchant copies into ChatGPT, Gemini or
@@ -181,6 +181,16 @@ const sectionInput = z.object({
 })
 
 /**
+ * The site's theme as the builder has it, shown to the AI beside the page.
+ * Only read into the prompt (export.ts picks the fields), so the bound is on
+ * size: a theme is a few colours, fonts and at most the custom CSS.
+ */
+const themeInput = z
+  .record(z.string(), z.unknown())
+  .refine((theme) => JSON.stringify(theme).length <= 40_000)
+  .nullish()
+
+/**
  * The prompt for one page in the builder: either a new page, or — when the
  * page's sections are passed — a change to the page as it is, round-tripped by
  * section id so the answer updates what is there instead of starting over.
@@ -190,11 +200,13 @@ export async function pagePromptAction(input: {
   pageId: string
   request: string
   sections: unknown[]
+  theme?: unknown
 }): Promise<string> {
   const { organization } = await getActiveOrganization()
   const page = await pageForDesign(organization.id, input.storeId, input.pageId)
   if (!page) throw new Error('Page not found')
   const sections = z.array(sectionInput).max(60).parse(input.sections)
+  const theme = themeInput.parse(input.theme)
 
   const brief = await shopBrief(organization.id, {
     request: input.request.slice(0, 4000),
@@ -213,8 +225,9 @@ export async function pagePromptAction(input: {
       ...section,
       config: (section.config ?? undefined) as SectionConfig | undefined,
     })),
+    theme: theme as Partial<PageTheme> | null | undefined,
   })
-  return `${prompt}\n## The page as it is now\n\nChange this page as the owner asked and send back the whole page. Keep each section's "id" for sections you keep or change, leave "id" out of new sections, and leave out sections that should go.\n\n\`\`\`json\n${JSON.stringify(current, null, 1)}\n\`\`\`\n`
+  return `${prompt}\n## The page as it is now\n\nChange this page as the owner asked. ${CHANGE_PAGE_RULES}\n\n\`\`\`json\n${JSON.stringify(current, null, 1)}\n\`\`\`\n`
 }
 
 /** Reads a pasted page design for the builder to apply. */

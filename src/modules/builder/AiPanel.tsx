@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useTransition } from 'react'
+import { useEffect, useRef, useState, useTransition } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import {
@@ -30,8 +30,11 @@ import type { PageDesignResult } from '@/modules/sitespec/read'
 import type {
   DesignIssue,
   NormalizedSection,
+  ThemeDesign,
 } from '@/modules/sitespec/normalize'
-import { restyleConfig } from '@/modules/sitespec/style-keys'
+import { layerConfig, restyleConfig } from '@/modules/sitespec/style-keys'
+import type { PageTheme } from '../sections/types'
+import { sanitizeCustomCss } from '../sections/customcode/sanitize'
 import { getSectionDefinition } from '../sections/registry'
 import { cn } from '@/lib/utils'
 import {
@@ -45,6 +48,11 @@ import { useBuilderSite } from './SiteContext'
 
 type Scope = 'page' | 'section'
 
+/** Saves a change to the site's draft theme; the builder's own, from the shell. */
+type SaveTheme = (
+  patch: Record<string, unknown>
+) => Promise<{ ok: boolean; error?: string }>
+
 /**
  * AI in the builder: ask for a change in plain words, or bring a design from
  * the merchant's own AI.
@@ -54,8 +62,12 @@ type Scope = 'page' | 'section'
  * the change *is* how a merchant decides whether they like it. Sections the
  * answer kept keep their ids, so their per-element styling and their place in
  * the page's history survive a rewrite.
+ *
+ * An answer can restyle anything the builder can: each element of a block,
+ * elements added to it, and — for a whole page — the site's theme, which is
+ * saved like a change in the Design panel and put back by the same Undo.
  */
-export function AiPanel() {
+export function AiPanel({ saveTheme }: { saveTheme?: SaveTheme }) {
   const site = useBuilderSite()
   const selectedId = useBuilderStore((s) => s.selectedSectionId)
   const sections = useBuilderStore((s) => s.sections)
@@ -76,9 +88,14 @@ export function AiPanel() {
           pageId={site.pageId}
           selected={selected && !isLayoutSection(selected) ? selected : null}
           selectedName={selectedName}
+          saveTheme={saveTheme}
         />
       )}
-      <OwnAi storeId={site.storeId} pageId={site.pageId} />
+      <OwnAi
+        storeId={site.storeId}
+        pageId={site.pageId}
+        saveTheme={saveTheme}
+      />
       <Link
         href="/settings/ai-editors"
         target="_blank"
@@ -115,11 +132,13 @@ function AskAi({
   pageId,
   selected,
   selectedName,
+  saveTheme,
 }: {
   storeId: string
   pageId: string
   selected: BuilderSection | null
   selectedName: string | null
+  saveTheme?: SaveTheme
 }) {
   const [request, setRequest] = useState('')
   const [scopeChoice, setScope] = useState<Scope>('section')
@@ -178,6 +197,9 @@ function AskAi({
         request: words,
         sections: target,
         scope,
+        // A whole page is asked about with the site's look beside it, so
+        // "make it dark" or "use our brand colours" can change the theme.
+        ...(!sectionId && { theme: builder.theme }),
       })
     } finally {
       const { aiRequest, setAiRequest } = useBuilderStore.getState()
@@ -196,6 +218,11 @@ function AskAi({
         )
     if (!applied) return
     setIssues(done.result.issues)
+    // One block was asked about, so the site's look is not this answer's to
+    // change; the route did not show it the theme either.
+    const restoreTheme = sectionId
+      ? null
+      : await applyThemeDesign(done.result.theme, saveTheme)
     // Translating the words does not change the language of NCOM's own
     // words on the site — buttons, the cart, the checkout. Say where that is.
     const siteLanguage = useBuilderStore.getState().theme?.language
@@ -209,8 +236,16 @@ function AskAi({
     toast.success('Done — the change is on your page', {
       description: mismatch
         ? `To show buttons and the checkout in ${into === 'bn' ? 'Bangla' : 'English'} too, change the language under Design.`
-        : undefined,
-      action: { label: 'Undo', onClick: undoEdit },
+        : restoreTheme
+          ? 'The site’s theme changed too, on every page.'
+          : undefined,
+      action: {
+        label: 'Undo',
+        onClick: () => {
+          undoEdit()
+          restoreTheme?.()
+        },
+      },
     })
   }
 
@@ -304,7 +339,15 @@ function AskAi({
   )
 }
 
-function OwnAi({ storeId, pageId }: { storeId: string; pageId: string }) {
+function OwnAi({
+  storeId,
+  pageId,
+  saveTheme,
+}: {
+  storeId: string
+  pageId: string
+  saveTheme?: SaveTheme
+}) {
   const [request, setRequest] = useState('')
   const [editCurrent, setEditCurrent] = useState(true)
   const [answer, setAnswer] = useState('')
@@ -312,6 +355,15 @@ function OwnAi({ storeId, pageId }: { storeId: string; pageId: string }) {
   const [error, setError] = useState<string | null>(null)
   const [issues, setIssues] = useState<DesignIssue[] | null>(null)
   const [pending, startTransition] = useTransition()
+  // Undo for the last answer's theme change, which the page's history does
+  // not hold. Null when that answer left the theme as it was.
+  const restoreTheme = useRef<(() => void) | null>(null)
+
+  function undo() {
+    undoEdit()
+    restoreTheme.current?.()
+    restoreTheme.current = null
+  }
 
   function apply() {
     setError(null)
@@ -328,13 +380,14 @@ function OwnAi({ storeId, pageId }: { storeId: string; pageId: string }) {
         return
       }
       if (!applyDesign(result, mode)) return
+      restoreTheme.current = await applyThemeDesign(result.theme, saveTheme)
       setIssues(result.issues)
       setAnswer('')
       toast.success('Your AI’s design is on the page', {
-        action: {
-          label: 'Undo',
-          onClick: undoEdit,
-        },
+        description: restoreTheme.current
+          ? 'The site’s theme changed too, on every page.'
+          : undefined,
+        action: { label: 'Undo', onClick: undo },
       })
     })
   }
@@ -376,6 +429,7 @@ function OwnAi({ storeId, pageId }: { storeId: string; pageId: string }) {
             sections: editCurrent
               ? editable(useBuilderStore.getState().sections)
               : [],
+            theme: editCurrent ? useBuilderStore.getState().theme : null,
           })
         }
       />
@@ -420,7 +474,7 @@ function OwnAi({ storeId, pageId }: { storeId: string; pageId: string }) {
       {issues && (
         <button
           type="button"
-          onClick={undoEdit}
+          onClick={undo}
           className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 self-start text-xs"
         >
           <Undo2 className="size-3.5" />
@@ -475,7 +529,8 @@ function applyDesign(
    * *is* the section's style: one it leaves out was taken off, or "remove the
    * background photo" could never remove it. A layout block matched only by
    * kind was never shown to the AI, so there the design's style goes over the
-   * old one instead.
+   * old one instead. Either way its element designs are laid over the
+   * section's own, so per-element styling the answer did not mention stays.
    */
   const toBuilder = (
     section: NormalizedSection,
@@ -487,8 +542,17 @@ function applyDesign(
           ...reuse,
           content: section.content,
           config: sawStyle
-            ? restyleConfig(reuse.config, section.config, section.rejectedStyle)
-            : { ...reuse.config, ...section.config },
+            ? restyleConfig(
+                reuse.config,
+                section.config,
+                section.rejectedStyle,
+                section.clearedElements
+              )
+            : layerConfig(
+                reuse.config,
+                section.config,
+                section.clearedElements
+              ),
           isVisible: section.isVisible,
         }
       : {
@@ -660,6 +724,58 @@ function applyDesign(
     ...addedBottom,
   ])
   return true
+}
+
+/**
+ * Puts the theme an answer asked for on the site: on the canvas at once, and
+ * saved to the draft theme as the Design panel saves its own changes, so it
+ * goes live on Publish like any of them.
+ *
+ * Only settings that differ are sent, so an answer that repeated the theme it
+ * was shown changes nothing. Answers a function that puts the old settings
+ * back — the page's undo history holds only its blocks, so the AI's Undo calls
+ * it beside `undoEdit` — or null when nothing changed.
+ */
+async function applyThemeDesign(
+  design: ThemeDesign | null,
+  save: SaveTheme | undefined
+): Promise<(() => void) | null> {
+  const theme = useBuilderStore.getState().theme
+  if (!design || !theme || !save) return null
+  const patch: Record<string, unknown> = {}
+  const before: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(design)) {
+    // The theme form's rule: Bangla digits beside English words read as a
+    // mistake, so only a Bangla site takes them.
+    if (key === 'numerals' && value === 'bangla' && theme.language !== 'bn')
+      continue
+    const current = theme[key as keyof PageTheme]
+    if (current === value) continue
+    // An answer that sent back the custom CSS it was shown sends it through
+    // the reader's sanitiser, which drops what it does not allow — an @import
+    // the merchant typed themselves among it. Unchanged, so not rewritten.
+    if (
+      key === 'customCss' &&
+      sanitizeCustomCss(typeof current === 'string' ? current : '') === value
+    )
+      continue
+    patch[key] = value
+    // What was there, in a form the draft theme takes back: no custom CSS
+    // is an empty one, and an unset logo is null.
+    before[key] = current ?? (key === 'customCss' ? '' : null)
+  }
+  if (Object.keys(patch).length === 0) return null
+
+  const put = async (values: Record<string, unknown>) => {
+    const { theme: now, setTheme } = useBuilderStore.getState()
+    if (!now) return
+    setTheme({ ...now, ...values } as PageTheme)
+    const result = await save(values).catch(() => ({ ok: false }))
+    if (!result.ok)
+      toast.error('The new theme could not be saved. Try again from Design.')
+  }
+  await put(patch)
+  return () => void put(before)
 }
 
 /**

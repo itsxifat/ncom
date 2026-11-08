@@ -79,6 +79,14 @@ export const sectionSpecSchema = z
     content: z.unknown().optional(),
     /** Section-level design: background, spacing, alignment. */
     style: z.unknown().optional(),
+    /**
+     * Each of the block's elements designed on its own — a headline's type,
+     * a button's colours and hover, a card's shadow — keyed by the element
+     * names the catalogue lists. See element-design.ts.
+     */
+    elements: z.unknown().optional(),
+    /** Headings, text, buttons, pictures and icons added to the block. */
+    extras: z.unknown().optional(),
     /** Present on the page but hidden from visitors. */
     hidden: z.unknown().optional(),
   })
@@ -116,6 +124,11 @@ export const pageSpecSchema = z
     title: looseText(150),
     slug: looseText(100),
     seo: seoSpecSchema,
+    /**
+     * The whole site's look, from a page answer: one page cannot have a theme
+     * of its own, so this changes every page. Validated in normalize.ts.
+     */
+    theme: z.unknown().optional(),
     sections: sectionList,
   })
   .loose()

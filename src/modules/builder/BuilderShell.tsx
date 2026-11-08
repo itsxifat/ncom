@@ -553,7 +553,7 @@ export function BuilderShell({
                 )}
                 {site && (
                   <div hidden={panel !== 'ai'}>
-                    <AiPanel />
+                    <AiPanel saveTheme={saveThemeAndMark || undefined} />
                   </div>
                 )}
                 {panel === 'history' && <HistoryPanel />}

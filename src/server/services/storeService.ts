@@ -570,6 +570,16 @@ function templateThemeColumns(template: SiteTemplate) {
     ...(theme.borderRadius && { borderRadius: theme.borderRadius }),
     ...(theme.headingWeight && { headingWeight: theme.headingWeight }),
     ...(theme.containerWidth && { containerWidth: theme.containerWidth }),
+    ...(theme.spacingScale && { spacingScale: theme.spacingScale }),
+    ...(theme.sectionSpacing && { sectionSpacing: theme.sectionSpacing }),
+    ...(theme.bodyScale && { bodyScale: theme.bodyScale }),
+    ...(theme.showStickyHeader !== undefined && {
+      showStickyHeader: theme.showStickyHeader,
+    }),
+    ...(theme.logoUrl && { logoUrl: theme.logoUrl }),
+    ...(theme.logoWidth && { logoWidth: theme.logoWidth }),
+    ...(theme.faviconUrl && { faviconUrl: theme.faviconUrl }),
+    ...(theme.customCss && { customCss: theme.customCss }),
     language: theme.language ?? 'en',
     numerals: theme.numerals ?? 'latin',
   }

@@ -3,7 +3,10 @@ import type { SiteLanguage } from '../sections/language'
 import type { PageRole, SiteKind } from '../sections/storefront'
 import { getSectionDefinition } from '../sections/registry'
 import { HOOK_REFERENCE } from '../sections/customcode/hooks'
+import { ICON_NAMES } from '../sections/elementDescriptors'
+import { ANIMATION_TYPES } from '../sections/elementStyle'
 import { catalogText } from './catalog'
+import { elementPropertyLines } from './element-design'
 import { PAGE_FORMAT, SITE_FORMAT } from './format'
 import { STYLE_KEYS } from './style-keys'
 
@@ -72,13 +75,14 @@ function hasBlock(type: string) {
 function shapeExample(options: GuideOptions): string {
   // A block that belongs on that kind of site: a store's hero button would
   // lead nowhere (see pageAdvice).
-  const section = `{ "type": "${options.kind === 'STORE' ? 'categories' : 'hero'}", "content": { "title": "…" }, "style": { "backgroundVariant": "muted" } }`
+  const section = `{ "type": "${options.kind === 'STORE' ? 'categories' : 'hero'}", "content": { "title": "…" }, "style": { "backgroundVariant": "muted" }, "elements": { "title": { "fontSize": 52, "letterSpacing": -1 } }, "extras": [ … ] }`
   if (options.scope === 'page') {
     return [
       '{',
       `  "format": "${PAGE_FORMAT}",`,
       '  "title": "Page title",',
       '  "seo": { "title": "≤ 60 characters", "description": "≤ 155 characters" },',
+      '  "theme": { … } (optional — it changes the look of the whole site, every page),',
       `  "sections": [ ${section}, … ]`,
       '}',
     ].join('\n')
@@ -88,7 +92,7 @@ function shapeExample(options: GuideOptions): string {
     `  "format": "${SITE_FORMAT}",`,
     '  "name": "The shop’s name",',
     '  "language": "bn" or "en",',
-    '  "theme": { "primaryColor": "#…", "secondaryColor": "#…", "backgroundColor": "#…", "textColor": "#…", "headingFont": "…", "bodyFont": "…", "buttonStyle": "SOLID", "borderRadius": "md", "headingWeight": "700" },',
+    '  "theme": { "primaryColor": "#…", "secondaryColor": "#…", "backgroundColor": "#…", "textColor": "#…", "headingFont": "…", "bodyFont": "…", "buttonStyle": "SOLID", "borderRadius": "md", "headingWeight": "700", "customCss": "…" },',
     ...(options.kind === 'STORE'
       ? [
           '  "layout": { "sections": [ announcement (optional), header, footer ] },',
@@ -143,22 +147,92 @@ function formatRules(options: GuideOptions): string[] {
   return [
     'Use only the blocks listed below, by their `type`. In `content`, include only the fields you want to set — every field you leave out keeps the block’s sensible default. Never add fields that are not listed, inside list items too: write each item with exactly the field names listed under "each item".',
     'Fields marked "rich text" are text that may use only <strong>, <em>, <br> and <a href="…">. Fields marked "text" are plain text — no HTML, no Markdown.',
-    `Section design goes in "style" (optional), an object: ${STYLE_KEYS.map((key) => `\`${key}\``).join(', ')}. backgroundVariant is "default" (the page background), "muted" (a light tint of it) or "custom" (backgroundColor). Colours are hex like "#1f7a4d". paddingTop/paddingBottom are rem (0–30). anchorId gives the section an id other links can jump to ("#anchor-id"). headingFont/bodyFont change that one section’s fonts.`,
-    'Block text is always drawn in the theme’s textColor, whatever the section’s background. So keep every section’s background as readable behind that colour as the page itself: "default", "muted" or a custom backgroundColor close to the theme’s backgroundColor. Do not use "dark" or "primary" backgrounds, a strongly different custom colour, or a busy or dark background photo (backgroundImageUrl) behind text — and leave backgroundOverlay at 0 unless the theme’s text is light, because it darkens the photo. For a dark look, make the theme itself dark: a dark backgroundColor with a light textColor.',
-    'When you change a page NCOM gave you, a section you send back with its "id" replaces that section: its "content" and its "style" are what you send. A style you leave out of it, or set to null, is removed (the section follows the theme again), and a content field you leave out goes back to the block’s default — so send back everything you want to keep.',
+    'A section is designed in three layers, all optional: "style" for the section as a whole, "elements" for each thing the block draws, and "extras" for things you add to it (see "Designing every detail"). Together with the theme and its customCss they reach everything the owner could change by hand — any colour, size, spacing, shape, shadow, layout or animation, on every block, for phones and computers separately. Design what the owner imagines; do not settle for the blocks’ default look.',
+    `"style" is an object: ${STYLE_KEYS.map((key) => `\`${key}\``).join(', ')}. backgroundVariant is "default" (the page background), "muted" (a light tint of it), "primary" (the brand colour), "dark" (the theme’s textColor) or "custom" (backgroundColor). Colours are hex like "#1f7a4d" (8 digits for see-through). paddingTop/paddingBottom are rem (0–30), maxWidth is px (320–2000), borderRadius is px (0–80), backgroundOverlay 0–80 darkens backgroundImageUrl. anchorId gives the section an id other links can jump to ("#anchor-id"). headingFont/bodyFont change that one section’s fonts. customClassName gives the section class names for the theme’s customCss to style it by.`,
+    'Keep every word readable. A block draws its text in the theme’s textColor unless you colour it, whatever the section’s background. So on a section much darker or lighter than the theme’s background ("dark", "primary", a strong custom colour, a dark photo), colour its text: "color" on each of that block’s text elements in "elements" (its headline, text, labels, prices — the block’s Elements list says which), or every text in the section at once through customCss (see "Custom CSS"). Over a photo, add backgroundOverlay or a text shadow too.',
+    'When you change a page NCOM gave you, a section you send back with its "id" replaces that section: its "content" and its "style" are what you send. A style you leave out of it, or set to null, is removed (the section follows the theme again), and a content field you leave out goes back to the block’s default — so send back everything you want to keep. "elements" is different: each element design you send is laid over that element’s design, an element you leave out keeps its design, and an element set to null loses it. "extras", when you send it, is the block’s whole list of added elements — one you leave out of it is removed; leave "extras" out entirely to keep them as they are.',
     ...(options.channel === 'mcp'
       ? [
-          'To change only part of one section, use update_section instead: the content and style fields you pass are laid over what is there and the rest is kept. Set a style field to null there to remove it.',
+          'To change only part of one section, use update_section instead: the content, style and elements you pass are laid over what is there and the rest is kept (an element’s design property by property, screen by screen). Set a style field, an element or an element’s property to null there to remove it. "extras" there replaces the block’s list of added elements.',
         ]
       : []),
-    'Theme colours are hex with 3 or 6 digits, like "#1f7a4d" — no transparency. buttonStyle: "SOLID" | "OUTLINE" | "GHOST". borderRadius: "none" | "sm" | "md" | "lg" | "full". headingWeight: "400"–"800". Fonts (headingFont, bodyFont) are family names — see "Fonts" below.',
-    'Keep good contrast in the theme: dark text on a light background or the reverse, and a primaryColor that white or black text reads well on — buttons are drawn in it.',
+    'Theme: colours are hex with 3 or 6 digits, like "#1f7a4d" — no transparency. buttonStyle: "SOLID" | "OUTLINE" | "GHOST". borderRadius: "none" | "sm" | "md" | "lg" | "full". headingWeight: "400"–"800". Fonts (headingFont, bodyFont) are family names — see "Fonts" below. containerWidth: "900px"–"2000px", how wide the page’s content runs. spacingScale (space inside blocks) and sectionSpacing (space between sections): "compact" | "comfortable" | "spacious". bodyScale: "0.9" | "1" | "1.1" | "1.2", the size of body text. showStickyHeader: true | false. logoWidth: 40–480 (px). logoUrl and faviconUrl only with https:// addresses the owner gave you. customCss: see "Custom CSS".',
+    options.scope === 'page'
+      ? 'A page answer may carry "theme" too, but every page of the site shares one theme, so add it only when the owner wants the site’s look changed, and send only the settings you change. When NCOM sends you the page, its "theme" shows the site’s settings as they are.'
+      : 'Set the whole theme: it is the site’s look, and every block and element design builds on it.',
+    'Keep good contrast in the theme: dark text on a light background or the reverse, and a primaryColor that white or black text reads well on — buttons are drawn in it. For a dark site, make the theme itself dark: a dark backgroundColor with a light textColor.',
+  ]
+}
+
+/**
+ * How to design inside a block: each element's own design, elements added to
+ * a block, and the site's custom CSS. Built from the same tables the reader
+ * checks against (element-design.ts), so it can only describe what works.
+ */
+function detailRules(options: GuideOptions): string[] {
+  const elementsExample = [
+    '"elements": {',
+    '  "title": { "fontSize": 56, "fontWeight": 800, "lineHeight": 1.05, "letterSpacing": -1.5, "color": "#ffffff" },',
+    '  "button": {',
+    '    "base": { "backgroundColor": "#ff5a1f", "color": "#ffffff", "padding": [16, 32], "borderRadius": 9999, "boxShadow": "0 10px 30px rgba(255,90,31,.35)" },',
+    '    "hover": { "backgroundColor": "#e8480f", "scale": 104 },',
+    '    "mobile": { "padding": [14, 24] },',
+    '    "transition": { "duration": 200, "easing": "ease-out" }',
+    '  },',
+    '  "card": { "borderRadius": 20, "borderWidth": 1, "borderColor": "#e5e7eb", "animation": { "type": "fade-up", "duration": 600 } },',
+    '  "card#0": { "gradient": { "angle": 135, "from": "#fff7ed", "to": "#ffedd5" } },',
+    '  "subtitle": null',
+    '}',
+  ]
+  const extrasExample = [
+    '"extras": [',
+    '  { "id": "badge", "type": "text", "html": "<strong>NEW</strong> · Free delivery today", "slot": "content", "style": { "backgroundColor": "#fef3c7", "padding": [6, 14], "borderRadius": 9999, "fontSize": 13, "order": -1 } },',
+    `  { "id": "call", "type": "button", "html": "Call to order", "href": "${options.kind === 'STORE' ? '/contact' : '#order'}" },`,
+    '  { "id": "secure", "type": "icon", "icon": "shield-check" }',
+    ']',
+  ]
+  return [
+    'Each block below lists its "Elements" — every headline, text, button, picture, card and box it draws, by name. Give a section an "elements" object to design any of them:',
+    '```json',
+    ...elementsExample,
+    '```',
+    '- A name designs that element. A name marked [] in the list is drawn once per item (a card, a slide, a question): its name designs every item, and "card#0", "card#1"… design one item (counting from 0). Names come only from that block’s list.',
+    '- An element’s design is a style for every screen ("title" above), or an object of "base" (every screen), "tablet" (up to 1023px wide), "mobile" (up to 639px wide) and "hover" (under the pointer) styles, with "transition" { "duration": ms, "easing" } to make hover changes smooth and "animation" { "type", "duration": ms, "delay": ms, "easing" } that plays as it scrolls into view. tablet and mobile change only what they name, and tablet values apply on phones too unless mobile changes them. Check that big type and wide layouts still fit on "mobile".',
+    `- animation "type": ${ANIMATION_TYPES.filter((type) => type !== 'none')
+      .map((type) => `"${type}"`)
+      .join(
+        ' | '
+      )}. easing: "ease-out" | "ease" | "ease-in" | "ease-in-out" | "linear". Stagger items with "delay" ("card#0" 0, "card#1" 120, …).`,
+    '- Style properties — numbers are pixels unless said otherwise:',
+    ...elementPropertyLines().map((line) => `  ${line}`),
+    '- Value formats. Colours: hex ("#1f7a4d", "#00000080"), rgb()/rgba(), hsl()/hsla(), "transparent", or the theme’s own colours: var(--page-primary), var(--page-secondary), var(--page-background), var(--page-text), var(--page-on-primary) (text that reads on the primary colour). Lengths: "240px", "50%", "20rem", "100vw", "auto" (a bare number is pixels). Sides (padding, margin, borderWidth): 16, [12, 24] (vertical, horizontal), [top, right, bottom, left] or { "top": 8, "bottom": 8 }. Corners (borderRadius): 12, or { "topLeft": 24, "bottomRight": 24 }; 9999 makes a pill, or a circle on a square. Shadows: "0 10px 30px rgba(0,0,0,.12)" or { "x": 0, "y": 10, "blur": 30, "spread": 0, "color": "#0000001f", "inset": false }.',
+    '- "position": "absolute" lifts an element out of the flow to sit anywhere over its block, placed with top/right/bottom/left (and zIndex) — for badges, stickers, overlapping pictures. "order" moves an element among its neighbours. A container with "display": "flex" or "grid" lays out what is inside it, with "flexDirection", "gap", "justifyContent", "alignItems" or "gridColumns".',
+    '',
+    '### Adding elements',
+    'A block’s "extras" adds elements it does not draw itself — a badge over the headline, a second button, a note under the price, a row of icons, a picture, a divider, space:',
+    '```json',
+    ...extrasExample,
+    '```',
+    `- "type": "heading" | "text" | "button" | "image" | "icon" | "divider" | "spacer". heading, text and button take "html" (rich text); a button takes "href" (${options.kind === 'STORE' ? '"/products" if left out' : 'the order form if left out'}); an image takes "src" (an https:// URL the owner gave you — no image otherwise) and "alt"; an icon takes "icon": ${ICON_NAMES.map((icon) => `"${icon}"`).join(', ')}.`,
+    '- "slot" is the place in the block it goes — each block says where under "Extras go in" (the first place if left out). Added elements come after the block’s own content there: move one with "order" (-1 puts it first), or anywhere with "position": "absolute".',
+    '- Give each an "id" (letters, digits, -) and design it with "style" on it, which takes everything an element design takes — or in "elements" as "x:<id>".',
+    '',
+    '### Custom CSS',
+    'For anything the properties above cannot say — keyframe animations, ::before and ::after decorations, :nth-child patterns, backdrop-filter, clip-path, mix-blend-mode, a whole section’s text colour at once — write real CSS in the theme’s "customCss". It applies to the whole site, so scope every rule: give the section a class with "customClassName" in its style, then select it, and reach an element inside it with [data-el="title"] (one item of a repeated one: [data-el="card"][data-el-i="2"]). For example, a section with "style": { "backgroundVariant": "custom", "backgroundColor": "#0b1120", "customClassName": "night" } and in the theme:',
+    '```css',
+    '.night { --lp-text: #f8fafc; --page-text: #f8fafc; }',
+    '.night [data-el="button"] { box-shadow: 0 0 32px var(--page-primary); }',
+    '@keyframes float { 50% { translate: 0 -8px; } }',
+    '.night [data-el="image"] { animation: float 4s ease-in-out infinite; }',
+    '```',
+    'The first rule turns every text in that section light. Use it only with a "custom" backgroundColor: the "dark" and "muted" backgrounds are painted from --page-text themselves, so changing it there changes the background too. No @import or external stylesheets, no html, body or :root rules (they do nothing here), images only by https:// URL. customCss replaces the site’s custom CSS, so keep the rules already there that should stay. Prefer element designs where they can do it — the owner can see and change those in the editor.',
   ]
 }
 
 function conversionRules(kind: SiteKind): string[] {
   const rules = [
     'If the owner gives you an existing design — HTML, React or Tailwind code, a screenshot, or a link’s contents — rebuild it from these blocks as faithfully as you can: one block per visual section, the same words, the colours as theme colours or section styles, the same fonts when they are Google Fonts families, otherwise the closest from the list.',
+    'Then match its look element by element with "elements": the same type sizes, weights and spacing, the same button shapes, colours and hover states, the same card borders, radii and shadows, the same layout of rows and columns, and how it changes on a phone. Add what a block does not draw with "extras", and only what neither can do with the theme’s customCss.',
   ]
   if (hasBlock('customcode')) {
     rules.push(
@@ -243,6 +317,10 @@ export function designGuide(options: GuideOptions): string {
       (rule) => `- ${rule}`
     ),
     '',
+    '## Designing every detail',
+    '',
+    ...detailRules(options),
+    '',
     '## Language',
     ...languageRules().map((rule) =>
       rule.startsWith('  ') ? rule : `- ${rule}`
@@ -311,6 +389,14 @@ export function briefText(brief: BusinessBrief): string {
   )
   return lines.join('\n')
 }
+
+/**
+ * What to do with a page NCOM sends out to be changed. One text for every
+ * prompt that carries a page, so our AI builder and the merchant's own AI are
+ * told the same thing about what an answer keeps.
+ */
+export const CHANGE_PAGE_RULES =
+  'Send back the whole page after the change. Keep each section’s "id" for sections you keep or change, leave "id" out of new sections, and leave out sections that should go. A section’s "elements" and "extras" are its element designs and added elements as they are now: send an element’s design to change it (null takes it off), and send "extras" only to change that list. The "theme" is the whole site’s look: leave it out of your answer unless the owner asked to change it, and then send only the settings you change.'
 
 /**
  * The text a merchant copies into their own AI: the guide, then their request

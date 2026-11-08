@@ -292,6 +292,11 @@ export function isColor(value: unknown): value is string {
   return typeof value === 'string' && COLOR_RE.test(value)
 }
 
+/** An aspect ratio as `16 / 9`, the only form `aspect-ratio` is emitted in. */
+export function isRatio(value: unknown): value is string {
+  return typeof value === 'string' && RATIO_RE.test(value)
+}
+
 function len(value: unknown): string | undefined {
   return isLength(value) ? value : undefined
 }
@@ -320,19 +325,29 @@ function pick<T extends string>(
     : undefined
 }
 
-/** A shadow, or undefined if it has nothing to draw. */
-function shadow(value: Shadow | undefined, inset = true): string | undefined {
+/**
+ * A shadow, or undefined if it has nothing to draw.
+ *
+ * `text` drops the parts `text-shadow` does not have. It takes no `inset` and
+ * no spread — a fourth length makes the whole declaration invalid, so the
+ * browser threw away every text shadow written with one.
+ */
+function shadow(
+  value: Shadow | undefined,
+  kind: 'box' | 'text' = 'box'
+): string | undefined {
   if (!value || typeof value !== 'object') return undefined
   const x = num(value.x, -200, 200, 0)!
   const y = num(value.y, -200, 200, 0)!
   const blur = num(value.blur, 0, 400, 0)!
-  const spread = num(value.spread, -200, 200, 0)!
+  const spread = kind === 'box' ? num(value.spread, -200, 200, 0)! : 0
   const paint = color(value.color) ?? 'rgba(0,0,0,0.25)'
   // A shadow with no offset, no blur and no spread paints nothing; emitting it
   // would still cost a repaint and would make "is this set?" answer yes for a
   // control the merchant has effectively cleared.
   if (!x && !y && !blur && !spread) return undefined
-  const prefix = inset && value.inset ? 'inset ' : ''
+  if (kind === 'text') return `${x}px ${y}px ${blur}px ${paint}`
+  const prefix = value.inset ? 'inset ' : ''
   return `${prefix}${x}px ${y}px ${blur}px ${spread}px ${paint}`
 }
 
@@ -404,7 +419,7 @@ export function styleDeclarations(style: ElementStyle | undefined): Decl[] {
   if (textAlign) out.push(['text-align', textAlign])
   const textColor = color(style.color)
   if (textColor) out.push(['color', textColor])
-  const textShadow = shadow(style.textShadow, false)
+  const textShadow = shadow(style.textShadow, 'text')
   if (textShadow) out.push(['text-shadow', textShadow])
   const lineClamp = num(style.lineClamp, 1, 20)
   if (lineClamp !== undefined) {

@@ -29,6 +29,7 @@ import {
   SiteDraftTooLargeError,
 } from '@/server/services/designDraftService'
 import { exportPage } from '@/modules/sitespec/export'
+import type { PageTheme } from '@/modules/sections/types'
 
 /**
  * `POST /api/ai/design` — the AI builder.
@@ -82,6 +83,15 @@ const bodySchema = z.discriminatedUnion('mode', [
     /** The sections to work on — the whole page, or just the selected one. */
     sections: z.array(sectionInput).max(60),
     scope: z.enum(['page', 'section']),
+    /**
+     * The site's theme as the builder has it, shown to Claude beside a whole
+     * page so it can keep the look or change it. Read into the prompt only
+     * (export.ts picks the fields); the bound is on size.
+     */
+    theme: z
+      .record(z.string(), z.unknown())
+      .refine((theme) => JSON.stringify(theme).length <= 40_000)
+      .nullish(),
   }),
 ])
 
@@ -233,6 +243,12 @@ export async function POST(request: Request) {
                     ...section,
                     config: section.config ?? undefined,
                   })),
+                  // A question about one block is not one about the site's
+                  // look, and the builder does not apply a theme from it.
+                  theme:
+                    body.scope === 'page'
+                      ? (body.theme as Partial<PageTheme> | null | undefined)
+                      : undefined,
                 })
               : undefined
           const result = await designPageWithAi({

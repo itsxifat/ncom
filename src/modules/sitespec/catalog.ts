@@ -6,7 +6,9 @@ import {
 } from '../sections/registry'
 import type { FieldConfig, SelectOption } from '../sections/editorFields'
 import { optionValue } from '../sections/editorFields'
+import type { ElementDescriptor } from '../sections/elementDescriptors'
 import type { PageRole, SiteKind } from '../sections/storefront'
+import { blockElementText } from './element-design'
 
 /**
  * The block library, described for a model rather than drawn for a merchant.
@@ -69,6 +71,10 @@ export interface BlockDoc {
   /** The page role that cannot do without it. */
   requiredOn?: PageRole
   fields: FieldDoc[]
+  /** The things it draws, each of which a design can style (`elements`). */
+  elements: Pick<ElementDescriptor, 'key' | 'label' | 'kind' | 'repeated'>[]
+  /** Where elements a design adds (`extras`) can go. */
+  slots: { key: string; label: string }[]
 }
 
 type JsonSchema = {
@@ -222,6 +228,13 @@ function describeBlock(definition: SectionDefinition): BlockDoc {
       contentJsonSchema(definition),
       definition.editorFields
     ),
+    elements: definition.elements.map((element) => ({
+      key: element.key,
+      label: element.label,
+      kind: element.kind,
+      ...(element.repeated && { repeated: true }),
+    })),
+    slots: definition.slots ?? [],
   }
 }
 
@@ -357,6 +370,7 @@ export function catalogText(kind: SiteKind, role?: PageRole): string {
       `Goes on: ${where.join(', ')}${flags.length ? `. ${flags.join('; ')}` : ''}.`
     )
     for (const field of block.fields) out.push(...fieldLine(field, '', kind))
+    out.push(...blockElementText(block))
     out.push('')
   }
   return out.join('\n').trim()

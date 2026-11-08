@@ -11,7 +11,15 @@ import type { PageRole, SiteKind } from '../sections/storefront'
 import type { SiteLanguage } from '../sections/language'
 import { findFont } from '@/lib/fonts'
 import { findGoogleFont } from '@/lib/google-fonts'
+import { sanitizeCustomCss } from '../sections/customcode/sanitize'
 import { contentJsonSchema } from './catalog'
+import {
+  combineElementDesigns,
+  flushNotes,
+  normalizeElementDesign,
+  normalizeExtras,
+  type ElementNotes,
+} from './element-design'
 import { cutText, wellFormed, type SectionSpec } from './format'
 import { STYLE_KEYS, type StyleKey } from './style-keys'
 
@@ -64,6 +72,12 @@ export interface NormalizedSection {
    * (see `restyleConfig`) instead of treating the slip as a removal.
    */
   rejectedStyle?: string[]
+  /**
+   * Elements whose design the design set to null. Element designs are laid
+   * over a section's own rather than replacing them, so taking one off has to
+   * be said; a caller rewriting an existing section removes these.
+   */
+  clearedElements?: string[]
 }
 
 export interface NormalizeContext {
@@ -275,17 +289,19 @@ const imageUrl = z
   .regex(/^(?:https:\/\/|\/)/, 'must be an https:// address')
 
 /**
- * The section design a design may set: the safe, visible subset of
- * SectionConfig. Per-element styling and merchant-added extras are left to the
- * builder — they are keyed to a block's internals, which a model writing from
- * the outside cannot see.
+ * The section design a design may set in `style`: the wrapper's part of
+ * SectionConfig. What is inside the block — each element's design and the
+ * elements added to it — comes in beside it, as `elements` and `extras`, read
+ * by element-design.ts against the block's own list of elements.
  *
  * Only what shows on the page is offered. `textColor` and `headingColor` are
  * left out on purpose: the blocks draw their text in the theme's text colour
  * whatever the section says (and nothing reads `headingColor`), so a design
- * that set them would get nothing for it. Leaving them out also keeps them out
- * of export.ts, so a value the merchant set in the builder survives a round
- * trip untouched rather than being sent out and judged.
+ * that set them would get nothing for it — an element's own `color`, or the
+ * theme's custom CSS on the section's `customClassName`, is what recolours a
+ * section's text. Leaving them out also keeps them out of export.ts, so a
+ * value the merchant set in the builder survives a round trip untouched
+ * rather than being sent out and judged.
  */
 const STYLE_FIELDS = {
   backgroundVariant: z.enum(['default', 'muted', 'primary', 'dark', 'custom']),
@@ -311,6 +327,21 @@ const STYLE_FIELDS = {
     .trim()
     .toLowerCase()
     .regex(/^[a-z][a-z0-9-]{0,40}$/, 'use lowercase letters, digits and -'),
+  // Class names for the theme's custom CSS to find the section by. Words
+  // only: the value lands in a `class` attribute, and a class is all it is.
+  customClassName: z
+    .string()
+    .trim()
+    .transform((value) => value.replace(/\s+/g, ' ').replace(/^\./, ''))
+    .pipe(
+      z
+        .string()
+        .max(100)
+        .regex(
+          /^-?[A-Za-z_][A-Za-z0-9_-]*(?: -?[A-Za-z_][A-Za-z0-9_-]*)*$/,
+          'use class names of letters, digits, - and _, separated by spaces'
+        )
+    ),
 } satisfies Record<StyleKey, z.ZodType>
 
 function normalizeStyle(
@@ -945,7 +976,24 @@ export function normalizeSection(
         'Ignored "content" — it must be an object of the block’s fields.',
     })
   }
-  const style = isRecord(spec.style) ? spec.style : undefined
+  let style = isRecord(spec.style) ? spec.style : undefined
+  // A model that thinks of everything about a section's look as its "style"
+  // puts its elements there too. It plainly meant them.
+  let elementsSpec = spec.elements
+  let extrasSpec = spec.extras
+  if (
+    style &&
+    (Object.hasOwn(style, 'elements') || Object.hasOwn(style, 'extras'))
+  ) {
+    const { elements, extras, ...rest } = style
+    // Both places at once: the section's own "elements" over the style's.
+    elementsSpec =
+      isRecord(elements) && isRecord(elementsSpec)
+        ? { ...elements, ...elementsSpec }
+        : (elementsSpec ?? elements)
+    extrasSpec ??= extras
+    style = rest
+  }
   if (!style && spec.style !== undefined && spec.style !== null) {
     // The call to action, countdown and categories blocks have a content
     // field called "style" (outline, cards…). A model that put it beside the
@@ -972,19 +1020,49 @@ export function normalizeSection(
   }
 
   const rejectedStyle: string[] = []
+  const normalizedContent = normalizeContent(
+    definition,
+    content,
+    context.language,
+    where,
+    issues
+  )
+  const config = normalizeStyle(style, where, issues, rejectedStyle)
+
+  // Inside the block: each element's design and the elements added to it.
+  // Left out means "as it is", so neither is set unless the design gave it.
+  const notes: ElementNotes = { where, list: [] }
+  const extras =
+    extrasSpec !== undefined && extrasSpec !== null
+      ? normalizeExtras(extrasSpec, { definition, kind: context.kind, notes })
+      : undefined
+  const elements =
+    elementsSpec !== undefined && elementsSpec !== null
+      ? normalizeElementDesign(elementsSpec, {
+          definition,
+          extraIds: extras
+            ? new Set(extras.extras.map((extra) => extra.id))
+            : null,
+          notes,
+        })
+      : undefined
+  flushNotes(notes, issues)
+  // An added element's own `style`, then the design's `elements` over it.
+  const designs = combineElementDesigns(extras?.styles, elements?.elements)
+  if (Object.keys(designs).length > 0) config.elements = designs
+  if (extras) config.extras = extras.extras
+
   return {
     type,
-    content: normalizeContent(
-      definition,
-      content,
-      context.language,
-      where,
-      issues
-    ),
-    config: normalizeStyle(style, where, issues, rejectedStyle),
+    content: normalizedContent,
+    config,
     isVisible: spec.hidden !== true && spec.hidden !== 'true',
     ref: typeof spec.id === 'string' && spec.id ? spec.id : undefined,
     ...(rejectedStyle.length > 0 && { rejectedStyle }),
+    ...(elements &&
+      elements.cleared.length > 0 && {
+        clearedElements: elements.cleared,
+      }),
   }
 }
 
@@ -1160,7 +1238,44 @@ export interface ThemeDesign {
   headingWeight?: '400' | '500' | '600' | '700' | '800'
   containerWidth?: string
   numerals?: 'latin' | 'bangla'
+  /** Space inside blocks and between their parts. */
+  spacingScale?: Spacing
+  /** Space between one section and the next. */
+  sectionSpacing?: Spacing
+  /** Body text size, as a multiple of the normal size. */
+  bodyScale?: '0.9' | '1' | '1.1' | '1.2'
+  showStickyHeader?: boolean
+  logoUrl?: string
+  logoWidth?: number
+  faviconUrl?: string
+  /**
+   * CSS for the whole site, for what the blocks and element designs cannot
+   * say. Sanitised here as the custom code block's CSS is — no `@import`, no
+   * script URLs, no way out of its `<style>` — because unlike the theme form,
+   * nobody typed it: a model wrote it, and the merchant pasted it unread.
+   */
+  customCss?: string
 }
+
+type Spacing = 'compact' | 'comfortable' | 'spacious'
+
+/** The Theme settings' own limit (`updateThemeSchema`). */
+const MAX_THEME_CSS = 20_000
+
+const spacing = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .transform((value) =>
+    value === 'tight' || value === 'small'
+      ? 'compact'
+      : value === 'normal' || value === 'medium' || value === 'default'
+        ? 'comfortable'
+        : value === 'loose' || value === 'large' || value === 'airy'
+          ? 'spacious'
+          : value
+  )
+  .pipe(z.enum(['compact', 'comfortable', 'spacious']))
 
 const THEME_FIELDS = {
   primaryColor: themeColor,
@@ -1192,6 +1307,29 @@ const THEME_FIELDS = {
       z.string().regex(/^(?:9\d\d|1\d\d\d|2000)px$/, 'between 900px and 2000px')
     ),
   numerals: z.enum(['latin', 'bangla']),
+  spacingScale: spacing,
+  sectionSpacing: spacing,
+  bodyScale: z
+    .union([z.string(), z.number()])
+    .transform((value) => String(Number(value)))
+    .pipe(z.enum(['0.9', '1', '1.1', '1.2'], 'one of 0.9, 1, 1.1, 1.2')),
+  showStickyHeader: z
+    .union([z.boolean(), z.enum(['true', 'false'])])
+    .transform((value) => value === true || value === 'true'),
+  logoUrl: imageUrl,
+  logoWidth: z.coerce.number().int().min(40).max(480),
+  faviconUrl: imageUrl,
+  customCss: z.string().transform((value, ctx) => {
+    const css = sanitizeCustomCss(value)
+    if (css.length > MAX_THEME_CSS) {
+      ctx.addIssue({
+        code: 'custom',
+        message: `it is ${css.length} characters; the most is ${MAX_THEME_CSS}`,
+      })
+      return z.NEVER
+    }
+    return css
+  }),
 } satisfies Record<keyof ThemeDesign, z.ZodType>
 
 export function normalizeTheme(

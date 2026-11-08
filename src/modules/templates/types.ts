@@ -51,6 +51,18 @@ export interface TemplateTheme {
   borderRadius?: 'none' | 'sm' | 'md' | 'lg' | 'full'
   headingWeight?: string
   containerWidth?: string
+  /**
+   * The rest of the Design tab, which a design written for the site may set
+   * and a gallery template leaves to the defaults.
+   */
+  spacingScale?: string
+  sectionSpacing?: string
+  bodyScale?: string
+  showStickyHeader?: boolean
+  logoUrl?: string
+  logoWidth?: number
+  faviconUrl?: string
+  customCss?: string
   /** Set by `localizeTemplate`; a template itself leaves these out. */
   language?: SiteLanguage
   numerals?: SiteNumerals
