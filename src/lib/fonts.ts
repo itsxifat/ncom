@@ -458,14 +458,24 @@ export type FontScript = 'latin' | 'bangla'
  * face with none at all — and matches the dashboard's.
  *
  * Read defensively. In a route handler the local font is not compiled at all
- * (Turbopack leaves `lib/taka-font.ts` with no exports in that layer), so the
- * import is undefined there — and reading `.style` of it at module load took
+ * (Turbopack leaves `lib/taka-font.ts` with no exports in that layer). In dev
+ * the import is then undefined; in a production build reading the missing
+ * binding throws a ReferenceError — either way at module load, which took
  * down every route that reaches this file: the landing page's order endpoint,
- * the MCP server. Nothing a route handler builds is ever drawn, so a generic
- * family keeps those stacks valid.
+ * the MCP server, and `next build` itself while it collects page data.
+ * Nothing a route handler builds is ever drawn, so a generic family keeps
+ * those stacks valid.
  */
-const TAKA =
-  (takaFont as typeof takaFont | undefined)?.style.fontFamily ?? 'system-ui'
+function takaFamily(): string {
+  try {
+    return (
+      (takaFont as typeof takaFont | undefined)?.style.fontFamily ?? 'system-ui'
+    )
+  } catch {
+    return 'system-ui'
+  }
+}
+const TAKA = takaFamily()
 
 const GENERIC: Record<string, string> = {
   sans: 'ui-sans-serif, system-ui, sans-serif',
