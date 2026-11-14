@@ -129,6 +129,36 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         console.error('Failed to provision workspace for new user:', error)
       }
     },
+    /**
+     * A Google sign-in whose address Google has confirmed counts as a verified
+     * email, so it never meets the OTP screen.
+     *
+     * Needed because Auth.js creates every OAuth user with `emailVerified: null`,
+     * whatever `profile()` above returns — so a Google signup was sent to
+     * /verify-email, which only the password signup sends a code for: the
+     * screen said a code was sent when none had been.
+     *
+     * Only for accounts without a password. A password account at this address
+     * was never proven to belong to its owner (anyone can register an address),
+     * and Google linking into it must not hand that password a verified account;
+     * it still confirms by code.
+     */
+    async linkAccount({ user, account, profile }) {
+      if (account.provider !== 'google' || !user.id || !profile.email) return
+      const verifiedByGoogle =
+        'emailVerified' in profile && profile.emailVerified instanceof Date
+      if (!verifiedByGoogle) return
+
+      await prisma.user.updateMany({
+        where: {
+          id: user.id,
+          email: { equals: profile.email, mode: 'insensitive' },
+          emailVerified: null,
+          passwordHash: null,
+        },
+        data: { emailVerified: new Date() },
+      })
+    },
   },
   callbacks: {
     ...authConfig.callbacks,
