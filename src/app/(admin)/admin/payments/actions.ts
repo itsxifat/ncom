@@ -1,6 +1,8 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { requirePlatformAdmin } from '@/server/auth/rbac'
+import { resendInvoice, runCrmJob } from '@/server/billing/crmSync'
 import {
   EnfinitoPaySettingsError,
   removeEnfinitoPaySecrets,
@@ -49,5 +51,32 @@ export async function testEnfinitoPayAction(): Promise<{
 
 export async function removeEnfinitoPayAction(): Promise<void> {
   await removeEnfinitoPaySecrets()
+  revalidatePath('/admin/payments')
+}
+
+/** Pushes what is queued and compares every invoice with the CRM, now. */
+export async function compareWithCrmAction(): Promise<{
+  ok: boolean
+  message: string
+}> {
+  await requirePlatformAdmin()
+  const result = await runCrmJob({ compare: true })
+  revalidatePath('/admin/payments')
+  if (!result.enabled)
+    return { ok: false, message: 'The CRM is not connected.' }
+  if (result.error) return { ok: false, message: result.error }
+  if (!result.compared)
+    return {
+      ok: false,
+      message: 'The CRM did not answer. Try again in a minute.',
+    }
+  return { ok: true, message: 'Compared with the CRM.' }
+}
+
+/** Sends one invoice to the CRM again now. */
+export async function resendToCrmAction(id: number): Promise<void> {
+  await requirePlatformAdmin()
+  if (!Number.isInteger(id) || id <= 0) return
+  await resendInvoice(id)
   revalidatePath('/admin/payments')
 }

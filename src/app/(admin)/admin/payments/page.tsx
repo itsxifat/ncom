@@ -5,6 +5,7 @@ import { PageHeader } from '@/components/app/page-header'
 import { PageShell } from '@/components/app/page-shell'
 import { StatCard } from '@/components/app/stat-card'
 import { EnfinitoPaySettingsClient } from './EnfinitoPaySettingsClient'
+import { CrmSection } from './CrmSection'
 
 export const metadata = { title: 'Payments' }
 
@@ -55,6 +56,8 @@ export default async function AdminPaymentsPage() {
         webhookUrl={`${base}/api/billing/enfinito-pay`}
         returnDomain={new URL(base).host}
       />
+
+      <CrmSection />
     </PageShell>
   )
 }

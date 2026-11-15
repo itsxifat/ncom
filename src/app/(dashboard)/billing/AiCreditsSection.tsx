@@ -1,4 +1,5 @@
-import { Coins } from 'lucide-react'
+import Link from 'next/link'
+import { Coins, FileText } from 'lucide-react'
 import type {
   AiCreditEntryRow,
   AiCreditSummary,
@@ -12,6 +13,7 @@ import {
   ListRowText,
 } from '@/components/app/list-panel'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Money } from '@/components/store/form-controls'
 import { formatMoney } from '@/lib/money'
 import { cn } from '@/lib/utils'
@@ -49,6 +51,8 @@ export function AiCreditsSection({
   entries,
   canBuy,
   payOnline,
+  vatNote = '',
+  invoiceIds = {},
 }: {
   summary: AiCreditSummary
   packs: CreditPackRow[]
@@ -57,6 +61,10 @@ export function AiCreditsSection({
   canBuy: boolean
   /** Enfinito Pay is set up: a pack is paid for on the spot. */
   payOnline: boolean
+  /** "Prices include 15% VAT." — as the CRM decides. */
+  vatNote?: string
+  /** The invoice of each order, by order id. */
+  invoiceIds?: Record<string, number>
 }) {
   const refreshes = new Date(summary.refreshesAt).toLocaleDateString('en-GB', {
     day: 'numeric',
@@ -127,6 +135,7 @@ export function AiCreditsSection({
                 ))}
               </div>
               <p className="text-muted-foreground text-xs">
+                {vatNote && `${vatNote} `}
                 {!canBuy
                   ? 'Only a workspace owner can buy credits.'
                   : payOnline
@@ -162,6 +171,21 @@ export function AiCreditsSection({
                     <Money>
                       {formatMoney(order.totalCents, order.currencyCode)}
                     </Money>
+                    {invoiceIds[order.id] && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        render={
+                          <Link
+                            href={`/print/invoices/${invoiceIds[order.id]}`}
+                          />
+                        }
+                        nativeButton={false}
+                      >
+                        <FileText />
+                        Invoice
+                      </Button>
+                    )}
                     {canBuy &&
                       payOnline &&
                       order.status === 'AWAITING_PAYMENT' && (

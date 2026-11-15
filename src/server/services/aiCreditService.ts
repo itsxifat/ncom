@@ -10,6 +10,16 @@ import { usagePeriodKey } from '@/lib/plans'
 import { formatMoney } from '@/lib/money'
 import { getEntitlements } from './entitlementService'
 import { logAudit } from './auditService'
+import {
+  billingPolicy,
+  createInvoice,
+  customerOf,
+  recordOrderPayment,
+  voidOrderInvoice,
+  type PaymentRecord,
+} from '@/server/billing/invoices'
+import { scheduleCrmSync } from '@/server/billing/crmSync'
+import { priceSale } from '@/server/billing/tax'
 
 /**
  * AI builder credits.
@@ -553,16 +563,43 @@ export async function orderCreditPack(
     )
   }
 
-  const order = await prisma.aiCreditOrder.create({
-    data: {
-      organizationId,
-      packId: pack.id,
-      packName: pack.name,
-      credits: pack.credits,
-      currencyCode: pack.currencyCode,
-      totalCents: pack.priceCents,
-      createdById: session.user.id,
-    },
+  // Priced and invoiced at once, under the VAT the CRM decides: the invoice's
+  // total is what the owner pays.
+  const description = `${pack.name} · ${pack.credits.toLocaleString('en')} AI credits`
+  const policy = pack.priceCents > 0 ? await billingPolicy() : null
+  const customer = policy ? await customerOf(prisma, organizationId) : null
+  const priced =
+    policy && customer
+      ? priceSale(
+          [{ description, quantity: 1, unitCents: pack.priceCents }],
+          0,
+          policy,
+          customer.customerNumber
+        )
+      : null
+
+  const order = await prisma.$transaction(async (tx) => {
+    const created = await tx.aiCreditOrder.create({
+      data: {
+        organizationId,
+        packId: pack.id,
+        packName: pack.name,
+        credits: pack.credits,
+        currencyCode: pack.currencyCode,
+        totalCents: priced?.totalCents ?? pack.priceCents,
+        createdById: session.user.id,
+      },
+    })
+    if (priced && policy) {
+      await createInvoice(tx, {
+        organizationId,
+        order: { kind: 'credits', id: created.id },
+        description,
+        priced,
+        seller: policy.seller ?? null,
+      })
+    }
+    return created
   })
   await logAudit(
     session.user.id,
@@ -572,9 +609,11 @@ export async function orderCreditPack(
     {
       packId: pack.id,
       credits: pack.credits,
-      totalCents: pack.priceCents,
+      totalCents: order.totalCents,
+      vatCents: priced?.vatCents ?? 0,
     }
   )
+  if (priced) scheduleCrmSync()
 
   if (pack.priceCents === 0) {
     await settleOrder(order.id, { actorUserId: session.user.id })
@@ -589,9 +628,11 @@ async function settleOrder(
     actorUserId: string | null
     provider?: string
     providerReference?: string
+    /** The money that paid it, for its invoice. Default: settled by hand, for the order's total. */
+    payment?: PaymentRecord
   }
 ): Promise<boolean> {
-  return prisma.$transaction(async (tx) => {
+  const settled = await prisma.$transaction(async (tx) => {
     const order = await tx.aiCreditOrder.findUnique({ where: { id: orderId } })
     if (!order) throw new CreditError('Order not found.')
     if (order.status === 'PAID') return false
@@ -610,6 +651,22 @@ async function settleOrder(
       },
     })
     if (count === 0) return false
+    // Paid exactly when its invoice is: in this transaction, once.
+    if (order.totalCents > 0) {
+      await recordOrderPayment(
+        tx,
+        { kind: 'credits', id: order.id },
+        input.payment ?? {
+          method: 'MANUAL',
+          amountCents: order.totalCents,
+          dedupeKey: `manual:credits:${order.id}`,
+          paidAt: new Date(),
+          channel: 'other',
+          reference: input.providerReference ?? '',
+          createdById: input.actorUserId,
+        }
+      )
+    }
     await changeBalance(tx, order.organizationId, order.credits, {
       kind: 'PURCHASE',
       description: `Bought ${order.packName} (${order.credits} credits) for ${formatMoney(order.totalCents, order.currencyCode)}`,
@@ -619,6 +676,8 @@ async function settleOrder(
     })
     return true
   })
+  if (settled) scheduleCrmSync()
+  return settled
 }
 
 /**
@@ -637,6 +696,7 @@ export async function settleCreditOrderPayment(
     actorUserId: string | null
     provider: string
     providerReference?: string
+    payment?: PaymentRecord
   }
 ): Promise<boolean> {
   const settled = await settleOrder(orderId, input)
@@ -669,10 +729,15 @@ export async function markCreditOrderPaid(
 
 export async function cancelCreditOrder(orderId: string): Promise<void> {
   const session = await requirePlatformAdmin()
-  const { count } = await prisma.aiCreditOrder.updateMany({
-    where: { id: orderId, status: 'AWAITING_PAYMENT' },
-    data: { status: 'CANCELED', canceledAt: new Date() },
+  const count = await prisma.$transaction(async (tx) => {
+    const { count } = await tx.aiCreditOrder.updateMany({
+      where: { id: orderId, status: 'AWAITING_PAYMENT' },
+      data: { status: 'CANCELED', canceledAt: new Date() },
+    })
+    if (count > 0) await voidOrderInvoice(tx, { kind: 'credits', id: orderId })
+    return count
   })
+  scheduleCrmSync()
   if (count === 0) {
     throw new CreditError(
       'Only an order still waiting for payment can be cancelled.'

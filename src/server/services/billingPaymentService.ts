@@ -17,6 +17,13 @@ import {
   type QuoteLine,
 } from './planCheckoutService'
 import { CreditError, settleCreditOrderPayment } from './aiCreditService'
+import {
+  checkoutLines,
+  findOrderInvoice,
+  markCheckoutRefunded,
+  type PaymentRecord,
+} from '@/server/billing/invoices'
+import { scheduleCrmSync } from '@/server/billing/crmSync'
 import { logAudit } from './auditService'
 import { sendEmail } from './emailService'
 import { planActivatedEmail } from '@/server/email/templates'
@@ -107,6 +114,12 @@ async function loadOrder(
         },
       ]
     }
+    // Invoiced under VAT: the page shows the invoice's figures (VAT on top as
+    // its own line), so what is paid is the invoice's total.
+    const invoice = await findOrderInvoice(prisma, { kind, id: order.id })
+    const priced = invoice
+      ? checkoutLines(invoice, items)
+      : { items, discountCents: order.discountCents }
     return {
       kind,
       id: order.id,
@@ -114,16 +127,33 @@ async function loadOrder(
       status: order.status,
       currencyCode: order.currencyCode,
       totalCents: order.totalCents,
-      discountCents: order.discountCents,
+      discountCents: priced.discountCents,
       provider: order.provider,
       providerReference: order.providerReference,
       createdById: order.createdById,
-      items,
+      items: priced.items,
       description: `${order.plan.name} · ${order.interval === 'ANNUAL' ? 'yearly' : 'monthly'}`,
     }
   }
   const order = await prisma.aiCreditOrder.findUnique({ where: { id } })
   if (!order) return null
+  const invoice = await findOrderInvoice(prisma, { kind, id: order.id })
+  const name = `${order.packName} · ${order.credits.toLocaleString('en')} AI credits`
+  // VAT on top: the pack at its price and the VAT as a line of its own.
+  const priced = invoice
+    ? checkoutLines(invoice, [
+        {
+          name,
+          amountCents: invoice.pricesIncludeVat
+            ? invoice.totalCents
+            : invoice.totalCents - invoice.vatCents - invoice.sdCents,
+          quantity: 1,
+        },
+      ])
+    : {
+        items: [{ name, amountCents: order.totalCents, quantity: 1 }],
+        discountCents: 0,
+      }
   return {
     kind,
     id: order.id,
@@ -131,17 +161,11 @@ async function loadOrder(
     status: order.status,
     currencyCode: order.currencyCode,
     totalCents: order.totalCents,
-    discountCents: 0,
+    discountCents: priced.discountCents,
     provider: order.provider,
     providerReference: order.providerReference,
     createdById: order.createdById,
-    items: [
-      {
-        name: `${order.packName} · ${order.credits.toLocaleString('en')} AI credits`,
-        amountCents: order.totalCents,
-        quantity: 1,
-      },
-    ],
+    items: priced.items,
     description: 'AI builder credits',
   }
 }
@@ -352,6 +376,22 @@ export async function confirmPayment(
       return { outcome: 'ignored' }
     }
     const reference = checkout.payment?.transaction_id ?? checkout.id
+    const paidAt = checkout.payment?.paid_at
+      ? new Date(checkout.payment.paid_at)
+      : new Date()
+    // What the invoice records, and what the CRM books.
+    const payment: PaymentRecord = {
+      method: 'ENFINITO_PAY',
+      amountCents: order.totalCents,
+      dedupeKey: `enfinito-pay:${checkout.id}`,
+      paidAt: Number.isNaN(paidAt.getTime()) ? new Date() : paidAt,
+      livemode: checkout.livemode,
+      channel: checkout.payment?.method ?? '',
+      reference: checkout.payment?.invoice_number ?? '',
+      checkoutId: checkout.id,
+      transactionId: checkout.payment?.transaction_id ?? null,
+      createdById: order.createdById,
+    }
     try {
       const applied =
         order.kind === 'plan'
@@ -360,11 +400,13 @@ export async function confirmPayment(
               provider: PROVIDER,
               providerReference: reference,
               markPaid: true,
+              payment,
             })
           : await settleCreditOrderPayment(order.id, {
               actorUserId: order.createdById,
               provider: PROVIDER,
               providerReference: reference,
+              payment,
             })
       if (applied) {
         await logAudit(
@@ -404,7 +446,9 @@ export async function confirmPayment(
 
   if (checkout.status === 'refunded') {
     // Access is not taken away by itself: the team decides, as it does for
-    // anything that would take a paying workspace offline.
+    // anything that would take a paying workspace offline. The CRM is told,
+    // and asks finance for the credit note that takes the money back.
+    if ((await markCheckoutRefunded(checkout.id)) > 0) scheduleCrmSync()
     await logAudit(null, 'billing.payment.refunded', entity, order.id, {
       checkoutId: checkout.id,
       transactionId: checkout.payment?.transaction_id ?? null,

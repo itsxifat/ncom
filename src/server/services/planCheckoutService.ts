@@ -14,6 +14,23 @@ import {
   type CouponRejection,
 } from '@/server/services/planCouponService'
 import { ensureSubscription } from '@/server/services/entitlementService'
+import { currentPolicy } from '@/server/billing/crm'
+import {
+  billingPolicy,
+  createInvoice,
+  recordOrderPayment,
+  voidOrderInvoice,
+  type PaymentRecord,
+} from '@/server/billing/invoices'
+import { scheduleCrmSync } from '@/server/billing/crmSync'
+import {
+  priceSale,
+  vatLabel,
+  vatNote,
+  type PricedInvoice,
+  type SaleLine,
+  type TaxPolicy,
+} from '@/server/billing/tax'
 
 /**
  * Subscribing to a plan, and changing one.
@@ -65,13 +82,76 @@ export interface CheckoutQuote {
   lines: QuoteLine[]
   subtotalCents: number
   discountCents: number
+  /** What is paid: the price after the coupon, with VAT as the CRM decides. */
   totalCents: number
+  /** VAT and SD on the order (inside the total, or added to it). */
+  tax: QuoteTax
   /** True when nothing is owed, so checkout can complete without a gateway. */
   isFree: boolean
   coupon: CouponEvaluation | null
   couponError: { reason: CouponRejection; message: string } | null
   trialDays: number
   isContactSalesOnly: boolean
+}
+
+export interface QuoteTax {
+  vatCents: number
+  sdCents: number
+  /** "VAT (15%)" */
+  label: string
+  /** true: inside the price shown; false: added to it. */
+  included: boolean
+  /** What owners are told next to prices ("" when there is no VAT). */
+  note: string
+  /** Connected to the CRM, but its tax settings have not arrived yet. */
+  pending: boolean
+}
+
+const NO_QUOTE_TAX: QuoteTax = {
+  vatCents: 0,
+  sdCents: 0,
+  label: 'VAT',
+  included: true,
+  note: '',
+  pending: false,
+}
+
+function saleLines(lines: QuoteLine[]): SaleLine[] {
+  return lines.map((line) => ({
+    description: line.label,
+    quantity: line.quantity,
+    unitCents: line.unitPriceCents,
+  }))
+}
+
+/** The order priced as it will be invoiced. */
+function priceOrder(
+  policy: TaxPolicy,
+  billingNumber: number,
+  lines: QuoteLine[],
+  discountCents: number
+): PricedInvoice {
+  return priceSale(saleLines(lines), discountCents, policy, billingNumber)
+}
+
+function quoteTax(priced: PricedInvoice, policy: TaxPolicy): QuoteTax {
+  return {
+    vatCents: priced.vatCents,
+    sdCents: priced.sdCents,
+    label: vatLabel(priced.vatTreatment, priced.vatRate),
+    included: priced.pricesIncludeVat,
+    note: priced.vatCents + priced.sdCents > 0 ? vatNote(policy) : '',
+    pending: false,
+  }
+}
+
+async function billingNumberOf(organizationId: string): Promise<number> {
+  const org = await prisma.organization.findUnique({
+    where: { id: organizationId },
+    select: { billingNumber: true },
+  })
+  if (!org) throw new CheckoutError('That workspace was not found.')
+  return org.billingNumber
 }
 
 export interface QuoteInput {
@@ -200,7 +280,26 @@ export async function quoteCheckout(input: QuoteInput): Promise<CheckoutQuote> {
   }
 
   const discountCents = Math.min(subtotalCents, coupon?.discountCents ?? 0)
-  const totalCents = subtotalCents - discountCents
+  const listTotalCents = subtotalCents - discountCents
+
+  // Priced the way it will be invoiced, under the CRM's last tax settings.
+  let totalCents = listTotalCents
+  let tax = NO_QUOTE_TAX
+  if (listTotalCents > 0) {
+    const policy = await currentPolicy()
+    if (!policy) {
+      tax = { ...NO_QUOTE_TAX, pending: true }
+    } else {
+      const priced = priceOrder(
+        policy,
+        await billingNumberOf(input.organizationId),
+        lines,
+        discountCents
+      )
+      totalCents = priced.totalCents
+      tax = quoteTax(priced, policy)
+    }
+  }
 
   return {
     planId: plan.id,
@@ -212,7 +311,8 @@ export async function quoteCheckout(input: QuoteInput): Promise<CheckoutQuote> {
     subtotalCents,
     discountCents,
     totalCents,
-    isFree: totalCents === 0,
+    tax,
+    isFree: listTotalCents === 0,
     coupon,
     couponError,
     trialDays: plan.trialDays + (coupon?.trialDays ?? 0),
@@ -260,6 +360,19 @@ export async function startCheckout(
 
   const subscription = await ensureSubscription(input.organizationId)
 
+  // Priced now, under the tax settings in force, and invoiced as priced: the
+  // invoice's total is what the owner pays.
+  const policy = quote.isFree ? null : await billingPolicy()
+  const priced = policy
+    ? priceOrder(
+        policy,
+        await billingNumberOf(input.organizationId),
+        quote.lines,
+        quote.discountCents
+      )
+    : null
+  const totalCents = priced?.totalCents ?? 0
+
   const order = await prisma.$transaction(async (tx) => {
     const created = await tx.planOrder.create({
       data: {
@@ -270,7 +383,7 @@ export async function startCheckout(
         currencyCode: quote.currencyCode,
         subtotalCents: quote.subtotalCents,
         discountCents: quote.discountCents,
-        totalCents: quote.totalCents,
+        totalCents,
         couponId: quote.coupon?.couponId ?? null,
         couponCode: quote.coupon?.code ?? null,
         status: quote.isFree ? 'AUTO_ACTIVATED' : 'AWAITING_PAYMENT',
@@ -278,6 +391,16 @@ export async function startCheckout(
         createdById: session.user.id,
       },
     })
+
+    if (priced && policy) {
+      await createInvoice(tx, {
+        organizationId: input.organizationId,
+        order: { kind: 'plan', id: created.id },
+        description: `${quote.planName} · ${quote.interval === 'ANNUAL' ? 'yearly' : 'monthly'}`,
+        priced,
+        seller: policy.seller ?? null,
+      })
+    }
 
     if (quote.coupon) {
       const redeemed = await redeemCoupon(tx, {
@@ -318,16 +441,18 @@ export async function startCheckout(
     {
       planId: quote.planId,
       interval: quote.interval,
-      totalCents: quote.totalCents,
+      totalCents,
+      vatCents: priced?.vatCents ?? 0,
       couponCode: quote.coupon?.code ?? null,
     }
   )
+  if (priced) scheduleCrmSync()
 
   return {
     orderId: order.id,
     status: order.status,
     activated: quote.isFree,
-    totalCents: quote.totalCents,
+    totalCents,
     currencyCode: quote.currencyCode,
   }
 }
@@ -471,6 +596,8 @@ export async function activateOrder(
     provider?: string
     providerReference?: string
     markPaid?: boolean
+    /** The money that paid it, for its invoice. Default: settled by hand, for the order's total. */
+    payment?: PaymentRecord
   }
 ): Promise<boolean> {
   const order = await prisma.planOrder.findUnique({
@@ -507,6 +634,23 @@ export async function activateOrder(
     })
     if (count === 0) return false
 
+    // Paid exactly when its invoice is: in this transaction, once.
+    if (input.markPaid && order.totalCents > 0) {
+      await recordOrderPayment(
+        tx,
+        { kind: 'plan', id: order.id },
+        input.payment ?? {
+          method: 'MANUAL',
+          amountCents: order.totalCents,
+          dedupeKey: `manual:plan:${order.id}`,
+          paidAt: new Date(),
+          channel: 'other',
+          reference: input.providerReference ?? '',
+          createdById: input.actorUserId,
+        }
+      )
+    }
+
     await applyActivation(tx, {
       organizationId: order.organizationId,
       order,
@@ -521,6 +665,7 @@ export async function activateOrder(
     return true
   })
   if (!activated) return false
+  scheduleCrmSync()
 
   await logAudit(
     input.actorUserId,
@@ -538,14 +683,18 @@ export async function cancelOrder(
   orderId: string,
   input: { actorUserId: string; reason?: string }
 ): Promise<void> {
-  await prisma.planOrder.update({
-    where: { id: orderId },
-    data: {
-      status: 'CANCELED',
-      canceledAt: new Date(),
-      failureReason: input.reason ?? null,
-    },
+  await prisma.$transaction(async (tx) => {
+    await tx.planOrder.update({
+      where: { id: orderId },
+      data: {
+        status: 'CANCELED',
+        canceledAt: new Date(),
+        failureReason: input.reason ?? null,
+      },
+    })
+    await voidOrderInvoice(tx, { kind: 'plan', id: orderId })
   })
+  scheduleCrmSync()
 
   await logAudit(
     input.actorUserId,

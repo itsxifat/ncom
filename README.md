@@ -153,6 +153,40 @@ changed in the admin.
   Enfinito Pay is how workspaces pay NCOM, nothing else: shoppers pay a
   merchant's store with the methods that store sets up (see "Payments" below).
 
+- **Invoices and the Enfinito CRM** (`src/server/billing/`, the way Envo does
+  it; the CRM's side is `lib/products/` and `docs/ncom.md` in crm-v2): every
+  order with something to pay gets a `BillingInvoice` in the same transaction,
+  numbered in the CRM's format in NCOM's own series (`ENV2611N001`), and paid in
+  the same transaction that settles the order (`BillingPayment`). Owners print
+  it (or save it as a PDF) from Billing → Invoice (`/print/invoices/<id>`), with
+  Enfinito as the seller as the CRM prints it. Every invoice and payment goes to
+  the CRM by itself and counts as income under the product `PRODUCT:NCOM`:
+  unpaid = a CRM draft (no VAT), paid = issued on the day it was paid and
+  booked, cancelled = cancelled. VAT, the service code and gateway charges are
+  decided in the CRM (Configuration → Integrations → NCOM) and NCOM follows:
+  - `billing/tax.ts` prices an order with the same formulas and rounding as the
+    CRM's `lib/invoiceTotals.js`, which refuses an invoice that differs: change
+    both together. With VAT inside prices (the CRM's default) the owner pays the
+    price shown, VAT inside it (a paisa or two under when there is no exact
+    split); with VAT on top it is added, shown in the plan picker and as its own
+    line on Enfinito Pay's page. An order is priced once, when it is placed.
+  - Triggers (migration `20261115090000_billing_invoices_for_the_crm`) mark any
+    changed invoice or payment, so nothing has to remember to sync;
+    `billing/crmSync.ts` pushes the whole state in batches, right after a sale
+    changes and from the `crm-sync` cron (every minute), and compares both sides
+    every six hours. Owners never wait for the CRM: it is priced with the last
+    tax settings the CRM gave, and if the CRM is away invoices queue and go when
+    it is back. Admin → Payments shows what is on its way, what finance has to
+    check, and when both sides last agreed (_Compare now_).
+  - Set `CRM_BASE_URL` + `CRM_API_SECRET` (made in the CRM); unset = not
+    connected, no VAT. Changing `CRM_BASE_URL` queues everything for the new CRM,
+    and checkouts answer "try again in a minute" until it has given its tax
+    settings; set `CRM_SYNC_FROM` for a CRM with real books so test purchases
+    stay out. Don't delete invoices or payments, and never reuse their ids (or
+    `Organization.billingNumber`) after wiping data while connected to the same
+    CRM: those ids are how the CRM knows them. Only the owner's verified login
+    may match an existing CRM client.
+
 The seeded `NCOMEXPLORE` coupon is 100% off, forever, restricted to workspaces
 that existed when it was created — the onboarding offer, without handing the same
 deal to next month's signups.

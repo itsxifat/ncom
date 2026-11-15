@@ -20,6 +20,7 @@ import {
   startPayment,
 } from '@/server/services/billingPaymentService'
 import { onlinePaymentAvailable } from '@/server/services/enfinitoPaySettingsService'
+import { InvoiceError } from '@/server/billing/invoices'
 import { sendEmail } from '@/server/services/emailService'
 import {
   planActivatedEmail,
@@ -217,7 +218,8 @@ export async function resumeSubscriptionAction(): Promise<BillingActionState> {
  * the caller's fallback.
  */
 function messageFor(error: unknown, fallback: string): string {
-  if (error instanceof CheckoutError) return error.message
+  if (error instanceof CheckoutError || error instanceof InvoiceError)
+    return error.message
   if (error instanceof AuthorizationError) {
     return 'Only a workspace owner can change the plan.'
   }
@@ -249,7 +251,11 @@ export async function orderCreditPackAction(
     )
     return { ok: true, paid: false, payUrl: url }
   } catch (cause) {
-    if (cause instanceof CreditError || cause instanceof BillingPaymentError)
+    if (
+      cause instanceof CreditError ||
+      cause instanceof BillingPaymentError ||
+      cause instanceof InvoiceError
+    )
       return { ok: false, error: cause.message }
     if (cause instanceof AuthorizationError) {
       return { ok: false, error: 'Only the workspace owner can buy credits.' }

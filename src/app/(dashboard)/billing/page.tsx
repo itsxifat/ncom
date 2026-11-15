@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { ArrowUpRight, Check, Info } from 'lucide-react'
+import { ArrowUpRight, Check, FileText, Info } from 'lucide-react'
 import { getActiveOrganization } from '@/server/services/organizationService'
 import { getEntitlementsWithUsage } from '@/server/services/entitlementService'
 import { listPlanOrders } from '@/server/services/planCheckoutService'
@@ -33,6 +33,9 @@ import {
   SUPPORT_TIER_LABELS,
 } from '@/lib/plans'
 import { onlinePaymentAvailable } from '@/server/services/enfinitoPaySettingsService'
+import { listOrganizationInvoices } from '@/server/billing/invoices'
+import { currentPolicy } from '@/server/billing/crm'
+import { vatNote } from '@/server/billing/tax'
 import { SubscriptionControls } from './SubscriptionControls'
 import { AiCreditsSection } from './AiCreditsSection'
 import { PayOrderButton } from './PayOrderButton'
@@ -103,7 +106,16 @@ export default async function BillingPage({
     listCreditPacks(),
     listCreditOrders(organization.id),
   ])
-  const payOnline = await onlinePaymentAvailable()
+  const [payOnline, invoices, policy] = await Promise.all([
+    onlinePaymentAvailable(),
+    listOrganizationInvoices(organization.id),
+    currentPolicy(),
+  ])
+  const invoiceIds: Record<string, number> = {}
+  for (const invoice of invoices) {
+    const orderId = invoice.planOrderId ?? invoice.creditOrderId
+    if (orderId) invoiceIds[orderId] = invoice.id
+  }
   // After the summary, not beside it: reading the summary is what gives a
   // workspace its plan's one-time credits, and the history should show them.
   const creditEntries = await listAiCreditEntries(organization.id, 10)
@@ -308,6 +320,8 @@ export default async function BillingPage({
           entries={creditEntries}
           canBuy={canManage}
           payOnline={payOnline}
+          vatNote={policy ? vatNote(policy) : ''}
+          invoiceIds={invoiceIds}
         />
       )}
 
@@ -347,6 +361,21 @@ export default async function BillingPage({
                   <Money>
                     {formatMoney(order.totalCents, order.currencyCode)}
                   </Money>
+                  {invoiceIds[order.id] && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      render={
+                        <Link
+                          href={`/print/invoices/${invoiceIds[order.id]}`}
+                        />
+                      }
+                      nativeButton={false}
+                    >
+                      <FileText />
+                      Invoice
+                    </Button>
+                  )}
                   {canManage &&
                     payOnline &&
                     order.status === 'AWAITING_PAYMENT' && (

@@ -125,6 +125,11 @@ model Organization {
   aiCreditEntries AiCreditEntry[]
   aiCreditOrders  AiCreditOrder[]
 
+  /// The workspace's number in the Enfinito CRM, where it is a client and
+  /// NCOM's invoices are billed to it. Never reused.
+  billingNumber   Int              @unique @default(autoincrement())
+  billingInvoices BillingInvoice[]
+
   // Commerce lives here, not on Store. One catalogue, one inventory, one order
   // book, one set of payment/shipping/tax settings — reused by every storefront
   // the organisation runs. A store is a website; this is the business.
@@ -991,10 +996,143 @@ model AiCreditOrder {
   createdAt         DateTime            @default(now())
   updatedAt         DateTime            @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invoice      BillingInvoice?
 
   @@index([organizationId, createdAt])
   @@index([status])
+}
+
+// ── Invoices: what NCOM bills, in the Enfinito CRM's books ──────────────
+
+enum BillingInvoiceStatus {
+  /// Raised for an order waiting for payment: a draft in the CRM, no VAT booked.
+  UNPAID
+  /// Paid: issued in the CRM on the day it was paid, and the money booked.
+  PAID
+  /// The order was cancelled before it was paid.
+  VOID
+}
+
+enum CrmSyncState {
+  /// On its way to the CRM.
+  PENDING
+  /// The CRM matches.
+  SYNCED
+  /// The CRM holds it for finance; the money is safe and NCOM keeps retrying.
+  REVIEW
+  /// The CRM refused it (nothing was written there).
+  REJECTED
+  /// The CRM answered with other figures.
+  MISMATCH
+  /// Not for the CRM (free, or from before go-live) unless it changes.
+  SKIPPED
+}
+
+/// One invoice per sale with something to pay: a plan order or an AI credit
+/// order. Priced once, when the order is placed, under the VAT the Enfinito CRM
+/// decides (billing/tax.ts), and never repriced: what the owner pays is its
+/// total. Numbered in the CRM's format in a series of NCOM's own (ENV2611N001),
+/// so the invoice has one number everywhere. Every change is queued for the CRM
+/// by database triggers (see the migration), so no code path can forget to send
+/// it. Never deleted: the CRM knows invoices and payments by these ids.
+model BillingInvoice {
+  id               Int                  @id @default(autoincrement())
+  number           String               @unique
+  organizationId   String?
+  /// The workspace's number (Organization.billingNumber): how the CRM knows the customer.
+  customerNumber   Int
+  planOrderId      String?              @unique
+  creditOrderId    String?              @unique
+  description      String
+  /// [{ description, quantity, rate, vatRate, sdRate }] in taka, as the CRM recalculates them.
+  lines            Json
+  currencyCode     String               @default("BDT")
+  /// Σ quantity × rate, before the discount (taka in paisa).
+  subtotalCents    Int
+  discountCents    Int                  @default(0)
+  sdCents          Int                  @default(0)
+  vatCents         Int                  @default(0)
+  /// What the owner pays: subtotal − discount + SD + VAT.
+  totalCents       Int
+  vatTreatment     String               @default("NONE")
+  vatRate          Float                @default(0)
+  sdRate           Float                @default(0)
+  serviceCode      String?
+  /// The CRM's tax settings this was priced under (null: no VAT, not connected).
+  taxPolicyVersion String?
+  pricesIncludeVat Boolean              @default(true)
+  status           BillingInvoiceStatus @default(UNPAID)
+  dueAt            DateTime             @default(now())
+  paidAt           DateTime?
+  voidedAt         DateTime?
+  /// The buyer and seller as printed when it was raised.
+  buyer            Json
+  seller           Json?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  // ── The Enfinito CRM (billing/crmSync.ts) ──
+  /// Counts changes; crmSyncedVersion is the last one the CRM has.
+  crmVersion       Int          @default(1)
+  crmSyncedVersion Int          @default(0)
+  crmState         CrmSyncState @default(PENDING)
+  crmCode          String?
+  crmError         String?
+  crmAttempts      Int          @default(0)
+  crmNextAttemptAt DateTime     @default(now())
+  crmSyncedAt      DateTime?
+  crmInvoiceId     String?
+  /// The seller and buyer as the CRM printed them (BIN, client code).
+  crmSnapshot      Json?
+
+  organization Organization?    @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  planOrder    PlanOrder?       @relation(fields: [planOrderId], references: [id], onDelete: SetNull)
+  creditOrder  AiCreditOrder?   @relation(fields: [creditOrderId], references: [id], onDelete: SetNull)
+  payments     BillingPayment[]
+
+  @@index([organizationId, createdAt])
+  @@index([crmNextAttemptAt])
+}
+
+enum BillingPaymentMethod {
+  ENFINITO_PAY
+  /// Settled some other way and marked paid by the platform team.
+  MANUAL
+}
+
+enum BillingPaymentStatus {
+  SUCCEEDED
+  /// Refunded at the gateway; the CRM asks finance for a credit note.
+  REFUNDED
+}
+
+/// Money received on an invoice. Written once, in the same transaction that
+/// settles the order, so an order is paid exactly when its invoice is.
+model BillingPayment {
+  id            Int                  @id @default(autoincrement())
+  invoiceId     Int
+  method        BillingPaymentMethod
+  status        BillingPaymentStatus @default(SUCCEEDED)
+  amountCents   Int
+  /// Enfinito Pay: whether a live key took it (a test key moves no money).
+  livemode      Boolean?
+  /// How it was paid: bkash, nagad, card… or, by hand, cash, bank, other.
+  channel       String               @default("")
+  reference     String               @default("")
+  checkoutId    String?
+  transactionId String?
+  /// One payment per settlement however often it is confirmed.
+  dedupeKey     String               @unique
+  paidAt        DateTime
+  refundedAt    DateTime?
+  createdById   String?
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+
+  invoice BillingInvoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+
+  @@index([invoiceId])
 }
 
 // ── Media ───────────────────────────────────────────────────────────────
@@ -1466,6 +1604,7 @@ model PlanOrder {
   plan         Plan                  @relation(fields: [planId], references: [id])
   coupon       PlanCoupon?           @relation(fields: [couponId], references: [id], onDelete: SetNull)
   redemption   PlanCouponRedemption?
+  invoice      BillingInvoice?
 
   @@index([organizationId, createdAt])
   @@index([status])

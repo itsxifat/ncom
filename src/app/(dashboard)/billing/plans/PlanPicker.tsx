@@ -447,6 +447,27 @@ export function PlanPicker({
                         </Money>
                       </div>
                     )}
+
+                    {!quote.tax.included && quote.tax.sdCents > 0 && (
+                      <div className="flex justify-between gap-3">
+                        <span className="text-muted-foreground">
+                          Supplementary duty
+                        </span>
+                        <Money>
+                          {formatMoney(quote.tax.sdCents, quote.currencyCode)}
+                        </Money>
+                      </div>
+                    )}
+                    {!quote.tax.included && quote.tax.vatCents > 0 && (
+                      <div className="flex justify-between gap-3">
+                        <span className="text-muted-foreground">
+                          {quote.tax.label}
+                        </span>
+                        <Money>
+                          {formatMoney(quote.tax.vatCents, quote.currencyCode)}
+                        </Money>
+                      </div>
+                    )}
                   </div>
 
                   <div className="border-border flex items-baseline justify-between gap-3 border-t pt-3">
@@ -458,6 +479,24 @@ export function PlanPicker({
                       </span>
                     </span>
                   </div>
+                  {quote.tax.included &&
+                    quote.tax.vatCents + quote.tax.sdCents > 0 && (
+                      <p className="text-muted-foreground -mt-2 text-xs">
+                        Includes{' '}
+                        {formatMoney(
+                          quote.tax.vatCents + quote.tax.sdCents,
+                          quote.currencyCode
+                        )}{' '}
+                        {quote.tax.label}
+                        {quote.tax.sdCents > 0 && ' and supplementary duty'}.
+                        You get a VAT invoice for it.
+                      </p>
+                    )}
+                  {quote.tax.pending && !quote.isFree && (
+                    <p className="text-muted-foreground -mt-2 text-xs">
+                      VAT is worked out when you confirm.
+                    </p>
+                  )}
 
                   {showPaymentStep && (
                     <div className="bg-muted rounded-xl p-3 text-xs">
