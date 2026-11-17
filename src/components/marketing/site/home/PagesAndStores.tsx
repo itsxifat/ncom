@@ -19,9 +19,7 @@ export function PagesAndStores() {
     >
       <div
         style={{
-          animation: 'ncom-reveal linear both',
-          animationTimeline: 'view()',
-          animationRange: 'entry 0% cover 25%',
+          animation: 'ncom-rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) both',
         }}
       >
         <p
@@ -84,9 +82,7 @@ export function PagesAndStores() {
             display: 'flex',
             flexDirection: 'column',
             gap: '22px',
-            animation: 'ncom-reveal linear both',
-            animationTimeline: 'view()',
-            animationRange: 'entry 0% cover 30%',
+            animation: 'ncom-rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) both',
           }}
         >
           <p
@@ -207,9 +203,7 @@ export function PagesAndStores() {
             display: 'flex',
             flexDirection: 'column',
             gap: '22px',
-            animation: 'ncom-reveal linear both',
-            animationTimeline: 'view()',
-            animationRange: 'entry 5% cover 35%',
+            animation: 'ncom-rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) both',
           }}
         >
           <div

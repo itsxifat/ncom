@@ -11,6 +11,7 @@ import { PricingSection } from '@/components/marketing/site/home/PricingSection'
 import { Faq } from '@/components/marketing/site/home/Faq'
 import { FinalCta } from '@/components/marketing/site/home/FinalCta'
 import { loadPackages } from '@/components/marketing/site/loadPackages'
+import { taka } from '@/components/marketing/site/packages'
 
 export const metadata: Metadata = {
   title: {
@@ -24,9 +25,13 @@ export const metadata: Metadata = {
 /** The NCOM homepage, from the founder-approved design on the Claude Design canvas. */
 export default async function HomePage() {
   const packages = await loadPackages()
+  const paid = packages.filter((p) => p.monthlyPriceCents > 0)
+  const fromPrice = paid.length
+    ? taka(Math.min(...paid.map((p) => p.monthlyPriceCents)))
+    : '৳199'
   return (
     <>
-      <Hero />
+      <Hero fromPrice={fromPrice} />
       <WhatYouGet />
       <PagesAndStores />
       <OrderFlow />

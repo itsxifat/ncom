@@ -192,6 +192,7 @@ export function SiteHeaderBar() {
           </Link>
         </div>
       </div>
+      <span className="ncom-progress" aria-hidden="true" />
     </header>
   )
 }

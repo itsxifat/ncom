@@ -27,9 +27,7 @@ export function BlockEditor() {
             textAlign: 'center',
             maxWidth: '780px',
             margin: '0 auto',
-            animation: 'ncom-reveal linear both',
-            animationTimeline: 'view()',
-            animationRange: 'entry 0% cover 25%',
+            animation: 'ncom-rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) both',
           }}
         >
           <p
@@ -81,9 +79,7 @@ export function BlockEditor() {
             borderRadius: '24px',
             overflow: 'hidden',
             boxShadow: '0 60px 140px rgba(0, 0, 0, 0.6)',
-            animation: 'ncom-reveal linear both',
-            animationTimeline: 'view()',
-            animationRange: 'entry 0% cover 35%',
+            animation: 'ncom-rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) both',
           }}
         >
           <div

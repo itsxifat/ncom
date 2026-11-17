@@ -36,9 +36,7 @@ export function SectionIntro({
         textAlign: align,
         maxWidth: align === 'center' ? '780px' : '860px',
         margin: align === 'center' ? '0 auto' : 0,
-        animation: 'ncom-reveal linear both',
-        animationTimeline: 'view()',
-        animationRange: 'entry 0% cover 25%',
+        animation: 'ncom-rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) both',
       }}
     >
       <p

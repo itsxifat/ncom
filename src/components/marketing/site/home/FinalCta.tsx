@@ -40,9 +40,7 @@ export function FinalCta() {
             fontSize: 'clamp(44px, 7.6vw, 112px)',
             lineHeight: '0.94',
             letterSpacing: '-0.04em',
-            animation: 'ncom-reveal linear both',
-            animationTimeline: 'view()',
-            animationRange: 'entry 0% cover 30%',
+            animation: 'ncom-rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) both',
           }}
         >
           Make your first page in minutes. Try it free for 7 days.

@@ -30,9 +30,7 @@ export function Growth() {
           style={{
             flex: '1 1 420px',
             minWidth: '0',
-            animation: 'ncom-reveal linear both',
-            animationTimeline: 'view()',
-            animationRange: 'entry 0% cover 30%',
+            animation: 'ncom-rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) both',
           }}
         >
           <p
@@ -90,9 +88,7 @@ export function Growth() {
             padding: 'clamp(20px, 2.6vw, 32px)',
             boxSizing: 'border-box',
             boxShadow: '0 60px 140px rgba(0, 0, 0, 0.5)',
-            animation: 'ncom-reveal linear both',
-            animationTimeline: 'view()',
-            animationRange: 'entry 5% cover 35%',
+            animation: 'ncom-rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) both',
           }}
         >
           <div
@@ -203,9 +199,8 @@ export function Growth() {
                   strokeDasharray="302"
                   strokeDashoffset="42"
                   style={{
-                    animation: 'ncom-ring linear both',
-                    animationTimeline: 'view()',
-                    animationRange: 'entry 30% cover 55%',
+                    animation:
+                      'ncom-ring 1.8s cubic-bezier(0.16, 1, 0.3, 1) both',
                   }}
                 ></circle>
               </svg>
@@ -253,9 +248,7 @@ export function Growth() {
                 borderRadius: '6px 6px 2px 2px',
                 background: '#2a2a31',
                 transformOrigin: 'bottom',
-                animation: 'ncom-grow linear both',
-                animationTimeline: 'view()',
-                animationRange: 'entry 30% cover 45%',
+                animation: 'ncom-grow 1.3s cubic-bezier(0.16, 1, 0.3, 1) both',
               }}
             ></span>
             <span
@@ -265,9 +258,7 @@ export function Growth() {
                 borderRadius: '6px 6px 2px 2px',
                 background: '#2a2a31',
                 transformOrigin: 'bottom',
-                animation: 'ncom-grow linear both',
-                animationTimeline: 'view()',
-                animationRange: 'entry 32% cover 47%',
+                animation: 'ncom-grow 1.3s cubic-bezier(0.16, 1, 0.3, 1) both',
               }}
             ></span>
             <span
@@ -277,9 +268,7 @@ export function Growth() {
                 borderRadius: '6px 6px 2px 2px',
                 background: '#2a2a31',
                 transformOrigin: 'bottom',
-                animation: 'ncom-grow linear both',
-                animationTimeline: 'view()',
-                animationRange: 'entry 34% cover 49%',
+                animation: 'ncom-grow 1.3s cubic-bezier(0.16, 1, 0.3, 1) both',
               }}
             ></span>
             <span
@@ -289,9 +278,7 @@ export function Growth() {
                 borderRadius: '6px 6px 2px 2px',
                 background: '#2a2a31',
                 transformOrigin: 'bottom',
-                animation: 'ncom-grow linear both',
-                animationTimeline: 'view()',
-                animationRange: 'entry 36% cover 51%',
+                animation: 'ncom-grow 1.3s cubic-bezier(0.16, 1, 0.3, 1) both',
               }}
             ></span>
             <span
@@ -301,9 +288,7 @@ export function Growth() {
                 borderRadius: '6px 6px 2px 2px',
                 background: '#2a2a31',
                 transformOrigin: 'bottom',
-                animation: 'ncom-grow linear both',
-                animationTimeline: 'view()',
-                animationRange: 'entry 38% cover 53%',
+                animation: 'ncom-grow 1.3s cubic-bezier(0.16, 1, 0.3, 1) both',
               }}
             ></span>
             <span
@@ -313,9 +298,7 @@ export function Growth() {
                 borderRadius: '6px 6px 2px 2px',
                 background: 'var(--accent)',
                 transformOrigin: 'bottom',
-                animation: 'ncom-grow linear both',
-                animationTimeline: 'view()',
-                animationRange: 'entry 40% cover 55%',
+                animation: 'ncom-grow 1.3s cubic-bezier(0.16, 1, 0.3, 1) both',
               }}
             ></span>
             <span
@@ -325,9 +308,7 @@ export function Growth() {
                 borderRadius: '6px 6px 2px 2px',
                 background: '#2a2a31',
                 transformOrigin: 'bottom',
-                animation: 'ncom-grow linear both',
-                animationTimeline: 'view()',
-                animationRange: 'entry 42% cover 57%',
+                animation: 'ncom-grow 1.3s cubic-bezier(0.16, 1, 0.3, 1) both',
               }}
             ></span>
           </div>

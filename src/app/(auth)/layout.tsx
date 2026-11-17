@@ -38,7 +38,7 @@ export default async function AuthLayout({
         <div className="flex flex-1 items-center justify-center py-10">
           <div className="w-full max-w-sm">{children}</div>
         </div>
-        <p className="text-center text-xs text-[#71717a]">
+        <p className="text-center text-xs text-[#a1a1aa]">
           <Link href="/terms" className="hover:text-[#f5f5f6]">
             Terms
           </Link>

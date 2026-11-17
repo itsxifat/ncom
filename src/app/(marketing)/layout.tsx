@@ -1,5 +1,6 @@
 import { SiteHeaderBar } from '@/components/marketing/site/SiteHeaderBar'
 import { SiteFooter } from '@/components/marketing/site/SiteFooter'
+import { MotionObserver } from '@/components/marketing/site/MotionObserver'
 import { getSiteContact } from '@/server/services/siteContactService'
 import '@/components/marketing/site/site.css'
 
@@ -18,6 +19,7 @@ export default async function MarketingLayout({
       <SiteHeaderBar />
       <main>{children}</main>
       <SiteFooter contact={contact} />
+      <MotionObserver />
     </div>
   )
 }

@@ -18,9 +18,7 @@ export function WhatYouGet() {
     >
       <div
         style={{
-          animation: 'ncom-reveal linear both',
-          animationTimeline: 'view()',
-          animationRange: 'entry 0% cover 25%',
+          animation: 'ncom-rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) both',
         }}
       >
         <p
@@ -87,9 +85,7 @@ export function WhatYouGet() {
               display: 'flex',
               flexDirection: 'column',
               gap: '12px',
-              animation: 'ncom-rise linear both',
-              animationTimeline: 'view()',
-              animationRange: 'entry 5% cover 24%',
+              animation: 'ncom-rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) both',
             }}
           >
             <svg
@@ -143,9 +139,7 @@ export function WhatYouGet() {
               display: 'flex',
               flexDirection: 'column',
               gap: '12px',
-              animation: 'ncom-rise linear both',
-              animationTimeline: 'view()',
-              animationRange: 'entry 5% cover 24%',
+              animation: 'ncom-rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) both',
             }}
           >
             <svg
@@ -200,9 +194,7 @@ export function WhatYouGet() {
               display: 'flex',
               flexDirection: 'column',
               gap: '12px',
-              animation: 'ncom-rise linear both',
-              animationTimeline: 'view()',
-              animationRange: 'entry 5% cover 24%',
+              animation: 'ncom-rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) both',
             }}
           >
             <svg
@@ -256,9 +248,7 @@ export function WhatYouGet() {
               display: 'flex',
               flexDirection: 'column',
               gap: '12px',
-              animation: 'ncom-rise linear both',
-              animationTimeline: 'view()',
-              animationRange: 'entry 5% cover 24%',
+              animation: 'ncom-rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) both',
             }}
           >
             <svg
@@ -314,9 +304,7 @@ export function WhatYouGet() {
               display: 'flex',
               flexDirection: 'column',
               gap: '12px',
-              animation: 'ncom-rise linear both',
-              animationTimeline: 'view()',
-              animationRange: 'entry 5% cover 24%',
+              animation: 'ncom-rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) both',
             }}
           >
             <svg
@@ -370,9 +358,7 @@ export function WhatYouGet() {
               display: 'flex',
               flexDirection: 'column',
               gap: '12px',
-              animation: 'ncom-rise linear both',
-              animationTimeline: 'view()',
-              animationRange: 'entry 5% cover 24%',
+              animation: 'ncom-rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) both',
             }}
           >
             <svg
@@ -426,9 +412,7 @@ export function WhatYouGet() {
               display: 'flex',
               flexDirection: 'column',
               gap: '12px',
-              animation: 'ncom-rise linear both',
-              animationTimeline: 'view()',
-              animationRange: 'entry 5% cover 24%',
+              animation: 'ncom-rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) both',
             }}
           >
             <svg
@@ -483,9 +467,7 @@ export function WhatYouGet() {
               display: 'flex',
               flexDirection: 'column',
               gap: '12px',
-              animation: 'ncom-rise linear both',
-              animationTimeline: 'view()',
-              animationRange: 'entry 5% cover 24%',
+              animation: 'ncom-rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) both',
             }}
           >
             <svg
@@ -538,9 +520,7 @@ export function WhatYouGet() {
               display: 'flex',
               flexDirection: 'column',
               gap: '12px',
-              animation: 'ncom-rise linear both',
-              animationTimeline: 'view()',
-              animationRange: 'entry 5% cover 24%',
+              animation: 'ncom-rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) both',
             }}
           >
             <svg
@@ -594,9 +574,7 @@ export function WhatYouGet() {
               display: 'flex',
               flexDirection: 'column',
               gap: '12px',
-              animation: 'ncom-rise linear both',
-              animationTimeline: 'view()',
-              animationRange: 'entry 5% cover 24%',
+              animation: 'ncom-rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) both',
             }}
           >
             <svg
@@ -651,9 +629,7 @@ export function WhatYouGet() {
               display: 'flex',
               flexDirection: 'column',
               gap: '12px',
-              animation: 'ncom-rise linear both',
-              animationTimeline: 'view()',
-              animationRange: 'entry 5% cover 24%',
+              animation: 'ncom-rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) both',
             }}
           >
             <svg
@@ -707,9 +683,7 @@ export function WhatYouGet() {
               display: 'flex',
               flexDirection: 'column',
               gap: '12px',
-              animation: 'ncom-rise linear both',
-              animationTimeline: 'view()',
-              animationRange: 'entry 5% cover 24%',
+              animation: 'ncom-rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) both',
             }}
           >
             <svg

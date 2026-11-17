@@ -31,7 +31,7 @@ function Value({ value }: { value: string | boolean }) {
   }
   if (value === false) {
     return (
-      <span aria-label="Not included" style={{ color: '#52525b' }}>
+      <span aria-label="Not included" style={{ color: '#8a8a93' }}>
         —
       </span>
     )
@@ -109,7 +109,7 @@ export function ComparisonTable({ packages }: { packages: PublicPackage[] }) {
                     display: 'block',
                     marginTop: '4px',
                     fontSize: '12px',
-                    color: pkg.trialDays > 0 ? 'var(--accent)' : '#71717a',
+                    color: pkg.trialDays > 0 ? 'var(--accent)' : '#a1a1aa',
                   }}
                 >
                   {pkg.trialDays > 0

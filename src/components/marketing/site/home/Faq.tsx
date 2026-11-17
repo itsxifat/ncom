@@ -26,9 +26,7 @@ export function Faq() {
           style={{
             flex: '1 1 300px',
             minWidth: '0',
-            animation: 'ncom-reveal linear both',
-            animationTimeline: 'view()',
-            animationRange: 'entry 0% cover 30%',
+            animation: 'ncom-rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) both',
           }}
         >
           <p

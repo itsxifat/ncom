@@ -28,9 +28,7 @@ export function OrderFlow() {
             textAlign: 'center',
             maxWidth: '760px',
             margin: '0 auto',
-            animation: 'ncom-reveal linear both',
-            animationTimeline: 'view()',
-            animationRange: 'entry 0% cover 25%',
+            animation: 'ncom-rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) both',
           }}
         >
           <p
@@ -310,9 +308,7 @@ export function OrderFlow() {
               display: 'flex',
               flexDirection: 'column',
               gap: '14px',
-              animation: 'ncom-reveal linear both',
-              animationTimeline: 'view()',
-              animationRange: 'entry 0% cover 30%',
+              animation: 'ncom-rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) both',
             }}
           >
             <h3
@@ -374,9 +370,8 @@ export function OrderFlow() {
                       background: '#4ade80',
                       borderRadius: '999px',
                       transformOrigin: 'left',
-                      animation: 'ncom-underline linear both',
-                      animationTimeline: 'view()',
-                      animationRange: 'entry 20% cover 45%',
+                      animation:
+                        'ncom-underline 1s cubic-bezier(0.16, 1, 0.3, 1) both',
                     }}
                   ></span>
                 </div>
@@ -411,9 +406,8 @@ export function OrderFlow() {
                       background: '#fbbf24',
                       borderRadius: '999px',
                       transformOrigin: 'left',
-                      animation: 'ncom-underline linear both',
-                      animationTimeline: 'view()',
-                      animationRange: 'entry 25% cover 50%',
+                      animation:
+                        'ncom-underline 1s cubic-bezier(0.16, 1, 0.3, 1) both',
                     }}
                   ></span>
                 </div>
@@ -431,9 +425,7 @@ export function OrderFlow() {
               display: 'flex',
               flexDirection: 'column',
               gap: '14px',
-              animation: 'ncom-reveal linear both',
-              animationTimeline: 'view()',
-              animationRange: 'entry 5% cover 35%',
+              animation: 'ncom-rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) both',
             }}
           >
             <h3
@@ -541,9 +533,7 @@ export function OrderFlow() {
               display: 'flex',
               flexDirection: 'column',
               gap: '14px',
-              animation: 'ncom-reveal linear both',
-              animationTimeline: 'view()',
-              animationRange: 'entry 10% cover 40%',
+              animation: 'ncom-rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) both',
             }}
           >
             <h3
