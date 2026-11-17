@@ -4,9 +4,10 @@ import { loadPackages } from '@/components/marketing/site/loadPackages'
 import { taka, trialPackageNames } from '@/components/marketing/site/packages'
 
 /**
- * Sign in, sign up and email verification — in the public site's look (dark
- * ink and lime), so arriving from the homepage does not feel like leaving it.
- * The form side runs on the app's dark theme, whose primary is the brand lime.
+ * Sign in, sign up and email verification — in the public site's look, so
+ * arriving from the homepage does not feel like leaving it. The form side
+ * follows the visitor's light or dark theme (the same one the site and the
+ * dashboard use); the brand panel is lime in both.
  */
 export default async function AuthLayout({
   children,
@@ -30,24 +31,24 @@ export default async function AuthLayout({
   ]
 
   return (
-    <div className="dark flex flex-1 bg-[#09090b] text-[#f5f5f6]">
+    <div className="bg-background text-foreground flex flex-1">
       <div className="flex flex-1 flex-col px-4 py-8 sm:px-8">
         <Link href="/" aria-label="NCOM home" className="w-fit">
-          <BrandMark tone="onDark" />
+          <BrandMark tone="onLight" />
         </Link>
         <div className="flex flex-1 items-center justify-center py-10">
           <div className="w-full max-w-sm">{children}</div>
         </div>
-        <p className="text-center text-xs text-[#a1a1aa]">
-          <Link href="/terms" className="hover:text-[#f5f5f6]">
+        <p className="text-muted-foreground text-center text-xs">
+          <Link href="/terms" className="hover:text-foreground">
             Terms
           </Link>
           {' · '}
-          <Link href="/privacy" className="hover:text-[#f5f5f6]">
+          <Link href="/privacy" className="hover:text-foreground">
             Privacy
           </Link>
           {' · '}
-          <Link href="/pricing" className="hover:text-[#f5f5f6]">
+          <Link href="/pricing" className="hover:text-foreground">
             Pricing
           </Link>
         </p>

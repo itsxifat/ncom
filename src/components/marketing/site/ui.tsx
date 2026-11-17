@@ -44,7 +44,7 @@ export function SectionIntro({
           margin: 0,
           fontSize: '14px',
           fontWeight: 700,
-          color: 'var(--accent)',
+          color: 'var(--accent-text)',
         }}
       >
         {eyebrow}
@@ -72,7 +72,7 @@ export function SectionIntro({
             margin: align === 'center' ? '20px auto 0' : '20px 0 0',
             maxWidth: '620px',
             fontSize: '18px',
-            color: '#c4c4cc',
+            color: 'var(--s-muted)',
           }}
         >
           {lead}

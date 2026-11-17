@@ -9,7 +9,7 @@ export function Faq() {
     <section
       id="faq"
       aria-labelledby="faq-title"
-      style={{ borderTop: '1px solid rgba(255, 255, 255, 0.06)' }}
+      style={{ borderTop: '1px solid rgba(var(--s-ink), 0.06)' }}
     >
       <div
         style={{
@@ -34,7 +34,7 @@ export function Faq() {
               margin: '0',
               fontSize: '14px',
               fontWeight: '700',
-              color: 'var(--accent)',
+              color: 'var(--accent-text)',
             }}
           >
             Questions
@@ -66,7 +66,7 @@ export function Faq() {
           <details
             data-faq=""
             open
-            style={{ borderTop: '1px solid rgba(255, 255, 255, 0.1)' }}
+            style={{ borderTop: '1px solid rgba(var(--s-ink), 0.1)' }}
           >
             <summary
               style={{
@@ -89,7 +89,7 @@ export function Faq() {
                 style={{
                   flex: '0 0 auto',
                   display: 'inline-flex',
-                  color: '#c4c4cc',
+                  color: 'var(--s-muted)',
                 }}
               >
                 <svg
@@ -109,7 +109,7 @@ export function Faq() {
               style={{
                 margin: '0 0 22px',
                 maxWidth: '640px',
-                color: '#d4d4d8',
+                color: 'var(--s-text-3)',
               }}
             >
               Keep your page. Your ads land on one page with the price, the
@@ -119,7 +119,7 @@ export function Faq() {
           <details
             data-faq=""
             open
-            style={{ borderTop: '1px solid rgba(255, 255, 255, 0.1)' }}
+            style={{ borderTop: '1px solid rgba(var(--s-ink), 0.1)' }}
           >
             <summary
               style={{
@@ -142,7 +142,7 @@ export function Faq() {
                 style={{
                   flex: '0 0 auto',
                   display: 'inline-flex',
-                  color: '#c4c4cc',
+                  color: 'var(--s-muted)',
                 }}
               >
                 <svg
@@ -162,7 +162,7 @@ export function Faq() {
               style={{
                 margin: '0 0 22px',
                 maxWidth: '640px',
-                color: '#d4d4d8',
+                color: 'var(--s-text-3)',
               }}
             >
               No form can. NCOM checks each buyer’s Steadfast delivery record
@@ -172,7 +172,7 @@ export function Faq() {
           </details>
           <details
             data-faq=""
-            style={{ borderTop: '1px solid rgba(255, 255, 255, 0.1)' }}
+            style={{ borderTop: '1px solid rgba(var(--s-ink), 0.1)' }}
           >
             <summary
               style={{
@@ -195,7 +195,7 @@ export function Faq() {
                 style={{
                   flex: '0 0 auto',
                   display: 'inline-flex',
-                  color: '#c4c4cc',
+                  color: 'var(--s-muted)',
                 }}
               >
                 <svg
@@ -215,7 +215,7 @@ export function Faq() {
               style={{
                 margin: '0 0 22px',
                 maxWidth: '640px',
-                color: '#d4d4d8',
+                color: 'var(--s-text-3)',
               }}
             >
               Booking works with Steadfast and Pathao. With other couriers you
@@ -224,7 +224,7 @@ export function Faq() {
           </details>
           <details
             data-faq=""
-            style={{ borderTop: '1px solid rgba(255, 255, 255, 0.1)' }}
+            style={{ borderTop: '1px solid rgba(var(--s-ink), 0.1)' }}
           >
             <summary
               style={{
@@ -247,7 +247,7 @@ export function Faq() {
                 style={{
                   flex: '0 0 auto',
                   display: 'inline-flex',
-                  color: '#c4c4cc',
+                  color: 'var(--s-muted)',
                 }}
               >
                 <svg
@@ -267,7 +267,7 @@ export function Faq() {
               style={{
                 margin: '0 0 22px',
                 maxWidth: '640px',
-                color: '#d4d4d8',
+                color: 'var(--s-text-3)',
               }}
             >
               Not yet. Landing pages are cash on delivery, and stores can add
@@ -276,7 +276,7 @@ export function Faq() {
           </details>
           <details
             data-faq=""
-            style={{ borderTop: '1px solid rgba(255, 255, 255, 0.1)' }}
+            style={{ borderTop: '1px solid rgba(var(--s-ink), 0.1)' }}
           >
             <summary
               style={{
@@ -299,7 +299,7 @@ export function Faq() {
                 style={{
                   flex: '0 0 auto',
                   display: 'inline-flex',
-                  color: '#c4c4cc',
+                  color: 'var(--s-muted)',
                 }}
               >
                 <svg
@@ -319,7 +319,7 @@ export function Faq() {
               style={{
                 margin: '0 0 22px',
                 maxWidth: '640px',
-                color: '#d4d4d8',
+                color: 'var(--s-text-3)',
               }}
             >
               No. You pay for your package — from ৳199 a month — and nothing per
@@ -328,7 +328,7 @@ export function Faq() {
           </details>
           <details
             data-faq=""
-            style={{ borderTop: '1px solid rgba(255, 255, 255, 0.1)' }}
+            style={{ borderTop: '1px solid rgba(var(--s-ink), 0.1)' }}
           >
             <summary
               style={{
@@ -351,7 +351,7 @@ export function Faq() {
                 style={{
                   flex: '0 0 auto',
                   display: 'inline-flex',
-                  color: '#c4c4cc',
+                  color: 'var(--s-muted)',
                 }}
               >
                 <svg
@@ -371,7 +371,7 @@ export function Faq() {
               style={{
                 margin: '0 0 22px',
                 maxWidth: '640px',
-                color: '#d4d4d8',
+                color: 'var(--s-text-3)',
               }}
             >
               Yes. Lite, Starter, Business and Pro each start with a 7-day free
@@ -381,7 +381,7 @@ export function Faq() {
           </details>
           <details
             data-faq=""
-            style={{ borderTop: '1px solid rgba(255, 255, 255, 0.1)' }}
+            style={{ borderTop: '1px solid rgba(var(--s-ink), 0.1)' }}
           >
             <summary
               style={{
@@ -404,7 +404,7 @@ export function Faq() {
                 style={{
                   flex: '0 0 auto',
                   display: 'inline-flex',
-                  color: '#c4c4cc',
+                  color: 'var(--s-muted)',
                 }}
               >
                 <svg
@@ -424,7 +424,7 @@ export function Faq() {
               style={{
                 margin: '0 0 22px',
                 maxWidth: '640px',
-                color: '#d4d4d8',
+                color: 'var(--s-text-3)',
               }}
             >
               Pick a template, describe your product to the AI (this uses
@@ -433,7 +433,7 @@ export function Faq() {
           </details>
           <details
             data-faq=""
-            style={{ borderTop: '1px solid rgba(255, 255, 255, 0.1)' }}
+            style={{ borderTop: '1px solid rgba(var(--s-ink), 0.1)' }}
           >
             <summary
               style={{
@@ -456,7 +456,7 @@ export function Faq() {
                 style={{
                   flex: '0 0 auto',
                   display: 'inline-flex',
-                  color: '#c4c4cc',
+                  color: 'var(--s-muted)',
                 }}
               >
                 <svg
@@ -476,7 +476,7 @@ export function Faq() {
               style={{
                 margin: '0 0 22px',
                 maxWidth: '640px',
-                color: '#d4d4d8',
+                color: 'var(--s-text-3)',
               }}
             >
               Your shop can be, numerals and order form included. The dashboard
@@ -486,8 +486,8 @@ export function Faq() {
           <details
             data-faq=""
             style={{
-              borderTop: '1px solid rgba(255, 255, 255, 0.1)',
-              borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+              borderTop: '1px solid rgba(var(--s-ink), 0.1)',
+              borderBottom: '1px solid rgba(var(--s-ink), 0.1)',
             }}
           >
             <summary
@@ -511,7 +511,7 @@ export function Faq() {
                 style={{
                   flex: '0 0 auto',
                   display: 'inline-flex',
-                  color: '#c4c4cc',
+                  color: 'var(--s-muted)',
                 }}
               >
                 <svg
@@ -531,7 +531,7 @@ export function Faq() {
               style={{
                 margin: '0 0 22px',
                 maxWidth: '640px',
-                color: '#d4d4d8',
+                color: 'var(--s-text-3)',
               }}
             >
               Invite moderators and packers as Viewer, Editor or Admin. Business

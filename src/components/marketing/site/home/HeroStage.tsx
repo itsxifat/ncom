@@ -589,7 +589,7 @@ export function HeroStage() {
                     cx="32"
                     cy="32"
                     r="28"
-                    stroke="rgba(255,255,255,0.1)"
+                    stroke="rgba(var(--s-ink), 0.1)"
                   />
                   <circle
                     className="hx-ring-fill"

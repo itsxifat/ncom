@@ -14,8 +14,8 @@ import {
 const HEADING_FONT = 'var(--font-space-grotesk), var(--font-bangla), sans-serif'
 
 const CARD = {
-  background: '#111114',
-  border: '1px solid rgba(255, 255, 255, 0.08)',
+  background: 'var(--s-card)',
+  border: '1px solid rgba(var(--s-ink), 0.08)',
   borderRadius: '24px',
   padding: '26px',
   boxSizing: 'border-box',
@@ -29,7 +29,7 @@ const FEATURED_CARD = {
   ...CARD,
   position: 'relative',
   background:
-    'linear-gradient(#131316, #131316) padding-box, linear-gradient(110deg, rgba(255, 255, 255, 0.1) 25%, var(--accent) 45%, rgba(255, 255, 255, 0.1) 65%) border-box',
+    'linear-gradient(var(--s-card), var(--s-card)) padding-box, linear-gradient(110deg, rgba(var(--s-ink), 0.1) 25%, var(--accent) 45%, rgba(var(--s-ink), 0.1) 65%) border-box',
   backgroundSize: '100% 100%, 300% 100%',
   border: '1px solid transparent',
   animation: 'ncom-border 5s linear infinite',
@@ -79,8 +79,8 @@ export function PackageCards({
               display: 'inline-flex',
               padding: '4px',
               borderRadius: '999px',
-              background: '#16161a',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
+              background: 'var(--s-raised)',
+              border: '1px solid rgba(var(--s-ink), 0.08)',
             }}
           >
             {[
@@ -105,7 +105,7 @@ export function PackageCards({
                   fontFamily: 'inherit',
                   background:
                     yearly === option.value ? 'var(--accent)' : 'transparent',
-                  color: yearly === option.value ? '#0b0b0c' : '#c4c4cc',
+                  color: yearly === option.value ? '#0b0b0c' : 'var(--s-muted)',
                 }}
               >
                 {option.label}
@@ -170,7 +170,7 @@ export function PackageCards({
                         margin: '4px 0 0',
                         fontSize: '13px',
                         lineHeight: 1.45,
-                        color: '#a1a1aa',
+                        color: 'var(--s-subtle)',
                       }}
                     >
                       {pkg.tagline}
@@ -199,7 +199,7 @@ export function PackageCards({
                       fontFamily: 'var(--font-manrope), sans-serif',
                       fontSize: '14px',
                       fontWeight: 600,
-                      color: '#a1a1aa',
+                      color: 'var(--s-subtle)',
                       letterSpacing: 0,
                     }}
                   >
@@ -212,7 +212,7 @@ export function PackageCards({
                     style={{
                       margin: '8px 0 0',
                       fontSize: '13px',
-                      color: '#a1a1aa',
+                      color: 'var(--s-subtle)',
                     }}
                   >
                     or {taka(pkg.annualPriceCents)} a year
@@ -224,7 +224,7 @@ export function PackageCards({
                     style={{
                       margin: '8px 0 0',
                       fontSize: '13px',
-                      color: '#a1a1aa',
+                      color: 'var(--s-subtle)',
                     }}
                   >
                     {taka(Math.round(pkg.annualPriceCents! / 12))} a month —{' '}
@@ -236,7 +236,10 @@ export function PackageCards({
                     margin: '10px 0 0',
                     fontSize: '13px',
                     fontWeight: 700,
-                    color: pkg.trialDays > 0 ? 'var(--accent)' : '#a1a1aa',
+                    color:
+                      pkg.trialDays > 0
+                        ? 'var(--accent-text)'
+                        : 'var(--s-subtle)',
                   }}
                 >
                   {pkg.trialDays > 0
@@ -254,7 +257,7 @@ export function PackageCards({
                   flexDirection: 'column',
                   gap: '10px',
                   fontSize: '14px',
-                  color: '#d4d4d8',
+                  color: 'var(--s-text-3)',
                 }}
               >
                 {cardLines(pkg).map((line) => (
@@ -264,7 +267,7 @@ export function PackageCards({
                       width="16"
                       height="16"
                       fill="none"
-                      stroke="var(--accent)"
+                      stroke="var(--accent-text)"
                       strokeWidth="2.5"
                       strokeLinecap="round"
                       strokeLinejoin="round"
@@ -291,8 +294,8 @@ export function PackageCards({
                       }
                     : {
                         ...BUTTON,
-                        color: '#f5f5f6',
-                        border: '1px solid rgba(255, 255, 255, 0.16)',
+                        color: 'var(--s-text)',
+                        border: '1px solid rgba(var(--s-ink), 0.16)',
                       }
                 }
               >

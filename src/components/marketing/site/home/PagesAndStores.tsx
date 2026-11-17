@@ -27,7 +27,7 @@ export function PagesAndStores() {
             margin: '0',
             fontSize: '14px',
             fontWeight: '700',
-            color: 'var(--accent)',
+            color: 'var(--accent-text)',
           }}
         >
           Landing page or online store
@@ -53,7 +53,7 @@ export function PagesAndStores() {
             margin: '20px 0 0',
             maxWidth: '560px',
             fontSize: '18px',
-            color: '#c4c4cc',
+            color: 'var(--s-muted)',
           }}
         >
           A landing page for each ad, a full store for everything you sell —
@@ -74,8 +74,8 @@ export function PagesAndStores() {
           style={{
             position: 'relative',
             overflow: 'hidden',
-            background: '#111114',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
+            background: 'var(--s-card)',
+            border: '1px solid rgba(var(--s-ink), 0.08)',
             borderRadius: '28px',
             padding: 'clamp(28px, 3.4vw, 44px)',
             boxSizing: 'border-box',
@@ -90,7 +90,7 @@ export function PagesAndStores() {
               margin: '0',
               fontSize: '14px',
               fontWeight: '700',
-              color: '#c4c4cc',
+              color: 'var(--s-muted)',
             }}
           >
             Landing page
@@ -109,7 +109,7 @@ export function PagesAndStores() {
           >
             One product. One page. The order form right on it.
           </h3>
-          <p style={{ margin: '0', fontSize: '16px', color: '#c4c4cc' }}>
+          <p style={{ margin: '0', fontSize: '16px', color: 'var(--s-muted)' }}>
             Built for Facebook ads: the buyer picks a package, types name, phone
             and address, and taps once. Combos, free gifts and delivery charges
             are set per page.
@@ -119,8 +119,8 @@ export function PagesAndStores() {
             style={{
               marginTop: 'auto',
               position: 'relative',
-              background: '#0b0b0d',
-              border: '1px solid rgba(255, 255, 255, 0.06)',
+              background: 'var(--s-bg-alt)',
+              border: '1px solid rgba(var(--s-ink), 0.06)',
               borderRadius: '20px',
               padding: '18px',
             }}
@@ -145,7 +145,13 @@ export function PagesAndStores() {
                 <p style={{ margin: '0', fontSize: '14px', fontWeight: '700' }}>
                   Single · 500 g
                 </p>
-                <p style={{ margin: '0', fontSize: '13px', color: '#a1a1aa' }}>
+                <p
+                  style={{
+                    margin: '0',
+                    fontSize: '13px',
+                    color: 'var(--s-subtle)',
+                  }}
+                >
                   ৳850
                 </p>
               </div>
@@ -155,7 +161,13 @@ export function PagesAndStores() {
                 <p style={{ margin: '0', fontSize: '14px', fontWeight: '700' }}>
                   Family pack · 2 × 500 g
                 </p>
-                <p style={{ margin: '0', fontSize: '13px', color: '#a1a1aa' }}>
+                <p
+                  style={{
+                    margin: '0',
+                    fontSize: '13px',
+                    color: 'var(--s-subtle)',
+                  }}
+                >
                   ৳1,550
                 </p>
               </div>
@@ -165,7 +177,13 @@ export function PagesAndStores() {
                 <p style={{ margin: '0', fontSize: '14px', fontWeight: '700' }}>
                   3 bottles + wooden dipper
                 </p>
-                <p style={{ margin: '0', fontSize: '13px', color: '#a1a1aa' }}>
+                <p
+                  style={{
+                    margin: '0',
+                    fontSize: '13px',
+                    color: 'var(--s-subtle)',
+                  }}
+                >
                   ৳2,200
                 </p>
               </div>
@@ -175,13 +193,13 @@ export function PagesAndStores() {
                 position: 'absolute',
                 right: '18px',
                 top: '-16px',
-                background: '#f5f5f6',
-                color: '#0b0b0c',
+                background: 'var(--s-text)',
+                color: 'var(--s-bg)',
                 borderRadius: '999px',
                 padding: '5px 12px',
                 fontSize: '12px',
                 fontWeight: '800',
-                boxShadow: '0 10px 24px rgba(0, 0, 0, 0.45)',
+                boxShadow: 'var(--s-shadow-md)',
                 opacity: '0',
                 animation: 'ncom-toast 7s cubic-bezier(.2,.7,.2,1) infinite',
               }}
@@ -195,8 +213,8 @@ export function PagesAndStores() {
           style={{
             position: 'relative',
             overflow: 'hidden',
-            background: '#111114',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
+            background: 'var(--s-card)',
+            border: '1px solid rgba(var(--s-ink), 0.08)',
             borderRadius: '28px',
             padding: 'clamp(28px, 3.4vw, 44px)',
             boxSizing: 'border-box',
@@ -219,7 +237,7 @@ export function PagesAndStores() {
                 margin: '0',
                 fontSize: '14px',
                 fontWeight: '700',
-                color: '#c4c4cc',
+                color: 'var(--s-muted)',
               }}
             >
               Online store
@@ -231,7 +249,7 @@ export function PagesAndStores() {
                 alignItems: 'center',
                 gap: '8px',
                 fontSize: '13px',
-                color: '#c4c4cc',
+                color: 'var(--s-muted)',
               }}
             >
               <svg
@@ -287,7 +305,7 @@ export function PagesAndStores() {
           >
             Your whole catalogue, with a page for every product.
           </h3>
-          <p style={{ margin: '0', fontSize: '16px', color: '#c4c4cc' }}>
+          <p style={{ margin: '0', fontSize: '16px', color: 'var(--s-muted)' }}>
             Home page, categories, cart, checkout and customer accounts — with
             banners, sliders and product grids you arrange. Cash on delivery and
             bank transfer at checkout.
@@ -305,8 +323,8 @@ export function PagesAndStores() {
               style={{
                 position: 'relative',
                 overflow: 'hidden',
-                background: '#0b0b0d',
-                border: '1px solid rgba(255, 255, 255, 0.06)',
+                background: 'var(--s-bg-alt)',
+                border: '1px solid rgba(var(--s-ink), 0.06)',
                 borderRadius: '16px',
                 padding: '10px',
               }}
@@ -327,7 +345,13 @@ export function PagesAndStores() {
               >
                 Cotton three-piece
               </p>
-              <p style={{ margin: '0', fontSize: '12px', color: '#a1a1aa' }}>
+              <p
+                style={{
+                  margin: '0',
+                  fontSize: '12px',
+                  color: 'var(--s-subtle)',
+                }}
+              >
                 ৳2,450
               </p>
             </div>
@@ -335,8 +359,8 @@ export function PagesAndStores() {
               style={{
                 position: 'relative',
                 overflow: 'hidden',
-                background: '#0b0b0d',
-                border: '1px solid rgba(255, 255, 255, 0.06)',
+                background: 'var(--s-bg-alt)',
+                border: '1px solid rgba(var(--s-ink), 0.06)',
                 borderRadius: '16px',
                 padding: '10px',
               }}
@@ -357,7 +381,13 @@ export function PagesAndStores() {
               >
                 Rajshahi silk saree
               </p>
-              <p style={{ margin: '0', fontSize: '12px', color: '#a1a1aa' }}>
+              <p
+                style={{
+                  margin: '0',
+                  fontSize: '12px',
+                  color: 'var(--s-subtle)',
+                }}
+              >
                 ৳4,200
               </p>
             </div>
@@ -365,8 +395,8 @@ export function PagesAndStores() {
               style={{
                 position: 'relative',
                 overflow: 'hidden',
-                background: '#0b0b0d',
-                border: '1px solid rgba(255, 255, 255, 0.06)',
+                background: 'var(--s-bg-alt)',
+                border: '1px solid rgba(var(--s-ink), 0.06)',
                 borderRadius: '16px',
                 padding: '10px',
               }}
@@ -387,7 +417,13 @@ export function PagesAndStores() {
               >
                 Premium cotton panjabi
               </p>
-              <p style={{ margin: '0', fontSize: '12px', color: '#a1a1aa' }}>
+              <p
+                style={{
+                  margin: '0',
+                  fontSize: '12px',
+                  color: 'var(--s-subtle)',
+                }}
+              >
                 ৳1,850
               </p>
             </div>

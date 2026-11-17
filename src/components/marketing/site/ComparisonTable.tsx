@@ -3,10 +3,10 @@ import { HEADING_FONT } from './ui'
 
 const CELL = {
   padding: '14px 16px',
-  borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
+  borderBottom: '1px solid rgba(var(--s-ink), 0.06)',
   textAlign: 'center',
   fontSize: '14px',
-  color: '#d4d4d8',
+  color: 'var(--s-text-3)',
   whiteSpace: 'nowrap',
 } as const
 
@@ -18,7 +18,7 @@ function Value({ value }: { value: string | boolean }) {
         width="18"
         height="18"
         fill="none"
-        stroke="var(--accent)"
+        stroke="var(--accent-text)"
         strokeWidth="2.5"
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -31,7 +31,7 @@ function Value({ value }: { value: string | boolean }) {
   }
   if (value === false) {
     return (
-      <span aria-label="Not included" style={{ color: '#8a8a93' }}>
+      <span aria-label="Not included" style={{ color: 'var(--s-faint)' }}>
         —
       </span>
     )
@@ -45,9 +45,9 @@ export function ComparisonTable({ packages }: { packages: PublicPackage[] }) {
     <div
       style={{
         overflowX: 'auto',
-        border: '1px solid rgba(255, 255, 255, 0.08)',
+        border: '1px solid rgba(var(--s-ink), 0.08)',
         borderRadius: '24px',
-        background: '#0e0e11',
+        background: 'var(--s-panel)',
       }}
     >
       <table
@@ -67,7 +67,7 @@ export function ComparisonTable({ packages }: { packages: PublicPackage[] }) {
               style={{
                 ...CELL,
                 textAlign: 'left',
-                color: '#a1a1aa',
+                color: 'var(--s-subtle)',
                 fontWeight: 600,
               }}
             >
@@ -84,7 +84,7 @@ export function ComparisonTable({ packages }: { packages: PublicPackage[] }) {
                     display: 'block',
                     fontSize: '16px',
                     fontWeight: 700,
-                    color: '#f5f5f6',
+                    color: 'var(--s-text)',
                   }}
                 >
                   {pkg.name}
@@ -96,11 +96,11 @@ export function ComparisonTable({ packages }: { packages: PublicPackage[] }) {
                     fontFamily: HEADING_FONT,
                     fontSize: '22px',
                     fontWeight: 600,
-                    color: '#f5f5f6',
+                    color: 'var(--s-text)',
                   }}
                 >
                   {taka(pkg.monthlyPriceCents)}
-                  <span style={{ fontSize: '12px', color: '#a1a1aa' }}>
+                  <span style={{ fontSize: '12px', color: 'var(--s-subtle)' }}>
                     /mo
                   </span>
                 </span>
@@ -109,7 +109,10 @@ export function ComparisonTable({ packages }: { packages: PublicPackage[] }) {
                     display: 'block',
                     marginTop: '4px',
                     fontSize: '12px',
-                    color: pkg.trialDays > 0 ? 'var(--accent)' : '#a1a1aa',
+                    color:
+                      pkg.trialDays > 0
+                        ? 'var(--accent-text)'
+                        : 'var(--s-subtle)',
                   }}
                 >
                   {pkg.trialDays > 0
@@ -130,7 +133,7 @@ export function ComparisonTable({ packages }: { packages: PublicPackage[] }) {
                   ...CELL,
                   textAlign: 'left',
                   paddingTop: '26px',
-                  color: 'var(--accent)',
+                  color: 'var(--accent-text)',
                   fontSize: '13px',
                   fontWeight: 700,
                   letterSpacing: '0.02em',
@@ -148,7 +151,7 @@ export function ComparisonTable({ packages }: { packages: PublicPackage[] }) {
                     ...CELL,
                     textAlign: 'left',
                     fontWeight: 500,
-                    color: '#e4e4e7',
+                    color: 'var(--s-text-2)',
                     whiteSpace: 'normal',
                   }}
                 >

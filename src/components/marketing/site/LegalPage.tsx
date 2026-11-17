@@ -29,7 +29,7 @@ export function LegalPage({
           margin: 0,
           fontSize: '14px',
           fontWeight: 700,
-          color: 'var(--accent)',
+          color: 'var(--accent-text)',
         }}
       >
         Legal
@@ -46,7 +46,13 @@ export function LegalPage({
       >
         {title}
       </h1>
-      <p style={{ margin: '14px 0 0', fontSize: '14px', color: '#a1a1aa' }}>
+      <p
+        style={{
+          margin: '14px 0 0',
+          fontSize: '14px',
+          color: 'var(--s-subtle)',
+        }}
+      >
         Last updated {updated}
       </p>
       <div
@@ -55,10 +61,12 @@ export function LegalPage({
           marginTop: '36px',
           fontSize: '16px',
           lineHeight: 1.75,
-          color: '#d4d4d8',
+          color: 'var(--s-text-3)',
         }}
       >
-        <div style={{ fontSize: '18px', color: '#e4e4e7' }}>{intro}</div>
+        <div style={{ fontSize: '18px', color: 'var(--s-text-2)' }}>
+          {intro}
+        </div>
         {sections.map((section, index) => (
           <section key={section.heading} style={{ marginTop: '40px' }}>
             <h2
@@ -68,7 +76,7 @@ export function LegalPage({
                 fontSize: '22px',
                 fontWeight: 600,
                 letterSpacing: '-0.01em',
-                color: '#f5f5f6',
+                color: 'var(--s-text)',
               }}
             >
               {index + 1}. {section.heading}

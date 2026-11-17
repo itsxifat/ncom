@@ -11,8 +11,8 @@ export function OrderFlow() {
       aria-labelledby="flow-title"
       style={{
         position: 'relative',
-        borderTop: '1px solid rgba(255, 255, 255, 0.06)',
-        background: '#0b0b0d',
+        borderTop: '1px solid rgba(var(--s-ink), 0.06)',
+        background: 'var(--s-bg-alt)',
       }}
     >
       <div
@@ -36,7 +36,7 @@ export function OrderFlow() {
               margin: '0',
               fontSize: '14px',
               fontWeight: '700',
-              color: 'var(--accent)',
+              color: 'var(--accent-text)',
             }}
           >
             Orders and delivery
@@ -61,7 +61,7 @@ export function OrderFlow() {
               margin: '20px auto 0',
               maxWidth: '560px',
               fontSize: '18px',
-              color: '#c4c4cc',
+              color: 'var(--s-muted)',
             }}
           >
             NCOM checks each buyer’s delivery record. You book Steadfast or
@@ -84,7 +84,7 @@ export function OrderFlow() {
                 right: '0',
                 top: '25px',
                 height: '2px',
-                background: 'rgba(255, 255, 255, 0.1)',
+                background: 'rgba(var(--s-ink), 0.1)',
                 borderRadius: '999px',
               }}
             ></div>
@@ -265,7 +265,7 @@ export function OrderFlow() {
                 height: '16px',
                 marginLeft: '-8px',
                 borderRadius: '50%',
-                background: '#f5f5f6',
+                background: 'var(--s-text)',
                 boxShadow: '0 0 0 3px var(--accent)',
                 animation: 'ncom-parcel 9s cubic-bezier(.65,0,.35,1) infinite',
               }}
@@ -279,7 +279,7 @@ export function OrderFlow() {
               textAlign: 'center',
               fontSize: '13px',
               fontWeight: '700',
-              color: '#d4d4d8',
+              color: 'var(--s-text-3)',
             }}
           >
             <span>Order in</span>
@@ -300,8 +300,8 @@ export function OrderFlow() {
           <article
             data-hover="lift"
             style={{
-              background: '#111114',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
+              background: 'var(--s-card)',
+              border: '1px solid rgba(var(--s-ink), 0.08)',
               borderRadius: '24px',
               padding: '30px',
               boxSizing: 'border-box',
@@ -324,7 +324,9 @@ export function OrderFlow() {
             >
               Check each buyer’s delivery record
             </h3>
-            <p style={{ margin: '0', fontSize: '15px', color: '#c4c4cc' }}>
+            <p
+              style={{ margin: '0', fontSize: '15px', color: 'var(--s-muted)' }}
+            >
               No form stops every fake order. NCOM checks each buyer’s Steadfast
               delivery record against your rules and holds risky orders for you
               to decide.
@@ -345,11 +347,11 @@ export function OrderFlow() {
                   style={{
                     display: 'flex',
                     justifyContent: 'space-between',
-                    color: '#d4d4d8',
+                    color: 'var(--s-text-3)',
                   }}
                 >
                   <span>01712-XXXXXX</span>
-                  <span style={{ color: '#4ade80', fontWeight: '800' }}>
+                  <span style={{ color: 'var(--s-ok)', fontWeight: '800' }}>
                     Reliable
                   </span>
                 </div>
@@ -358,7 +360,7 @@ export function OrderFlow() {
                     marginTop: '6px',
                     height: '6px',
                     borderRadius: '999px',
-                    background: 'rgba(255, 255, 255, 0.08)',
+                    background: 'rgba(var(--s-ink), 0.08)',
                     overflow: 'hidden',
                   }}
                 >
@@ -367,7 +369,7 @@ export function OrderFlow() {
                       display: 'block',
                       width: '95%',
                       height: '100%',
-                      background: '#4ade80',
+                      background: 'var(--s-ok)',
                       borderRadius: '999px',
                       transformOrigin: 'left',
                       animation:
@@ -381,11 +383,11 @@ export function OrderFlow() {
                   style={{
                     display: 'flex',
                     justifyContent: 'space-between',
-                    color: '#d4d4d8',
+                    color: 'var(--s-text-3)',
                   }}
                 >
                   <span>01819-XXXXXX</span>
-                  <span style={{ color: '#fbbf24', fontWeight: '800' }}>
+                  <span style={{ color: 'var(--s-warn)', fontWeight: '800' }}>
                     Check first
                   </span>
                 </div>
@@ -394,7 +396,7 @@ export function OrderFlow() {
                     marginTop: '6px',
                     height: '6px',
                     borderRadius: '999px',
-                    background: 'rgba(255, 255, 255, 0.08)',
+                    background: 'rgba(var(--s-ink), 0.08)',
                     overflow: 'hidden',
                   }}
                 >
@@ -403,7 +405,7 @@ export function OrderFlow() {
                       display: 'block',
                       width: '58%',
                       height: '100%',
-                      background: '#fbbf24',
+                      background: 'var(--s-warn)',
                       borderRadius: '999px',
                       transformOrigin: 'left',
                       animation:
@@ -417,8 +419,8 @@ export function OrderFlow() {
           <article
             data-hover="lift"
             style={{
-              background: '#111114',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
+              background: 'var(--s-card)',
+              border: '1px solid rgba(var(--s-ink), 0.08)',
               borderRadius: '24px',
               padding: '30px',
               boxSizing: 'border-box',
@@ -441,7 +443,9 @@ export function OrderFlow() {
             >
               Book Steadfast or Pathao
             </h3>
-            <p style={{ margin: '0', fontSize: '15px', color: '#c4c4cc' }}>
+            <p
+              style={{ margin: '0', fontSize: '15px', color: 'var(--s-muted)' }}
+            >
               Book from the order, on your own courier accounts, and statuses
               update on their own. Automatic booking stays off until you switch
               it on. Print 4×6 stickers in one go.
@@ -525,8 +529,8 @@ export function OrderFlow() {
           <article
             data-hover="lift"
             style={{
-              background: '#111114',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
+              background: 'var(--s-card)',
+              border: '1px solid rgba(var(--s-ink), 0.08)',
               borderRadius: '24px',
               padding: '30px',
               boxSizing: 'border-box',
@@ -549,7 +553,9 @@ export function OrderFlow() {
             >
               Send the buyer a tracking link
             </h3>
-            <p style={{ margin: '0', fontSize: '15px', color: '#c4c4cc' }}>
+            <p
+              style={{ margin: '0', fontSize: '15px', color: 'var(--s-muted)' }}
+            >
               Each parcel gets a link that shows where it is and how much cash
               to keep ready. It never shows the address.
             </p>
@@ -576,7 +582,7 @@ export function OrderFlow() {
                     display: 'inline-block',
                   }}
                 ></span>
-                <span style={{ color: '#d4d4d8' }}>Packed</span>
+                <span style={{ color: 'var(--s-text-3)' }}>Packed</span>
               </div>
               <div
                 style={{ display: 'flex', alignItems: 'center', gap: '10px' }}
@@ -591,7 +597,7 @@ export function OrderFlow() {
                     animation: 'ncom-pulse 2.4s ease-out infinite',
                   }}
                 ></span>
-                <span style={{ color: '#f5f5f6', fontWeight: '700' }}>
+                <span style={{ color: 'var(--s-text)', fontWeight: '700' }}>
                   With the courier · keep ৳1,550 ready
                 </span>
               </div>
@@ -608,7 +614,7 @@ export function OrderFlow() {
                     display: 'inline-block',
                   }}
                 ></span>
-                <span style={{ color: '#a1a1aa' }}>Delivered</span>
+                <span style={{ color: 'var(--s-subtle)' }}>Delivered</span>
               </div>
             </div>
           </article>

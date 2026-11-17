@@ -26,7 +26,7 @@ export function WhatYouGet() {
             margin: '0',
             fontSize: '14px',
             fontWeight: '700',
-            color: 'var(--accent)',
+            color: 'var(--accent-text)',
           }}
         >
           What you get
@@ -52,7 +52,7 @@ export function WhatYouGet() {
             margin: '20px 0 0',
             maxWidth: '640px',
             fontSize: '18px',
-            color: '#b4b4bd',
+            color: 'var(--s-muted-2)',
           }}
         >
           Every package includes the order form, offers, courier booking, the
@@ -70,13 +70,13 @@ export function WhatYouGet() {
           gridTemplateColumns:
             'repeat(auto-fill, minmax(min(100%, 268px), 1fr))',
           gap: '1px',
-          background: 'rgba(255, 255, 255, 0.09)',
-          border: '1px solid rgba(255, 255, 255, 0.09)',
+          background: 'rgba(var(--s-ink), 0.09)',
+          border: '1px solid rgba(var(--s-ink), 0.09)',
           borderRadius: '24px',
           overflow: 'hidden',
         }}
       >
-        <li style={{ background: '#09090b', overflow: 'hidden' }}>
+        <li style={{ background: 'var(--s-bg)', overflow: 'hidden' }}>
           <div
             style={{
               height: '100%',
@@ -93,7 +93,7 @@ export function WhatYouGet() {
               width="26"
               height="26"
               fill="none"
-              stroke="var(--accent)"
+              stroke="var(--accent-text)"
               strokeWidth="1.75"
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -112,7 +112,7 @@ export function WhatYouGet() {
                 fontSize: '20px',
                 lineHeight: '1.2',
                 letterSpacing: '-0.02em',
-                color: '#f5f5f6',
+                color: 'var(--s-text)',
               }}
             >
               A landing page that takes orders
@@ -122,7 +122,7 @@ export function WhatYouGet() {
                 margin: '0',
                 fontSize: '15px',
                 lineHeight: '1.55',
-                color: '#b4b4bd',
+                color: 'var(--s-muted-2)',
               }}
             >
               One page for one product, a combo or a category, with the order
@@ -130,7 +130,7 @@ export function WhatYouGet() {
             </p>
           </div>
         </li>
-        <li style={{ background: '#09090b', overflow: 'hidden' }}>
+        <li style={{ background: 'var(--s-bg)', overflow: 'hidden' }}>
           <div
             style={{
               height: '100%',
@@ -147,7 +147,7 @@ export function WhatYouGet() {
               width="26"
               height="26"
               fill="none"
-              stroke="var(--accent)"
+              stroke="var(--accent-text)"
               strokeWidth="1.75"
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -167,7 +167,7 @@ export function WhatYouGet() {
                 fontSize: '20px',
                 lineHeight: '1.2',
                 letterSpacing: '-0.02em',
-                color: '#f5f5f6',
+                color: 'var(--s-text)',
               }}
             >
               A full online store
@@ -177,7 +177,7 @@ export function WhatYouGet() {
                 margin: '0',
                 fontSize: '15px',
                 lineHeight: '1.55',
-                color: '#b4b4bd',
+                color: 'var(--s-muted-2)',
               }}
             >
               Home page, categories and a page for every product, with cart,
@@ -185,7 +185,7 @@ export function WhatYouGet() {
             </p>
           </div>
         </li>
-        <li style={{ background: '#09090b', overflow: 'hidden' }}>
+        <li style={{ background: 'var(--s-bg)', overflow: 'hidden' }}>
           <div
             style={{
               height: '100%',
@@ -202,7 +202,7 @@ export function WhatYouGet() {
               width="26"
               height="26"
               fill="none"
-              stroke="var(--accent)"
+              stroke="var(--accent-text)"
               strokeWidth="1.75"
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -221,7 +221,7 @@ export function WhatYouGet() {
                 fontSize: '20px',
                 lineHeight: '1.2',
                 letterSpacing: '-0.02em',
-                color: '#f5f5f6',
+                color: 'var(--s-text)',
               }}
             >
               Offers and delivery charges
@@ -231,7 +231,7 @@ export function WhatYouGet() {
                 margin: '0',
                 fontSize: '15px',
                 lineHeight: '1.55',
-                color: '#b4b4bd',
+                color: 'var(--s-muted-2)',
               }}
             >
               Combos, mix &amp; match, free gifts and discount codes. Delivery
@@ -239,7 +239,7 @@ export function WhatYouGet() {
             </p>
           </div>
         </li>
-        <li style={{ background: '#09090b', overflow: 'hidden' }}>
+        <li style={{ background: 'var(--s-bg)', overflow: 'hidden' }}>
           <div
             style={{
               height: '100%',
@@ -256,7 +256,7 @@ export function WhatYouGet() {
               width="26"
               height="26"
               fill="none"
-              stroke="var(--accent)"
+              stroke="var(--accent-text)"
               strokeWidth="1.75"
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -277,7 +277,7 @@ export function WhatYouGet() {
                 fontSize: '20px',
                 lineHeight: '1.2',
                 letterSpacing: '-0.02em',
-                color: '#f5f5f6',
+                color: 'var(--s-text)',
               }}
             >
               8 ready-made designs
@@ -287,7 +287,7 @@ export function WhatYouGet() {
                 margin: '0',
                 fontSize: '15px',
                 lineHeight: '1.55',
-                color: '#b4b4bd',
+                color: 'var(--s-muted-2)',
               }}
             >
               Four for landing pages, four for stores, plus two blanks. Each in
@@ -295,7 +295,7 @@ export function WhatYouGet() {
             </p>
           </div>
         </li>
-        <li style={{ background: '#09090b', overflow: 'hidden' }}>
+        <li style={{ background: 'var(--s-bg)', overflow: 'hidden' }}>
           <div
             style={{
               height: '100%',
@@ -312,7 +312,7 @@ export function WhatYouGet() {
               width="26"
               height="26"
               fill="none"
-              stroke="var(--accent)"
+              stroke="var(--accent-text)"
               strokeWidth="1.75"
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -331,7 +331,7 @@ export function WhatYouGet() {
                 fontSize: '20px',
                 lineHeight: '1.2',
                 letterSpacing: '-0.02em',
-                color: '#f5f5f6',
+                color: 'var(--s-text)',
               }}
             >
               One order list
@@ -341,7 +341,7 @@ export function WhatYouGet() {
                 margin: '0',
                 fontSize: '15px',
                 lineHeight: '1.55',
-                color: '#b4b4bd',
+                color: 'var(--s-muted-2)',
               }}
             >
               Every order from every site in one list, showing the page and
@@ -349,7 +349,7 @@ export function WhatYouGet() {
             </p>
           </div>
         </li>
-        <li style={{ background: '#09090b', overflow: 'hidden' }}>
+        <li style={{ background: 'var(--s-bg)', overflow: 'hidden' }}>
           <div
             style={{
               height: '100%',
@@ -366,7 +366,7 @@ export function WhatYouGet() {
               width="26"
               height="26"
               fill="none"
-              stroke="var(--accent)"
+              stroke="var(--accent-text)"
               strokeWidth="1.75"
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -385,7 +385,7 @@ export function WhatYouGet() {
                 fontSize: '20px',
                 lineHeight: '1.2',
                 letterSpacing: '-0.02em',
-                color: '#f5f5f6',
+                color: 'var(--s-text)',
               }}
             >
               The fake-order check
@@ -395,7 +395,7 @@ export function WhatYouGet() {
                 margin: '0',
                 fontSize: '15px',
                 lineHeight: '1.55',
-                color: '#b4b4bd',
+                color: 'var(--s-muted-2)',
               }}
             >
               Each buyer’s Steadfast delivery record is checked against your
@@ -403,7 +403,7 @@ export function WhatYouGet() {
             </p>
           </div>
         </li>
-        <li style={{ background: '#09090b', overflow: 'hidden' }}>
+        <li style={{ background: 'var(--s-bg)', overflow: 'hidden' }}>
           <div
             style={{
               height: '100%',
@@ -420,7 +420,7 @@ export function WhatYouGet() {
               width="26"
               height="26"
               fill="none"
-              stroke="var(--accent)"
+              stroke="var(--accent-text)"
               strokeWidth="1.75"
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -440,7 +440,7 @@ export function WhatYouGet() {
                 fontSize: '20px',
                 lineHeight: '1.2',
                 letterSpacing: '-0.02em',
-                color: '#f5f5f6',
+                color: 'var(--s-text)',
               }}
             >
               Courier booking
@@ -450,7 +450,7 @@ export function WhatYouGet() {
                 margin: '0',
                 fontSize: '15px',
                 lineHeight: '1.55',
-                color: '#b4b4bd',
+                color: 'var(--s-muted-2)',
               }}
             >
               Book Steadfast or Pathao from the order, on your own accounts, so
@@ -458,7 +458,7 @@ export function WhatYouGet() {
             </p>
           </div>
         </li>
-        <li style={{ background: '#09090b', overflow: 'hidden' }}>
+        <li style={{ background: 'var(--s-bg)', overflow: 'hidden' }}>
           <div
             style={{
               height: '100%',
@@ -475,7 +475,7 @@ export function WhatYouGet() {
               width="26"
               height="26"
               fill="none"
-              stroke="var(--accent)"
+              stroke="var(--accent-text)"
               strokeWidth="1.75"
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -493,7 +493,7 @@ export function WhatYouGet() {
                 fontSize: '20px',
                 lineHeight: '1.2',
                 letterSpacing: '-0.02em',
-                color: '#f5f5f6',
+                color: 'var(--s-text)',
               }}
             >
               Stickers, scanning and tracking
@@ -503,7 +503,7 @@ export function WhatYouGet() {
                 margin: '0',
                 fontSize: '15px',
                 lineHeight: '1.55',
-                color: '#b4b4bd',
+                color: 'var(--s-muted-2)',
               }}
             >
               4×6 stickers with barcodes, scanning with a phone camera, and a
@@ -511,7 +511,7 @@ export function WhatYouGet() {
             </p>
           </div>
         </li>
-        <li style={{ background: '#09090b', overflow: 'hidden' }}>
+        <li style={{ background: 'var(--s-bg)', overflow: 'hidden' }}>
           <div
             style={{
               height: '100%',
@@ -528,7 +528,7 @@ export function WhatYouGet() {
               width="26"
               height="26"
               fill="none"
-              stroke="var(--accent)"
+              stroke="var(--accent-text)"
               strokeWidth="1.75"
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -547,7 +547,7 @@ export function WhatYouGet() {
                 fontSize: '20px',
                 lineHeight: '1.2',
                 letterSpacing: '-0.02em',
-                color: '#f5f5f6',
+                color: 'var(--s-text)',
               }}
             >
               Bangla or English
@@ -557,7 +557,7 @@ export function WhatYouGet() {
                 margin: '0',
                 fontSize: '15px',
                 lineHeight: '1.55',
-                color: '#b4b4bd',
+                color: 'var(--s-muted-2)',
               }}
             >
               On a Bangla site every word NCOM writes is Bangla, even the
@@ -565,7 +565,7 @@ export function WhatYouGet() {
             </p>
           </div>
         </li>
-        <li style={{ background: '#09090b', overflow: 'hidden' }}>
+        <li style={{ background: 'var(--s-bg)', overflow: 'hidden' }}>
           <div
             style={{
               height: '100%',
@@ -582,7 +582,7 @@ export function WhatYouGet() {
               width="26"
               height="26"
               fill="none"
-              stroke="var(--accent)"
+              stroke="var(--accent-text)"
               strokeWidth="1.75"
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -601,7 +601,7 @@ export function WhatYouGet() {
                 fontSize: '20px',
                 lineHeight: '1.2',
                 letterSpacing: '-0.02em',
-                color: '#f5f5f6',
+                color: 'var(--s-text)',
               }}
             >
               AI, three ways
@@ -611,7 +611,7 @@ export function WhatYouGet() {
                 margin: '0',
                 fontSize: '15px',
                 lineHeight: '1.55',
-                color: '#b4b4bd',
+                color: 'var(--s-muted-2)',
               }}
             >
               Describe your business and get a page you can edit (uses AI
@@ -620,7 +620,7 @@ export function WhatYouGet() {
             </p>
           </div>
         </li>
-        <li style={{ background: '#09090b', overflow: 'hidden' }}>
+        <li style={{ background: 'var(--s-bg)', overflow: 'hidden' }}>
           <div
             style={{
               height: '100%',
@@ -637,7 +637,7 @@ export function WhatYouGet() {
               width="26"
               height="26"
               fill="none"
-              stroke="var(--accent)"
+              stroke="var(--accent-text)"
               strokeWidth="1.75"
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -656,7 +656,7 @@ export function WhatYouGet() {
                 fontSize: '20px',
                 lineHeight: '1.2',
                 letterSpacing: '-0.02em',
-                color: '#f5f5f6',
+                color: 'var(--s-text)',
               }}
             >
               Your own web address
@@ -666,7 +666,7 @@ export function WhatYouGet() {
                 margin: '0',
                 fontSize: '15px',
                 lineHeight: '1.55',
-                color: '#b4b4bd',
+                color: 'var(--s-muted-2)',
               }}
             >
               An NCOM address with SSL on every package. Connect your own domain
@@ -674,7 +674,7 @@ export function WhatYouGet() {
             </p>
           </div>
         </li>
-        <li style={{ background: '#09090b', overflow: 'hidden' }}>
+        <li style={{ background: 'var(--s-bg)', overflow: 'hidden' }}>
           <div
             style={{
               height: '100%',
@@ -691,7 +691,7 @@ export function WhatYouGet() {
               width="26"
               height="26"
               fill="none"
-              stroke="var(--accent)"
+              stroke="var(--accent-text)"
               strokeWidth="1.75"
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -709,7 +709,7 @@ export function WhatYouGet() {
                 fontSize: '20px',
                 lineHeight: '1.2',
                 letterSpacing: '-0.02em',
-                color: '#f5f5f6',
+                color: 'var(--s-text)',
               }}
             >
               Ad tracking and a sales report
@@ -719,7 +719,7 @@ export function WhatYouGet() {
                 margin: '0',
                 fontSize: '15px',
                 lineHeight: '1.55',
-                color: '#b4b4bd',
+                color: 'var(--s-muted-2)',
               }}
             >
               Meta Pixel and Conversions API, GA4 and invoiced vs collected on

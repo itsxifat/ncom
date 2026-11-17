@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { SiteThemeToggle } from './SiteThemeToggle'
 
 /**
  * The site header: logo, section links, sign in and the trial button.
@@ -13,8 +14,8 @@ export function SiteHeaderBar() {
         position: 'sticky',
         top: '0',
         zIndex: '50',
-        background: '#09090b',
-        borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+        background: 'var(--s-bg)',
+        borderBottom: '1px solid rgba(var(--s-ink), 0.08)',
       }}
     >
       <div
@@ -34,7 +35,7 @@ export function SiteHeaderBar() {
           href="/"
           aria-label="NCOM home"
           style={{
-            color: 'var(--accent)',
+            color: 'var(--accent-text)',
             display: 'inline-flex',
             alignItems: 'center',
             minHeight: '44px',
@@ -63,7 +64,7 @@ export function SiteHeaderBar() {
           style={{
             flex: '1 1 calc((780px - 100%) * 999)',
             minWidth: '0',
-            marginRight: 'clamp(0px, calc((100% - 780px) * 999), 210px)',
+            marginRight: 'clamp(0px, calc((100% - 780px) * 999), 262px)',
             display: 'flex',
             flexWrap: 'wrap',
             justifyContent: 'center',
@@ -75,7 +76,7 @@ export function SiteHeaderBar() {
             href="/#flow"
             data-hover="link"
             style={{
-              color: '#d4d4d8',
+              color: 'var(--s-text-3)',
               textDecoration: 'none',
               fontSize: '14px',
               fontWeight: '600',
@@ -93,7 +94,7 @@ export function SiteHeaderBar() {
             href="/#templates"
             data-hover="link"
             style={{
-              color: '#d4d4d8',
+              color: 'var(--s-text-3)',
               textDecoration: 'none',
               fontSize: '14px',
               fontWeight: '600',
@@ -111,7 +112,7 @@ export function SiteHeaderBar() {
             href="/pricing"
             data-hover="link"
             style={{
-              color: '#d4d4d8',
+              color: 'var(--s-text-3)',
               textDecoration: 'none',
               fontSize: '14px',
               fontWeight: '600',
@@ -129,7 +130,7 @@ export function SiteHeaderBar() {
             href="/docs"
             data-hover="link"
             style={{
-              color: '#d4d4d8',
+              color: 'var(--s-text-3)',
               textDecoration: 'none',
               fontSize: '14px',
               fontWeight: '600',
@@ -154,11 +155,12 @@ export function SiteHeaderBar() {
             gap: '6px',
           }}
         >
+          <SiteThemeToggle />
           <Link
             href="/login"
             data-hover="link"
             style={{
-              color: '#f5f5f6',
+              color: 'var(--s-text)',
               textDecoration: 'none',
               fontWeight: '600',
               fontSize: '14px',

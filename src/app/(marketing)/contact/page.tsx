@@ -21,11 +21,11 @@ const CARD = {
   display: 'flex',
   flexDirection: 'column',
   gap: '10px',
-  background: '#111114',
-  border: '1px solid rgba(255, 255, 255, 0.08)',
+  background: 'var(--s-card)',
+  border: '1px solid rgba(var(--s-ink), 0.08)',
   borderRadius: '24px',
   padding: '28px',
-  color: '#f5f5f6',
+  color: 'var(--s-text)',
   textDecoration: 'none',
   minHeight: '180px',
   boxSizing: 'border-box',
@@ -46,10 +46,12 @@ function Channel({
 }) {
   const body = (
     <>
-      <span style={{ color: 'var(--accent)', display: 'inline-flex' }}>
+      <span style={{ color: 'var(--accent-text)', display: 'inline-flex' }}>
         {icon}
       </span>
-      <span style={{ fontSize: '14px', fontWeight: 700, color: '#a1a1aa' }}>
+      <span
+        style={{ fontSize: '14px', fontWeight: 700, color: 'var(--s-subtle)' }}
+      >
         {label}
       </span>
       <span
@@ -62,7 +64,13 @@ function Channel({
       >
         {value}
       </span>
-      <span style={{ marginTop: 'auto', fontSize: '14px', color: '#a1a1aa' }}>
+      <span
+        style={{
+          marginTop: 'auto',
+          fontSize: '14px',
+          color: 'var(--s-subtle)',
+        }}
+      >
         {note}
       </span>
     </>
@@ -191,7 +199,13 @@ export default async function ContactPage() {
           {channels}
         </div>
       ) : (
-        <p style={{ marginTop: '48px', textAlign: 'center', color: '#a1a1aa' }}>
+        <p
+          style={{
+            marginTop: '48px',
+            textAlign: 'center',
+            color: 'var(--s-subtle)',
+          }}
+        >
           Our support channels are being set up. In the meantime, sign in and
           we’ll see your workspace when you write to us.
         </p>
@@ -202,11 +216,11 @@ export default async function ContactPage() {
           style={{
             marginTop: '40px',
             textAlign: 'center',
-            color: '#a1a1aa',
+            color: 'var(--s-subtle)',
             fontSize: '15px',
           }}
         >
-          <p style={{ margin: 0, fontWeight: 700, color: '#f5f5f6' }}>
+          <p style={{ margin: 0, fontWeight: 700, color: 'var(--s-text)' }}>
             {contact.businessName}
           </p>
           <p style={{ margin: '4px 0 0', whiteSpace: 'pre-line' }}>
@@ -220,7 +234,7 @@ export default async function ContactPage() {
           marginTop: '48px',
           textAlign: 'center',
           fontSize: '15px',
-          color: '#a1a1aa',
+          color: 'var(--s-subtle)',
         }}
       >
         Ready to start?{' '}
@@ -228,7 +242,7 @@ export default async function ContactPage() {
           href="/register"
           data-hover="link"
           style={{
-            color: 'var(--accent)',
+            color: 'var(--accent-text)',
             fontWeight: 700,
             textDecoration: 'none',
           }}

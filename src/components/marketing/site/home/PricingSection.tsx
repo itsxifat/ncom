@@ -46,7 +46,7 @@ export function PricingSection({ packages }: { packages: PublicPackage[] }) {
           margin: '28px 0 0',
           textAlign: 'center',
           fontSize: '14px',
-          color: '#a1a1aa',
+          color: 'var(--s-subtle)',
         }}
       >
         Pay monthly or yearly in taka, with bKash, Nagad, Rocket or a card · No
@@ -55,7 +55,7 @@ export function PricingSection({ packages }: { packages: PublicPackage[] }) {
           href="/pricing"
           data-hover="link"
           style={{
-            color: 'var(--accent)',
+            color: 'var(--accent-text)',
             fontWeight: 700,
             textDecoration: 'none',
           }}

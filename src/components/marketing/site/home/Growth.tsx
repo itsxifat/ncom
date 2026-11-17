@@ -10,8 +10,8 @@ export function Growth() {
       id="growth"
       aria-labelledby="growth-title"
       style={{
-        borderTop: '1px solid rgba(255, 255, 255, 0.06)',
-        background: '#0b0b0d',
+        borderTop: '1px solid rgba(var(--s-ink), 0.06)',
+        background: 'var(--s-bg-alt)',
       }}
     >
       <div
@@ -38,7 +38,7 @@ export function Growth() {
               margin: '0',
               fontSize: '14px',
               fontWeight: '700',
-              color: 'var(--accent)',
+              color: 'var(--accent-text)',
             }}
           >
             Ads &amp; reports · every package
@@ -63,7 +63,7 @@ export function Growth() {
               margin: '20px 0 0',
               maxWidth: '500px',
               fontSize: '18px',
-              color: '#c4c4cc',
+              color: 'var(--s-muted)',
             }}
           >
             Meta Pixel and Conversions API are sent from the server, where an ad
@@ -71,7 +71,13 @@ export function Growth() {
             Manager too. Then see what you invoiced, what was collected and
             which page brought the orders.
           </p>
-          <p style={{ margin: '22px 0 0', fontSize: '14px', color: '#a1a1aa' }}>
+          <p
+            style={{
+              margin: '22px 0 0',
+              fontSize: '14px',
+              color: 'var(--s-subtle)',
+            }}
+          >
             Meta Pixel + Conversions API · Google Analytics 4 on every package ·
             Google Tag Manager from Starter.
           </p>
@@ -82,12 +88,12 @@ export function Growth() {
           style={{
             flex: '1 1 480px',
             minWidth: '0',
-            background: '#111114',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
+            background: 'var(--s-card)',
+            border: '1px solid rgba(var(--s-ink), 0.08)',
             borderRadius: '24px',
             padding: 'clamp(20px, 2.6vw, 32px)',
             boxSizing: 'border-box',
-            boxShadow: '0 60px 140px rgba(0, 0, 0, 0.5)',
+            boxShadow: 'var(--s-shadow-lg)',
             animation: 'ncom-rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) both',
           }}
         >
@@ -104,7 +110,7 @@ export function Growth() {
               style={{
                 fontFamily: 'var(--font-geist-mono), monospace',
                 fontSize: '11px',
-                color: '#a1a1aa',
+                color: 'var(--s-subtle)',
                 letterSpacing: '0.1em',
               }}
             >
@@ -130,7 +136,13 @@ export function Growth() {
               }}
             >
               <div>
-                <p style={{ margin: '0', fontSize: '13px', color: '#a1a1aa' }}>
+                <p
+                  style={{
+                    margin: '0',
+                    fontSize: '13px',
+                    color: 'var(--s-subtle)',
+                  }}
+                >
                   Invoiced
                 </p>
                 <p
@@ -147,7 +159,13 @@ export function Growth() {
                 </p>
               </div>
               <div>
-                <p style={{ margin: '0', fontSize: '13px', color: '#a1a1aa' }}>
+                <p
+                  style={{
+                    margin: '0',
+                    fontSize: '13px',
+                    color: 'var(--s-subtle)',
+                  }}
+                >
                   Collected
                 </p>
                 <p
@@ -158,7 +176,7 @@ export function Growth() {
                     fontSize: '32px',
                     fontWeight: '600',
                     letterSpacing: '-0.02em',
-                    color: 'var(--accent)',
+                    color: 'var(--accent-text)',
                   }}
                 >
                   ৳196,200
@@ -185,7 +203,7 @@ export function Growth() {
                   cy="60"
                   r="48"
                   fill="none"
-                  stroke="#24242a"
+                  stroke="var(--s-chrome)"
                   strokeWidth="10"
                 ></circle>
                 <circle
@@ -193,7 +211,7 @@ export function Growth() {
                   cy="60"
                   r="48"
                   fill="none"
-                  stroke="var(--accent)"
+                  stroke="var(--accent-text)"
                   strokeWidth="10"
                   strokeLinecap="round"
                   strokeDasharray="302"
@@ -223,7 +241,7 @@ export function Growth() {
                 >
                   79%
                 </span>
-                <span style={{ fontSize: '11px', color: '#a1a1aa' }}>
+                <span style={{ fontSize: '11px', color: 'var(--s-subtle)' }}>
                   delivered
                 </span>
               </div>
@@ -237,7 +255,7 @@ export function Growth() {
               display: 'flex',
               alignItems: 'flex-end',
               gap: '8px',
-              borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+              borderBottom: '1px solid rgba(var(--s-ink), 0.08)',
               paddingBottom: '1px',
             }}
           >
@@ -246,7 +264,7 @@ export function Growth() {
                 flex: '1',
                 height: '38%',
                 borderRadius: '6px 6px 2px 2px',
-                background: '#2a2a31',
+                background: 'var(--s-chrome)',
                 transformOrigin: 'bottom',
                 animation: 'ncom-grow 1.3s cubic-bezier(0.16, 1, 0.3, 1) both',
               }}
@@ -256,7 +274,7 @@ export function Growth() {
                 flex: '1',
                 height: '52%',
                 borderRadius: '6px 6px 2px 2px',
-                background: '#2a2a31',
+                background: 'var(--s-chrome)',
                 transformOrigin: 'bottom',
                 animation: 'ncom-grow 1.3s cubic-bezier(0.16, 1, 0.3, 1) both',
               }}
@@ -266,7 +284,7 @@ export function Growth() {
                 flex: '1',
                 height: '46%',
                 borderRadius: '6px 6px 2px 2px',
-                background: '#2a2a31',
+                background: 'var(--s-chrome)',
                 transformOrigin: 'bottom',
                 animation: 'ncom-grow 1.3s cubic-bezier(0.16, 1, 0.3, 1) both',
               }}
@@ -276,7 +294,7 @@ export function Growth() {
                 flex: '1',
                 height: '70%',
                 borderRadius: '6px 6px 2px 2px',
-                background: '#2a2a31',
+                background: 'var(--s-chrome)',
                 transformOrigin: 'bottom',
                 animation: 'ncom-grow 1.3s cubic-bezier(0.16, 1, 0.3, 1) both',
               }}
@@ -286,7 +304,7 @@ export function Growth() {
                 flex: '1',
                 height: '64%',
                 borderRadius: '6px 6px 2px 2px',
-                background: '#2a2a31',
+                background: 'var(--s-chrome)',
                 transformOrigin: 'bottom',
                 animation: 'ncom-grow 1.3s cubic-bezier(0.16, 1, 0.3, 1) both',
               }}
@@ -306,7 +324,7 @@ export function Growth() {
                 flex: '1',
                 height: '78%',
                 borderRadius: '6px 6px 2px 2px',
-                background: '#2a2a31',
+                background: 'var(--s-chrome)',
                 transformOrigin: 'bottom',
                 animation: 'ncom-grow 1.3s cubic-bezier(0.16, 1, 0.3, 1) both',
               }}
@@ -328,8 +346,10 @@ export function Growth() {
                 gap: '8px',
               }}
             >
-              <span style={{ color: '#d4d4d8' }}>Honey — Facebook ad</span>
-              <span style={{ color: '#a1a1aa' }}>128 orders</span>
+              <span style={{ color: 'var(--s-text-3)' }}>
+                Honey — Facebook ad
+              </span>
+              <span style={{ color: 'var(--s-subtle)' }}>128 orders</span>
             </div>
             <div
               style={{
@@ -338,8 +358,10 @@ export function Growth() {
                 gap: '8px',
               }}
             >
-              <span style={{ color: '#d4d4d8' }}>Ghee combo — Eid offer</span>
-              <span style={{ color: '#a1a1aa' }}>74 orders</span>
+              <span style={{ color: 'var(--s-text-3)' }}>
+                Ghee combo — Eid offer
+              </span>
+              <span style={{ color: 'var(--s-subtle)' }}>74 orders</span>
             </div>
           </div>
         </div>

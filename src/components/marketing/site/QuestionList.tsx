@@ -11,7 +11,7 @@ export function QuestionList({
           key={item.q}
           data-faq=""
           open={index < 2}
-          style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}
+          style={{ borderBottom: '1px solid rgba(var(--s-ink), 0.08)' }}
         >
           <summary
             style={{
@@ -30,7 +30,7 @@ export function QuestionList({
             <span
               data-plus=""
               aria-hidden="true"
-              style={{ color: 'var(--accent)', display: 'inline-flex' }}
+              style={{ color: 'var(--accent-text)', display: 'inline-flex' }}
             >
               <svg
                 viewBox="0 0 24 24"
@@ -50,7 +50,7 @@ export function QuestionList({
               margin: '0 0 24px',
               maxWidth: '720px',
               fontSize: '16px',
-              color: '#c4c4cc',
+              color: 'var(--s-muted)',
             }}
           >
             {item.a}

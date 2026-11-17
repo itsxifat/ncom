@@ -16,7 +16,7 @@ export const metadata: Metadata = {
 }
 
 const LINK = {
-  color: 'var(--accent)',
+  color: 'var(--accent-text)',
   fontWeight: 700,
   textDecoration: 'none',
 } as const

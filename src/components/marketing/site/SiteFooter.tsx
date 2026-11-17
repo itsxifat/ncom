@@ -7,7 +7,7 @@ import {
 } from '@/server/services/siteContactService'
 
 const LINK = {
-  color: '#c4c4cc',
+  color: 'var(--s-muted)',
   textDecoration: 'none',
   display: 'inline-flex',
   alignItems: 'center',
@@ -22,7 +22,7 @@ const LINK = {
 export function SiteFooter({ contact }: { contact: SiteContact }) {
   const whatsapp = whatsappLink(contact.whatsapp)
   return (
-    <footer style={{ background: '#09090b' }}>
+    <footer style={{ background: 'var(--s-bg)' }}>
       <div
         style={{
           maxWidth: '1200px',
@@ -40,7 +40,9 @@ export function SiteFooter({ contact }: { contact: SiteContact }) {
           }}
         >
           <div style={{ flex: '1 1 280px', minWidth: '0', maxWidth: '360px' }}>
-            <span style={{ color: 'var(--accent)', display: 'inline-flex' }}>
+            <span
+              style={{ color: 'var(--accent-text)', display: 'inline-flex' }}
+            >
               <svg
                 viewBox="0 0 1180 238"
                 width="98"
@@ -59,7 +61,11 @@ export function SiteFooter({ contact }: { contact: SiteContact }) {
               </svg>
             </span>
             <p
-              style={{ margin: '18px 0 0', fontSize: '15px', color: '#a1a1aa' }}
+              style={{
+                margin: '18px 0 0',
+                fontSize: '15px',
+                color: 'var(--s-subtle)',
+              }}
             >
               Landing pages and online stores that take cash-on-delivery orders,
               for sellers in Bangladesh. NCOM is made by {contact.businessName}.
@@ -114,7 +120,7 @@ export function SiteFooter({ contact }: { contact: SiteContact }) {
                   margin: '0',
                   fontSize: '13px',
                   fontWeight: '700',
-                  color: '#f5f5f6',
+                  color: 'var(--s-text)',
                 }}
               >
                 Product
@@ -123,7 +129,7 @@ export function SiteFooter({ contact }: { contact: SiteContact }) {
                 href="/#sell"
                 data-hover="link"
                 style={{
-                  color: '#c4c4cc',
+                  color: 'var(--s-muted)',
                   textDecoration: 'none',
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -136,7 +142,7 @@ export function SiteFooter({ contact }: { contact: SiteContact }) {
                 href="/#flow"
                 data-hover="link"
                 style={{
-                  color: '#c4c4cc',
+                  color: 'var(--s-muted)',
                   textDecoration: 'none',
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -149,7 +155,7 @@ export function SiteFooter({ contact }: { contact: SiteContact }) {
                 href="/#ai"
                 data-hover="link"
                 style={{
-                  color: '#c4c4cc',
+                  color: 'var(--s-muted)',
                   textDecoration: 'none',
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -162,7 +168,7 @@ export function SiteFooter({ contact }: { contact: SiteContact }) {
                 href="/#templates"
                 data-hover="link"
                 style={{
-                  color: '#c4c4cc',
+                  color: 'var(--s-muted)',
                   textDecoration: 'none',
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -175,7 +181,7 @@ export function SiteFooter({ contact }: { contact: SiteContact }) {
                 href="/pricing"
                 data-hover="link"
                 style={{
-                  color: '#c4c4cc',
+                  color: 'var(--s-muted)',
                   textDecoration: 'none',
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -198,7 +204,7 @@ export function SiteFooter({ contact }: { contact: SiteContact }) {
                   margin: '0',
                   fontSize: '13px',
                   fontWeight: '700',
-                  color: '#f5f5f6',
+                  color: 'var(--s-text)',
                 }}
               >
                 Developers
@@ -207,7 +213,7 @@ export function SiteFooter({ contact }: { contact: SiteContact }) {
                 href="/docs"
                 data-hover="link"
                 style={{
-                  color: '#c4c4cc',
+                  color: 'var(--s-muted)',
                   textDecoration: 'none',
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -220,7 +226,7 @@ export function SiteFooter({ contact }: { contact: SiteContact }) {
                 href="/docs"
                 data-hover="link"
                 style={{
-                  color: '#c4c4cc',
+                  color: 'var(--s-muted)',
                   textDecoration: 'none',
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -233,7 +239,7 @@ export function SiteFooter({ contact }: { contact: SiteContact }) {
                 href="/docs"
                 data-hover="link"
                 style={{
-                  color: '#c4c4cc',
+                  color: 'var(--s-muted)',
                   textDecoration: 'none',
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -246,7 +252,7 @@ export function SiteFooter({ contact }: { contact: SiteContact }) {
                 href="/docs"
                 data-hover="link"
                 style={{
-                  color: '#c4c4cc',
+                  color: 'var(--s-muted)',
                   textDecoration: 'none',
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -269,7 +275,7 @@ export function SiteFooter({ contact }: { contact: SiteContact }) {
                   margin: '0',
                   fontSize: '13px',
                   fontWeight: '700',
-                  color: '#f5f5f6',
+                  color: 'var(--s-text)',
                 }}
               >
                 Account
@@ -278,7 +284,7 @@ export function SiteFooter({ contact }: { contact: SiteContact }) {
                 href="/login"
                 data-hover="link"
                 style={{
-                  color: '#c4c4cc',
+                  color: 'var(--s-muted)',
                   textDecoration: 'none',
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -291,7 +297,7 @@ export function SiteFooter({ contact }: { contact: SiteContact }) {
                 href="/register"
                 data-hover="link"
                 style={{
-                  color: '#c4c4cc',
+                  color: 'var(--s-muted)',
                   textDecoration: 'none',
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -317,7 +323,7 @@ export function SiteFooter({ contact }: { contact: SiteContact }) {
                   margin: '0',
                   fontSize: '13px',
                   fontWeight: '700',
-                  color: '#f5f5f6',
+                  color: 'var(--s-text)',
                 }}
               >
                 Legal
@@ -338,9 +344,9 @@ export function SiteFooter({ contact }: { contact: SiteContact }) {
           style={{
             margin: '48px 0 0',
             paddingTop: '24px',
-            borderTop: '1px solid rgba(255, 255, 255, 0.07)',
+            borderTop: '1px solid rgba(var(--s-ink), 0.07)',
             fontSize: '13px',
-            color: '#a1a1aa',
+            color: 'var(--s-subtle)',
           }}
         >
           © {new Date().getFullYear()} NCOM · Made by {contact.businessName} in
