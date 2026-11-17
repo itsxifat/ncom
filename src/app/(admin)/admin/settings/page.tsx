@@ -9,11 +9,14 @@ import { PageShell } from '@/components/app/page-shell'
 import { SettingsSection } from '@/components/app/settings-section'
 import { PlatformFlags, type FlagRow } from './PlatformFlags'
 import { SettingsClient } from './SettingsClient'
+import { SiteContactForm } from './SiteContactForm'
+import { getSiteContact } from '@/server/services/siteContactService'
 
 export default async function AdminSettingsPage() {
-  const [settings, flags] = await Promise.all([
+  const [settings, flags, contact] = await Promise.all([
     listPlatformSettings(),
     getPlatformFlags(),
+    getSiteContact(),
   ])
 
   const flagRows: FlagRow[] = PLATFORM_FLAG_KEYS.map((key) => ({
@@ -36,6 +39,13 @@ export default async function AdminSettingsPage() {
       />
 
       <PlatformFlags flags={flagRows} />
+
+      <SettingsSection
+        title="Site contact"
+        description="How people reach NCOM. Shown in the public site's footer, on the Contact page, on the Enterprise package and in the legal pages. Leave a field empty to keep it off the site."
+      >
+        <SiteContactForm values={contact} />
+      </SettingsSection>
 
       <SettingsSection
         title="Raw settings"

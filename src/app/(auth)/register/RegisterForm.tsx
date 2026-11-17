@@ -45,7 +45,9 @@ export function RegisterForm({
         <CardTitle className="font-display text-2xl font-semibold">
           Create your account
         </CardTitle>
-        <CardDescription>Open your online store on NCOM.</CardDescription>
+        <CardDescription>
+          Start your 7-day free trial — no payment needed.
+        </CardDescription>
       </CardHeader>
       <CardContent>
         {googleEnabled && (

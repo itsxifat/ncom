@@ -47,7 +47,7 @@ export function LoginForm({
           Sign in
         </CardTitle>
         <CardDescription>
-          Welcome back. Sign in to keep working on your landing pages.
+          Welcome back. Sign in to your pages, stores and orders.
         </CardDescription>
       </CardHeader>
       <CardContent>

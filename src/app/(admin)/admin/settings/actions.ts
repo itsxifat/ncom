@@ -13,6 +13,10 @@ import {
   setPlatformFlag,
   type PlatformFlagKey,
 } from '@/server/services/platformFlagService'
+import {
+  saveSiteContact,
+  siteContactSchema,
+} from '@/server/services/siteContactService'
 
 export type SettingFormState = { error?: string } | undefined
 
@@ -71,4 +75,43 @@ export async function setPlatformFlagAction(
   // revalidated rather than just this one route.
   revalidatePath('/', 'layout')
   return {}
+}
+
+export type SiteContactFormState =
+  { error?: string; saved?: boolean } | undefined
+
+/**
+ * Saves how people reach NCOM — shown in the public site's footer, on the
+ * Contact page, on the Enterprise package and in the legal pages. An empty
+ * field is left off the site.
+ */
+export async function saveSiteContactAction(
+  _prevState: SiteContactFormState,
+  formData: FormData
+): Promise<SiteContactFormState> {
+  const session = await requirePlatformAdmin()
+
+  const parsed = siteContactSchema.safeParse({
+    businessName: formData.get('businessName') ?? '',
+    supportEmail: formData.get('supportEmail') ?? '',
+    whatsapp: formData.get('whatsapp') ?? '',
+    phone: formData.get('phone') ?? '',
+    facebookUrl: formData.get('facebookUrl') ?? '',
+    address: formData.get('address') ?? '',
+    hours: formData.get('hours') ?? '',
+  })
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? 'Check the details.' }
+  }
+
+  await saveSiteContact(parsed.data)
+  await logAudit(
+    session.user.id,
+    'platform.site_contact.updated',
+    'PlatformSetting',
+    'site.contact'
+  )
+  // The footer is on every public page.
+  revalidatePath('/', 'layout')
+  return { saved: true }
 }

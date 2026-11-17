@@ -1,0 +1,943 @@
+/*
+ * The NCOM marketing site, from the homepage design (Claude Design canvas,
+ * Main.dc.html). Its sections are styled inline as designed; this file holds
+ * what inline styles cannot: the keyframes, the hover states (data-hover), the
+ * FAQ disclosure and the reduced-motion switch — all scoped to .ncom-site so
+ * nothing here reaches the dashboard.
+ */
+
+.ncom-site {
+  --accent: #d8f84e;
+  flex: 1 1 auto;
+  min-height: 100dvh;
+  font-family: var(--font-manrope), var(--font-bangla), system-ui, sans-serif;
+  color: #f5f5f6;
+  background: #09090b;
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: clip;
+}
+html:has(.ncom-site) {
+  scroll-behavior: smooth;
+  background: #09090b;
+}
+@media (prefers-reduced-motion: reduce) {
+  html:has(.ncom-site) {
+    scroll-behavior: auto;
+  }
+}
+.ncom-site a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+@keyframes ncom-word {
+  from {
+    opacity: 0;
+    transform: translateY(0.42em);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes ncom-underline {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+@keyframes ncom-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(22px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes ncom-reveal {
+  0% {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  35%,
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes ncom-rise {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes ncom-grow {
+  from {
+    transform: scaleY(0.06);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+@keyframes ncom-ring {
+  from {
+    stroke-dashoffset: 302;
+  }
+  to {
+    stroke-dashoffset: 63;
+  }
+}
+@keyframes ncom-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-12px);
+  }
+}
+@keyframes ncom-marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+@keyframes ncom-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes ncom-pulse-unused {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 50%, transparent);
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 18px color-mix(in srgb, var(--accent) 0%, transparent);
+  }
+}
+@keyframes ncom-border {
+  from {
+    background-position:
+      0 0,
+      160% 0;
+  }
+  to {
+    background-position:
+      0 0,
+      -160% 0;
+  }
+}
+@keyframes ncom-sheen {
+  0%,
+  55% {
+    transform: translateX(-130%) skewX(-18deg);
+  }
+  85%,
+  100% {
+    transform: translateX(230%) skewX(-18deg);
+  }
+}
+@keyframes ncom-pick {
+  0%,
+  28% {
+    transform: translateX(0);
+  }
+  34%,
+  62% {
+    transform: translateX(100%);
+  }
+  68%,
+  94% {
+    transform: translateX(200%);
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+@keyframes ncom-toast {
+  0%,
+  36% {
+    opacity: 0;
+    transform: translateY(10px) scale(0.95);
+  }
+  40%,
+  58% {
+    opacity: 1;
+    transform: none;
+  }
+  62%,
+  100% {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+@keyframes ncom-roll {
+  0%,
+  30% {
+    transform: translateY(0);
+  }
+  36%,
+  63% {
+    transform: translateY(-1.25em);
+  }
+  69%,
+  94% {
+    transform: translateY(-2.5em);
+  }
+  100% {
+    transform: translateY(0);
+  }
+}
+@keyframes ncom-parcel {
+  0%,
+  8% {
+    left: 0%;
+  }
+  22%,
+  33% {
+    left: 33.333%;
+  }
+  47%,
+  58% {
+    left: 66.666%;
+  }
+  72%,
+  92% {
+    left: 100%;
+  }
+  100% {
+    left: 0%;
+  }
+}
+@keyframes ncom-node2 {
+  0%,
+  21% {
+    background: #18181c;
+    color: #8a8a93;
+    border-color: rgba(255, 255, 255, 0.14);
+  }
+  23%,
+  96% {
+    background: var(--accent);
+    color: #0b0b0c;
+    border-color: var(--accent);
+  }
+  100% {
+    background: #18181c;
+    color: #8a8a93;
+    border-color: rgba(255, 255, 255, 0.14);
+  }
+}
+@keyframes ncom-node3 {
+  0%,
+  46% {
+    background: #18181c;
+    color: #8a8a93;
+    border-color: rgba(255, 255, 255, 0.14);
+  }
+  48%,
+  96% {
+    background: var(--accent);
+    color: #0b0b0c;
+    border-color: var(--accent);
+  }
+  100% {
+    background: #18181c;
+    color: #8a8a93;
+    border-color: rgba(255, 255, 255, 0.14);
+  }
+}
+@keyframes ncom-node4 {
+  0%,
+  71% {
+    background: #18181c;
+    color: #8a8a93;
+    border-color: rgba(255, 255, 255, 0.14);
+  }
+  73%,
+  96% {
+    background: var(--accent);
+    color: #0b0b0c;
+    border-color: var(--accent);
+  }
+  100% {
+    background: #18181c;
+    color: #8a8a93;
+    border-color: rgba(255, 255, 255, 0.14);
+  }
+}
+@keyframes ncom-fill2 {
+  0%,
+  8% {
+    transform: scaleX(0);
+  }
+  22%,
+  96% {
+    transform: scaleX(1);
+  }
+  100% {
+    transform: scaleX(0);
+  }
+}
+@keyframes ncom-fill3 {
+  0%,
+  33% {
+    transform: scaleX(0);
+  }
+  47%,
+  96% {
+    transform: scaleX(1);
+  }
+  100% {
+    transform: scaleX(0);
+  }
+}
+@keyframes ncom-fill4 {
+  0%,
+  58% {
+    transform: scaleX(0);
+  }
+  72%,
+  96% {
+    transform: scaleX(1);
+  }
+  100% {
+    transform: scaleX(0);
+  }
+}
+@keyframes ncom-type {
+  0%,
+  3% {
+    clip-path: inset(0 100% 0 0);
+    animation-timing-function: steps(26, end);
+  }
+  20%,
+  100% {
+    clip-path: inset(0 0 0 0);
+  }
+}
+@keyframes ncom-step1 {
+  0%,
+  22% {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  27%,
+  94% {
+    opacity: 1;
+    transform: none;
+  }
+  99%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes ncom-step2 {
+  0%,
+  29% {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  34%,
+  94% {
+    opacity: 1;
+    transform: none;
+  }
+  99%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes ncom-step3 {
+  0%,
+  36% {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  41%,
+  94% {
+    opacity: 1;
+    transform: none;
+  }
+  99%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes ncom-cursor {
+  0% {
+    left: 88%;
+    top: 78%;
+  }
+  16%,
+  30% {
+    left: 40%;
+    top: 44%;
+  }
+  20% {
+    transform: scale(0.82);
+  }
+  22% {
+    transform: scale(1);
+  }
+  40%,
+  52% {
+    left: 86%;
+    top: 30%;
+  }
+  62%,
+  88% {
+    left: 78%;
+    top: 12%;
+  }
+  100% {
+    left: 88%;
+    top: 78%;
+  }
+}
+@keyframes ncom-select {
+  0%,
+  19% {
+    opacity: 0;
+  }
+  21%,
+  90% {
+    opacity: 1;
+  }
+  96%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes ncom-val-a {
+  0%,
+  40% {
+    opacity: 1;
+  }
+  44%,
+  92% {
+    opacity: 0;
+  }
+  98%,
+  100% {
+    opacity: 1;
+  }
+}
+@keyframes ncom-val-b {
+  0%,
+  40% {
+    opacity: 0;
+  }
+  44%,
+  92% {
+    opacity: 1;
+  }
+  98%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes ncom-headline {
+  0%,
+  40% {
+    font-size: 24px;
+  }
+  46%,
+  92% {
+    font-size: 31px;
+  }
+  98%,
+  100% {
+    font-size: 24px;
+  }
+}
+@keyframes ncom-device {
+  0%,
+  60% {
+    transform: translateX(0);
+  }
+  66%,
+  92% {
+    transform: translateX(200%);
+  }
+  98%,
+  100% {
+    transform: translateX(0);
+  }
+}
+@keyframes ncom-device-w {
+  0%,
+  60% {
+    width: 100%;
+  }
+  66%,
+  92% {
+    width: 50%;
+  }
+  98%,
+  100% {
+    width: 100%;
+  }
+}
+@keyframes ncom-f-progress {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+@keyframes ncom-f-c1 {
+  0%,
+  23% {
+    background: var(--accent);
+    color: #0b0b0c;
+    border-color: var(--accent);
+  }
+  25%,
+  100% {
+    background: rgba(255, 255, 255, 0);
+    color: #a1a1aa;
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+}
+@keyframes ncom-f-c2 {
+  0%,
+  23% {
+    background: rgba(255, 255, 255, 0);
+    color: #a1a1aa;
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+  25%,
+  44% {
+    background: var(--accent);
+    color: #0b0b0c;
+    border-color: var(--accent);
+  }
+  46%,
+  100% {
+    background: rgba(255, 255, 255, 0);
+    color: #a1a1aa;
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+}
+@keyframes ncom-f-c3 {
+  0%,
+  44% {
+    background: rgba(255, 255, 255, 0);
+    color: #a1a1aa;
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+  46%,
+  66% {
+    background: var(--accent);
+    color: #0b0b0c;
+    border-color: var(--accent);
+  }
+  68%,
+  100% {
+    background: rgba(255, 255, 255, 0);
+    color: #a1a1aa;
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+}
+@keyframes ncom-f-c4 {
+  0%,
+  66% {
+    background: rgba(255, 255, 255, 0);
+    color: #a1a1aa;
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+  68%,
+  98% {
+    background: var(--accent);
+    color: #0b0b0c;
+    border-color: var(--accent);
+  }
+  100% {
+    background: rgba(255, 255, 255, 0);
+    color: #a1a1aa;
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+}
+@keyframes ncom-f-prompt {
+  0% {
+    opacity: 0;
+    transform: translateY(3cqw) scale(0.97);
+  }
+  3%,
+  22% {
+    opacity: 1;
+    transform: none;
+  }
+  26%,
+  100% {
+    opacity: 0;
+    transform: translateY(-4cqw) scale(0.95);
+  }
+}
+@keyframes ncom-f-type1 {
+  0%,
+  4% {
+    clip-path: inset(0 100% 0 0);
+    animation-timing-function: steps(22, end);
+  }
+  10%,
+  100% {
+    clip-path: inset(0 0 0 0);
+  }
+}
+@keyframes ncom-f-type2 {
+  0%,
+  10% {
+    clip-path: inset(0 100% 0 0);
+    animation-timing-function: steps(22, end);
+  }
+  16%,
+  100% {
+    clip-path: inset(0 0 0 0);
+  }
+}
+@keyframes ncom-f-press {
+  0%,
+  17% {
+    transform: none;
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent);
+  }
+  18.5% {
+    transform: scale(0.93);
+  }
+  20% {
+    transform: none;
+    box-shadow: 0 0 0 2cqw color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+  23%,
+  100% {
+    transform: none;
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent);
+  }
+}
+@keyframes ncom-f-phone {
+  0%,
+  20% {
+    opacity: 0;
+    transform: translateY(5cqw) scale(0.93);
+  }
+  25%,
+  95% {
+    opacity: 1;
+    transform: none;
+  }
+  99%,
+  100% {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+}
+@keyframes ncom-f-b1 {
+  0%,
+  24% {
+    opacity: 0;
+    transform: translateY(2.5cqw);
+  }
+  27%,
+  95% {
+    opacity: 1;
+    transform: none;
+  }
+  99%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes ncom-f-b2 {
+  0%,
+  28% {
+    opacity: 0;
+    transform: translateY(2.5cqw);
+  }
+  31%,
+  95% {
+    opacity: 1;
+    transform: none;
+  }
+  99%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes ncom-f-b3 {
+  0%,
+  32% {
+    opacity: 0;
+    transform: translateY(2.5cqw);
+  }
+  35%,
+  95% {
+    opacity: 1;
+    transform: none;
+  }
+  99%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes ncom-f-pub {
+  0%,
+  36% {
+    opacity: 0;
+    transform: translateY(1.5cqw) scale(0.94);
+  }
+  38%,
+  45% {
+    opacity: 1;
+    transform: none;
+  }
+  48%,
+  100% {
+    opacity: 0;
+    transform: translateY(-1.5cqw);
+  }
+}
+@keyframes ncom-f-tap {
+  0%,
+  43% {
+    transform: none;
+    filter: brightness(1);
+  }
+  44% {
+    transform: scale(0.95);
+    filter: brightness(1.25);
+  }
+  46%,
+  100% {
+    transform: none;
+    filter: brightness(1);
+  }
+}
+@keyframes ncom-f-order {
+  0%,
+  45% {
+    opacity: 0;
+    transform: translateX(5cqw) scale(0.96);
+  }
+  48%,
+  95% {
+    opacity: 1;
+    transform: none;
+  }
+  99%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes ncom-f-hist {
+  0%,
+  51% {
+    opacity: 0;
+    transform: translateX(5cqw) scale(0.96);
+  }
+  54%,
+  95% {
+    opacity: 1;
+    transform: none;
+  }
+  99%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes ncom-f-bar {
+  0%,
+  55% {
+    transform: scaleX(0);
+  }
+  63%,
+  100% {
+    transform: scaleX(1);
+  }
+}
+@keyframes ncom-f-checking {
+  0%,
+  53% {
+    opacity: 0;
+  }
+  55%,
+  62% {
+    opacity: 1;
+  }
+  64%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes ncom-f-result {
+  0%,
+  63% {
+    opacity: 0;
+  }
+  65%,
+  95% {
+    opacity: 1;
+  }
+  99%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes ncom-f-courier {
+  0%,
+  67% {
+    opacity: 0;
+    transform: translateX(5cqw) scale(0.96);
+  }
+  70%,
+  95% {
+    opacity: 1;
+    transform: none;
+  }
+  99%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes ncom-f-truck {
+  0%,
+  70% {
+    transform: translateX(0);
+  }
+  82%,
+  100% {
+    transform: translateX(30cqw);
+  }
+}
+@keyframes ncom-f-done {
+  0%,
+  83% {
+    opacity: 0;
+    transform: scale(0.9);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 60%, transparent);
+  }
+  86% {
+    opacity: 1;
+    transform: scale(1.04);
+  }
+  88% {
+    transform: none;
+  }
+  92% {
+    box-shadow: 0 0 0 3.5cqw color-mix(in srgb, var(--accent) 0%, transparent);
+  }
+  95% {
+    opacity: 1;
+    transform: none;
+  }
+  99%,
+  100% {
+    opacity: 0;
+  }
+}
+.ncom-site [data-hover='lift'] {
+  transition:
+    transform 0.45s cubic-bezier(0.2, 0.7, 0.2, 1),
+    box-shadow 0.45s,
+    border-color 0.45s;
+}
+.ncom-site [data-hover='lift']:hover {
+  border-color: rgba(255, 255, 255, 0.22) !important;
+}
+.ncom-site [data-hover='btn'] {
+  transition:
+    transform 0.25s cubic-bezier(0.2, 0.7, 0.2, 1),
+    box-shadow 0.25s,
+    background-color 0.25s,
+    border-color 0.25s;
+}
+.ncom-site [data-hover='btn']:hover {
+  transform: translateY(-1px) !important;
+  filter: brightness(0.93);
+}
+.ncom-site [data-hover]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.ncom-site [data-hover='ghost'] {
+  transition:
+    background-color 0.25s,
+    border-color 0.25s;
+}
+.ncom-site [data-hover='ghost']:hover {
+  background-color: rgba(255, 255, 255, 0.06) !important;
+  border-color: rgba(255, 255, 255, 0.24) !important;
+}
+.ncom-site [data-hover='link'] {
+  transition: color 0.2s;
+}
+.ncom-site [data-hover='link']:hover {
+  color: #f5f5f6 !important;
+}
+.ncom-site [data-marquee]:hover,
+.ncom-site [data-marquee]:active,
+.ncom-site [data-marquee]:focus-within {
+  animation-play-state: paused !important;
+}
+.ncom-site [data-faq] summary {
+  list-style: none;
+}
+.ncom-site [data-faq] summary::-webkit-details-marker {
+  display: none;
+}
+.ncom-site [data-faq] [data-plus] {
+  transition: transform 0.3s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.ncom-site [data-faq][open] [data-plus] {
+  transform: rotate(45deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .ncom-site *,
+  .ncom-site *::before,
+  .ncom-site *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* Legal pages: paragraphs and lists inside the plain-text sections. */
+.ncom-site .ncom-legal p {
+  margin: 0 0 14px;
+}
+.ncom-site .ncom-legal ul {
+  margin: 0 0 14px;
+  padding-left: 22px;
+}
+.ncom-site .ncom-legal li {
+  margin: 6px 0;
+}
+.ncom-site .ncom-legal a {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+.ncom-site .ncom-legal a:hover {
+  text-decoration: underline;
+}
+.ncom-site .ncom-legal strong {
+  color: #f5f5f6;
+}
