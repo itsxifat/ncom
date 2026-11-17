@@ -1038,25 +1038,141 @@ html.ncom-motion .ncom-site [style*='hx-in']:not(.is-in) {
   overflow: hidden;
   padding: clamp(56px, 7vw, 96px) 0 clamp(56px, 6vw, 88px);
 }
-.hx-grid {
+.hx-top {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 clamp(16px, 4vw, 40px);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+.hx-top .hx-inner {
+  padding: 0;
+}
+.hx-globe-wrap {
+  position: relative;
+  width: min(520px, 100%);
+  aspect-ratio: 1;
+  margin: 24px auto 0;
+}
+@media (min-width: 1000px) {
+  .hx-top {
+    grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.75fr);
+    gap: 24px;
+  }
+  .hx-top .hx-inner {
+    text-align: left;
+  }
+  .hx-top .hx-title {
+    margin-left: 0;
+    font-size: clamp(48px, 4.6vw, 68px);
+  }
+  .hx-top .hx-sub {
+    margin-left: 0;
+  }
+  .hx-top .hx-ctas,
+  .hx-top .hx-proof {
+    justify-content: flex-start;
+  }
+  .hx-top {
+    position: relative;
+  }
+  /* A large sphere rising behind the right of the hero — out of the layout,
+     cropped by the page edge, passing behind the product scene. */
+  .hx-globe-wrap {
+    position: absolute;
+    z-index: -1;
+    right: -18%;
+    top: 50%;
+    width: min(64%, 780px);
+    margin: 0;
+    translate: 0 -50%;
+  }
+}
+.hx-globe {
   position: absolute;
   inset: 0;
-  z-index: -1;
-  background-image:
-    linear-gradient(rgba(var(--s-ink), 0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(var(--s-ink), 0.05) 1px, transparent 1px);
-  background-size: 72px 72px;
-  background-position: center -1px;
-  -webkit-mask-image: radial-gradient(
-    ellipse 75% 62% at 50% 0%,
-    #000 35%,
-    transparent 80%
-  );
-  mask-image: radial-gradient(
-    ellipse 75% 62% at 50% 0%,
-    #000 35%,
-    transparent 80%
-  );
+  pointer-events: none;
+}
+.hx-globe canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.hx-gl-label {
+  display: none;
+}
+/* The newest order's label rides its city's marker, where CSS anchor
+ * positioning exists; elsewhere the arcs speak for themselves. */
+@supports (position-anchor: --a) {
+  .hx-gl-label {
+    display: inline-flex;
+    position: absolute;
+    bottom: anchor(top);
+    left: anchor(center);
+    translate: -50% -10px;
+    padding: 5px 11px;
+    border-radius: 999px;
+    font-size: 12.5px;
+    font-weight: 700;
+    white-space: nowrap;
+    color: var(--s-text-2);
+    background: var(--s-card);
+    border: 1px solid rgba(var(--s-ink), 0.14);
+    box-shadow: var(--s-shadow-md);
+    opacity: 0;
+    scale: 0.92;
+    transition:
+      opacity 0.35s,
+      scale 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .hx-gl-label[data-on] {
+    opacity: 1;
+    scale: 1;
+  }
+  .hx-gl-label b {
+    color: var(--accent-text);
+    margin-right: 2px;
+  }
+  .hx-gl-label[data-city='chattogram'] {
+    position-anchor: --cobe-chattogram;
+  }
+  .hx-gl-label[data-city='sylhet'] {
+    position-anchor: --cobe-sylhet;
+  }
+  .hx-gl-label[data-city='rajshahi'] {
+    position-anchor: --cobe-rajshahi;
+  }
+  .hx-gl-label[data-city='khulna'] {
+    position-anchor: --cobe-khulna;
+  }
+  .hx-gl-label[data-city='barishal'] {
+    position-anchor: --cobe-barishal;
+  }
+  .hx-gl-label[data-city='rangpur'] {
+    position-anchor: --cobe-rangpur;
+  }
+  .hx-gl-label[data-city='mymensingh'] {
+    position-anchor: --cobe-mymensingh;
+  }
+  .hx-gl-label[data-city='cumilla'] {
+    position-anchor: --cobe-cumilla;
+  }
+  .hx-gl-label[data-city='coxsbazar'] {
+    position-anchor: --cobe-coxsbazar;
+  }
+  .hx-gl-label[data-city='bogura'] {
+    position-anchor: --cobe-bogura;
+  }
+  .hx-gl-label[data-city='jashore'] {
+    position-anchor: --cobe-jashore;
+  }
+}
+@media (max-width: 760px) {
+  .hx-gl-label {
+    display: none !important;
+  }
 }
 .hx-inner {
   max-width: 1200px;
@@ -2574,4 +2690,19 @@ html:not(.dark) .hx-underline {
 html:not(.dark) .hx-underline path {
   stroke: var(--accent);
   stroke-width: 26;
+}
+
+/* Small phones: room for the logo, the theme switch, Sign in and the trial button. */
+@media (max-width: 430px) {
+  .ncom-site header .ts-toggle {
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+  }
+  .ncom-site header a[href='/login'] {
+    padding: 0 8px !important;
+  }
+  .ncom-site header a[href='/register'] {
+    padding: 0 12px !important;
+  }
 }
