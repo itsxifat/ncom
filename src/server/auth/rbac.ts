@@ -4,11 +4,53 @@ import { currentMachineActor } from '@/server/auth/actor'
 import { prisma } from '@/server/db/client'
 import type { OrgRole } from '@/generated/prisma/enums'
 import type { Session } from 'next-auth'
+import { isWorkspaceRestricted } from '@/server/services/entitlementService'
 
 export class AuthorizationError extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'AuthorizationError'
+  }
+}
+
+/**
+ * The workspace is locked for an unpaid bill (or has no package yet), so
+ * nothing but paying is allowed. An AuthorizationError, so every action that
+ * already shows "not allowed" messages shows this one too.
+ */
+export class WorkspaceRestrictedError extends AuthorizationError {
+  constructor() {
+    super(
+      'This workspace is restricted until its bill is paid. Open Plan & billing to pay — everything comes back as soon as the payment goes through.'
+    )
+    this.name = 'WorkspaceRestrictedError'
+  }
+}
+
+export interface OrgAccessOptions {
+  /**
+   * Let a restricted workspace through. Only for paying and the reads that
+   * lead to it — the plan picker, checkout, the payment page, the bill.
+   */
+  allowRestricted?: boolean
+}
+
+/**
+ * Refuses a locked workspace. Writes by people, and everything an API key
+ * does, are checked; a person merely reading is not, because the dashboard
+ * already shows a locked workspace nothing but Billing (DashboardShell) and the
+ * reads that page needs must keep working.
+ */
+async function assertUsable(
+  organizationId: string,
+  minRole: OrgRole,
+  isMachine: boolean,
+  options: OrgAccessOptions
+): Promise<void> {
+  if (options.allowRestricted) return
+  if (!isMachine && minRole === 'VIEWER') return
+  if (await isWorkspaceRestricted(organizationId)) {
+    throw new WorkspaceRestrictedError()
   }
 }
 
@@ -55,7 +97,8 @@ export async function requirePlatformAdmin(): Promise<Session> {
  */
 export async function requireOrgAccess(
   organizationId: string,
-  minRole: OrgRole = 'VIEWER'
+  minRole: OrgRole = 'VIEWER',
+  options: OrgAccessOptions = {}
 ): Promise<{ session: Session | null; role: OrgRole }> {
   const machine = currentMachineActor()
   if (machine) {
@@ -65,6 +108,7 @@ export async function requireOrgAccess(
     ) {
       throw new AuthorizationError('This API key cannot access that data')
     }
+    await assertUsable(organizationId, minRole, true, options)
     // Null rather than a fabricated session: a machine actor is not a person,
     // and inventing a user id here would silently attribute its writes to
     // whoever happened to create the key.
@@ -85,6 +129,7 @@ export async function requireOrgAccess(
   if (!membership || !hasMinRole(membership.role, minRole)) {
     throw new AuthorizationError('You do not have access to this organization')
   }
+  await assertUsable(organizationId, minRole, false, options)
 
   return { session, role: membership.role }
 }
@@ -101,9 +146,14 @@ export async function requireOrgAccess(
  */
 export async function requireHumanOrgAccess(
   organizationId: string,
-  minRole: OrgRole = 'VIEWER'
+  minRole: OrgRole = 'VIEWER',
+  options: OrgAccessOptions = {}
 ): Promise<{ session: Session; role: OrgRole }> {
-  const { session, role } = await requireOrgAccess(organizationId, minRole)
+  const { session, role } = await requireOrgAccess(
+    organizationId,
+    minRole,
+    options
+  )
 
   if (!session) {
     throw new AuthorizationError(

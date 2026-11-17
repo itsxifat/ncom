@@ -52,6 +52,13 @@ export const PLATFORM_FLAGS = {
     default: true,
     group: 'Billing',
   },
+  'billing.restrictUnpaid': {
+    label: 'Restrict workspaces with unpaid bills',
+    description:
+      'When a trial or billing period ends and its bill is still unpaid a day later, the workspace is locked to Billing and its sites show "temporarily unavailable" until it pays — then everything comes back on its own. Turn off to only warn.',
+    default: true,
+    group: 'Billing',
+  },
   'billing.couponsEnabled': {
     label: 'Accept coupon codes',
     description: 'Shows the coupon field at checkout and honours codes.',

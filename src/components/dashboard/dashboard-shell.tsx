@@ -12,6 +12,10 @@ import {
   SETTINGS_NAV_ITEM,
   SidebarNav,
 } from '@/components/dashboard/sidebar-nav'
+import {
+  BillingGate,
+  type BillingAccessView,
+} from '@/components/dashboard/billing-gate'
 
 interface DashboardShellProps {
   organizationId: string
@@ -23,6 +27,8 @@ interface DashboardShellProps {
   /** Orders still waiting on a person — screened, held or not yet sent. */
   ordersNeedingAction: number
   signOutAction: () => void | Promise<void>
+  /** Whether the workspace is paid up — see BillingGate. */
+  billing: { access: BillingAccessView; planName: string; isOwner: boolean }
   children: React.ReactNode
 }
 
@@ -49,6 +55,7 @@ export function DashboardShell({
   initials,
   ordersNeedingAction,
   signOutAction,
+  billing,
   children,
 }: DashboardShellProps) {
   return (
@@ -93,7 +100,13 @@ export function DashboardShell({
         </>
       }
     >
-      {children}
+      <BillingGate
+        access={billing.access}
+        planName={billing.planName}
+        isOwner={billing.isOwner}
+      >
+        {children}
+      </BillingGate>
     </AppFrame>
   )
 }

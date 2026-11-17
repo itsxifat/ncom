@@ -14,7 +14,8 @@
 export function AllowanceReachedPage({
   reason,
 }: {
-  reason: 'traffic' | 'visitors'
+  /** `paused`: the workspace behind the site has an unpaid NCOM bill. */
+  reason: 'traffic' | 'visitors' | 'paused'
 }) {
   return (
     <main
@@ -60,9 +61,15 @@ export function AllowanceReachedPage({
           This site is temporarily unavailable
         </h1>
         <p style={{ margin: '0 0 8px', fontSize: '15px', color: '#57534e' }}>
-          It has reached its monthly{' '}
-          {reason === 'visitors' ? 'visitor' : 'bandwidth'} allowance and will be
-          back at the start of next month.
+          {reason === 'paused' ? (
+            'Please check back a little later.'
+          ) : (
+            <>
+              It has reached its monthly{' '}
+              {reason === 'visitors' ? 'visitor' : 'bandwidth'} allowance and
+              will be back at the start of next month.
+            </>
+          )}
         </p>
         <p style={{ margin: 0, fontSize: '13px', color: '#78716c' }}>
           If this is your site, sign in to your NCOM dashboard to restore it now.

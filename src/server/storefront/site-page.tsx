@@ -22,6 +22,8 @@ import type { PageTheme } from '@/modules/sections/types'
 import { richTextToPlain } from '@/modules/sections/sanitizeHtml'
 import { siteLanguage } from '@/modules/sections/language'
 import { prepareVisit } from './visit'
+import { isWorkspaceRestricted } from '@/server/services/entitlementService'
+import { AllowanceReachedPage } from '@/components/public/allowance-reached'
 import { storeText, type StoreWords } from '@/modules/storefront/i18n'
 import {
   buildStorefront,
@@ -58,6 +60,14 @@ function hostOf(store: CachedStore): string {
 // ── Standard pages ───────────────────────────────────────────────────────
 
 export async function renderSitePage(handle: string, path: string[]) {
+  // A workspace paused for an unpaid bill shows the holding page at every
+  // address its sites answer — including the cart, checkout and account
+  // routes, which land here when `storeForRoute` declines them.
+  const site = await resolvePublicStore(handle)
+  if (site && (await isWorkspaceRestricted(site.organizationId))) {
+    return <AllowanceReachedPage reason="paused" />
+  }
+
   const result = await getPublishedPageForRender(handle, path)
   if (!result) notFound()
 
@@ -216,7 +226,10 @@ function offerSnapshot(
 export async function storeForRoute(handle: string) {
   const store = await resolvePublicStore(handle)
   if (!store) notFound()
-  return store.kind === 'STORE' ? store : null
+  if (store.kind !== 'STORE') return null
+  // Paused: the route hands over to renderSitePage, which shows why.
+  if (await isWorkspaceRestricted(store.organizationId)) return null
+  return store
 }
 
 function decode(value: string): string {

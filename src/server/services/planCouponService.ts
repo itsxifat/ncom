@@ -316,7 +316,9 @@ function computeDiscount(
   }
 }
 
-function periodsFor(coupon: CouponWithPlans): number | null {
+function periodsFor(
+  coupon: Pick<CouponWithPlans, 'duration' | 'durationMonths'>
+): number | null {
   switch (coupon.duration) {
     case 'ONCE':
       return 1
@@ -325,6 +327,21 @@ function periodsFor(coupon: CouponWithPlans): number | null {
     case 'FOREVER':
       return null
   }
+}
+
+/**
+ * How many billing periods a code discounts, counting the first: what a
+ * subscription keeps in `couponPeriodsRemaining`. Null for a code that never
+ * runs out (or one that no longer exists, which then discounts nothing more
+ * because the subscription's coupon link is gone with it).
+ */
+export async function couponPeriods(couponId: string): Promise<number | null> {
+  const coupon = await prisma.planCoupon.findUnique({
+    where: { id: couponId },
+    select: { duration: true, durationMonths: true },
+  })
+  if (!coupon) return null
+  return periodsFor(coupon)
 }
 
 /** One-line description used on the checkout summary and in the admin list. */

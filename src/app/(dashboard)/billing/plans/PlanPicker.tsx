@@ -7,9 +7,14 @@ import {
   Info,
   Loader2,
   Lock,
+  Sparkles,
   TicketPercent,
 } from 'lucide-react'
-import { checkoutAction, quoteCheckoutAction } from '../actions'
+import {
+  checkoutAction,
+  quoteCheckoutAction,
+  startTrialAction,
+} from '../actions'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -75,6 +80,7 @@ export function PlanPicker({
   couponsEnabled,
   showPaymentStep,
   payOnline,
+  trial,
 }: {
   plans: PickerPlan[]
   addons: PickerAddon[]
@@ -84,6 +90,12 @@ export function PlanPicker({
   showPaymentStep: boolean
   /** Enfinito Pay is set up: a paid plan is paid for on the spot. */
   payOnline: boolean
+  /** Whether this workspace can start (or move) a free trial — see trialEligibility. */
+  trial: {
+    eligible: boolean
+    reason: string | null
+    runningUntil: string | null
+  }
 }) {
   const [selectedPlanId, setSelectedPlanId] = useState(currentPlanId)
   const [interval, setInterval] = useState<'MONTHLY' | 'ANNUAL'>(
@@ -98,6 +110,10 @@ export function PlanPicker({
   )
   const [checkoutState, checkoutFormAction, checkingOut] = useActionState(
     checkoutAction,
+    undefined
+  )
+  const [trialState, trialFormAction, startingTrial] = useActionState(
+    startTrialAction,
     undefined
   )
 
@@ -165,7 +181,9 @@ export function PlanPicker({
           ))}
         </div>
         {interval === 'ANNUAL' && (
-          <span className="text-xs text-emerald-600">Two months free</span>
+          <span className="text-xs text-emerald-600">
+            Save with yearly billing
+          </span>
         )}
       </div>
 
@@ -231,8 +249,15 @@ export function PlanPicker({
                     </>
                   )}
                   {plan.trialDays > 0 && (
-                    <p className="text-muted-foreground text-xs">
-                      {plan.trialDays}-day trial
+                    <p
+                      className={cn(
+                        'text-xs',
+                        trial.eligible
+                          ? 'font-medium text-emerald-600'
+                          : 'text-muted-foreground'
+                      )}
+                    >
+                      {plan.trialDays}-day free trial
                     </p>
                   )}
                 </div>
@@ -418,7 +443,55 @@ export function PlanPicker({
 
           <Card className="h-fit">
             <CardContent className="flex flex-col gap-4">
-              <p className="text-sm font-medium">Summary</p>
+              {selected && selected.trialDays > 0 && trial.eligible && (
+                <form
+                  action={trialFormAction}
+                  className="border-primary/30 bg-primary/5 flex flex-col gap-3 rounded-xl border p-4"
+                >
+                  <input type="hidden" name="planId" value={selected.id} />
+                  <input type="hidden" name="interval" value={interval} />
+                  <p className="flex items-center gap-1.5 text-sm font-medium">
+                    <Sparkles className="text-primary size-4" />
+                    {trial.runningUntil
+                      ? `Switch your trial to ${selected.name}`
+                      : `Try ${selected.name} free for ${selected.trialDays} days`}
+                  </p>
+                  <p className="text-muted-foreground text-xs leading-relaxed">
+                    {trial.runningUntil
+                      ? `Your trial keeps its end date (${new Date(trial.runningUntil).toLocaleDateString()}). No payment needed until then.`
+                      : `No payment needed now. When the trial ends, pay ${formatMoney(priceFor(selected) ?? 0, selected.currencyCode)}/${interval === 'ANNUAL' ? 'year' : 'month'} to keep going — if you don't, the workspace pauses until you do.`}
+                  </p>
+                  <Button
+                    type="submit"
+                    disabled={startingTrial}
+                    className="w-full"
+                  >
+                    {startingTrial ? (
+                      <Loader2 className="animate-spin" />
+                    ) : (
+                      <Sparkles />
+                    )}
+                    {trial.runningUntil ? 'Switch trial' : 'Start free trial'}
+                  </Button>
+                  {trialState?.error && (
+                    <FieldError>{trialState.error}</FieldError>
+                  )}
+                </form>
+              )}
+              {selected &&
+                selected.trialDays > 0 &&
+                !trial.eligible &&
+                trial.reason && (
+                  <p className="text-muted-foreground text-xs">
+                    {trial.reason}
+                  </p>
+                )}
+
+              <p className="text-sm font-medium">
+                {selected && selected.trialDays > 0 && trial.eligible
+                  ? 'Or pay now'
+                  : 'Summary'}
+              </p>
 
               {quoteMatchesSelection && quote ? (
                 <>

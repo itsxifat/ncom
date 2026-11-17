@@ -325,6 +325,177 @@ export function planOrderPendingEmail(input: {
   }
 }
 
+/**
+ * The bill for the next period is ready — sent a few days before a trial or a
+ * paid period ends, so paying on time never interrupts anything.
+ */
+export function billReadyEmail(input: {
+  workspaceName: string
+  planName: string
+  totalLabel: string
+  dueLabel: string
+  trial: boolean
+  payUrl: string
+}): RenderedEmail {
+  const ending = input.trial ? 'free trial ends' : 'plan renews'
+  return {
+    subject: input.trial
+      ? `Your ${input.planName} trial ends ${input.dueLabel}`
+      : `Your ${input.planName} bill is ready — due ${input.dueLabel}`,
+    html: renderShell({
+      preheader: `Pay ${input.totalLabel} by ${input.dueLabel} to keep ${input.workspaceName} running without a break.`,
+      eyebrow: input.trial ? 'Trial ending' : 'Bill ready',
+      heading: input.trial
+        ? 'Keep your sites live after the trial'
+        : 'Your next bill is ready',
+      body: [
+        lead(
+          `The ${ending} for <strong class="n-strong">${escapeHtml(input.workspaceName)}</strong> on <strong class="n-strong">${escapeHtml(input.dueLabel)}</strong>.`
+        ),
+        dataTable([
+          { label: 'Package', value: input.planName },
+          { label: 'Amount', value: input.totalLabel },
+          { label: 'Due', value: input.dueLabel },
+        ]),
+        button('Pay now', input.payUrl),
+        paragraph(
+          'Pay with bKash, Nagad, Rocket or a card. If it is still unpaid a day after it is due, the workspace is paused and its sites go offline until it is paid — then everything comes back on its own.'
+        ),
+        fallbackLink(input.payUrl),
+      ].join(''),
+      footerNote:
+        'You received this because you are the owner of this workspace.',
+    }),
+    text: [
+      `The ${ending} for ${input.workspaceName} on ${input.dueLabel}.`,
+      '',
+      `Package: ${input.planName}`,
+      `Amount: ${input.totalLabel}`,
+      `Due: ${input.dueLabel}`,
+      '',
+      `Pay now: ${input.payUrl}`,
+      '',
+      'If it is still unpaid a day after it is due, the workspace is paused and its sites go offline until it is paid — then everything comes back on its own.',
+    ].join('\n'),
+  }
+}
+
+/** The bill fell due unpaid: the workspace is in its grace day. */
+export function paymentOverdueEmail(input: {
+  workspaceName: string
+  planName: string
+  totalLabel: string
+  restrictsLabel: string
+  payUrl: string
+}): RenderedEmail {
+  return {
+    subject: `Payment due — ${input.workspaceName} goes offline ${input.restrictsLabel}`,
+    html: renderShell({
+      preheader: `Pay ${input.totalLabel} before ${input.restrictsLabel} to keep your sites live.`,
+      eyebrow: 'Payment due',
+      heading: 'Your bill is due',
+      body: [
+        lead(
+          `The bill for <strong class="n-strong">${escapeHtml(input.workspaceName)}</strong> is due and has not been paid yet.`
+        ),
+        dataTable([
+          { label: 'Package', value: input.planName },
+          { label: 'Amount', value: input.totalLabel },
+          { label: 'Pay before', value: input.restrictsLabel },
+        ]),
+        callout(
+          `If it is not paid by <strong>${escapeHtml(input.restrictsLabel)}</strong>, the dashboard is limited to Billing and your sites show “temporarily unavailable” until it is.`,
+          'danger'
+        ),
+        button('Pay now', input.payUrl),
+        fallbackLink(input.payUrl),
+      ].join(''),
+      footerNote:
+        'You received this because you are the owner of this workspace.',
+    }),
+    text: [
+      `The bill for ${input.workspaceName} is due and has not been paid yet.`,
+      '',
+      `Package: ${input.planName}`,
+      `Amount: ${input.totalLabel}`,
+      '',
+      `If it is not paid by ${input.restrictsLabel}, the dashboard is limited to Billing and your sites show "temporarily unavailable" until it is.`,
+      '',
+      `Pay now: ${input.payUrl}`,
+    ].join('\n'),
+  }
+}
+
+/** The grace day passed unpaid: the workspace is locked and its sites are offline. */
+export function workspaceRestrictedEmail(input: {
+  workspaceName: string
+  totalLabel: string
+  payUrl: string
+}): RenderedEmail {
+  return {
+    subject: `${input.workspaceName} is paused — pay to restore your sites`,
+    html: renderShell({
+      preheader: `Pay ${input.totalLabel} and everything comes back at once.`,
+      eyebrow: 'Workspace paused',
+      heading: 'Your sites are offline',
+      body: [
+        lead(
+          `<strong class="n-strong">${escapeHtml(input.workspaceName)}</strong> has an unpaid bill of <strong class="n-strong">${escapeHtml(input.totalLabel)}</strong>, so it is paused: its sites show “temporarily unavailable” and the dashboard opens on Billing only.`
+        ),
+        callout(
+          'Nothing has been deleted. Pay the bill and your sites, pages, products and orders are back the moment the payment goes through — there is nothing to republish.'
+        ),
+        button('Pay and restore', input.payUrl),
+        fallbackLink(input.payUrl),
+      ].join(''),
+      footerNote:
+        'You received this because you are the owner of this workspace.',
+    }),
+    text: [
+      `${input.workspaceName} has an unpaid bill of ${input.totalLabel}, so it is paused: its sites show "temporarily unavailable" and the dashboard opens on Billing only.`,
+      '',
+      'Nothing has been deleted. Pay the bill and everything is back the moment the payment goes through — there is nothing to republish.',
+      '',
+      `Pay and restore: ${input.payUrl}`,
+    ].join('\n'),
+  }
+}
+
+/** A cancelled subscription reached the end of its period. */
+export function planEndedEmail(input: {
+  workspaceName: string
+  planName: string
+  choosePlanUrl: string
+}): RenderedEmail {
+  return {
+    subject: `${input.planName} has ended on ${input.workspaceName}`,
+    html: renderShell({
+      preheader: 'Choose a package to bring your sites back.',
+      eyebrow: 'Plan ended',
+      heading: `${input.planName} has ended`,
+      body: [
+        lead(
+          `The ${escapeHtml(input.planName)} plan on <strong class="n-strong">${escapeHtml(input.workspaceName)}</strong> was cancelled and its last paid period is over, so its sites are offline.`
+        ),
+        paragraph(
+          'Nothing has been deleted. Choose a package any time and everything comes back.'
+        ),
+        button('Choose a package', input.choosePlanUrl),
+        fallbackLink(input.choosePlanUrl),
+      ].join(''),
+      footerNote:
+        'You received this because you are the owner of this workspace.',
+    }),
+    text: [
+      `The ${input.planName} plan on ${input.workspaceName} was cancelled and its last paid period is over, so its sites are offline.`,
+      '',
+      'Nothing has been deleted. Choose a package any time and everything comes back.',
+      '',
+      `Choose a package: ${input.choosePlanUrl}`,
+    ].join('\n'),
+  }
+}
+
 // ── Platform ──────────────────────────────────────────────────────────────
 
 /**

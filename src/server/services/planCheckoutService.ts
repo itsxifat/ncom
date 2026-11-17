@@ -2,12 +2,15 @@ import 'server-only'
 import { prisma } from '@/server/db/client'
 import type { Prisma } from '@/generated/prisma/client'
 import type {
+  PlanOrderKind,
   PlanOrderStatus,
   SubscriptionInterval,
 } from '@/generated/prisma/enums'
+import { periodEndOf } from '@/lib/billing-access'
 import { requireOrgAccess, requireHumanOrgAccess } from '@/server/auth/rbac'
 import { logAudit } from '@/server/services/auditService'
 import {
+  couponPeriods,
   evaluateCoupon,
   redeemCoupon,
   type CouponEvaluation,
@@ -54,6 +57,12 @@ import {
  * page — only by `activateOrder`, which a confirmed payment and the admin's
  * button both call.
  */
+
+/**
+ * Choosing a package and paying for it are what a locked workspace is still
+ * allowed to do — they are the way back.
+ */
+const PAYING = { allowRestricted: true } as const
 
 export class CheckoutError extends Error {
   constructor(message: string) {
@@ -194,7 +203,11 @@ function addonPriceFor(
  * in the coupon field.
  */
 export async function quoteCheckout(input: QuoteInput): Promise<CheckoutQuote> {
-  const { session } = await requireHumanOrgAccess(input.organizationId, 'OWNER')
+  const { session } = await requireHumanOrgAccess(
+    input.organizationId,
+    'OWNER',
+    PAYING
+  )
 
   const plan = await prisma.plan.findFirst({
     where: { id: input.planId, isActive: true },
@@ -342,7 +355,11 @@ export interface CheckoutResult {
 export async function startCheckout(
   input: QuoteInput
 ): Promise<CheckoutResult> {
-  const { session } = await requireHumanOrgAccess(input.organizationId, 'OWNER')
+  const { session } = await requireHumanOrgAccess(
+    input.organizationId,
+    'OWNER',
+    PAYING
+  )
 
   const quote = await quoteCheckout(input)
 
@@ -467,6 +484,41 @@ function periodEnd(from: Date, interval: SubscriptionInterval): Date {
 }
 
 /**
+ * Whether paying this order carries on the period the workspace is in, rather
+ * than starting something new: the renewal bill itself, or buying the very
+ * plan and billing period it is trialling.
+ */
+function continuesCurrentPeriod(
+  order: {
+    kind: PlanOrderKind
+    planId: string
+    interval: SubscriptionInterval
+  },
+  current: {
+    status: string
+    planId: string
+    interval: SubscriptionInterval
+  } | null
+): boolean {
+  if (order.kind === 'RENEWAL') return true
+  return (
+    current !== null &&
+    current.status === 'TRIALING' &&
+    current.planId === order.planId &&
+    current.interval === order.interval
+  )
+}
+
+/**
+ * Coupon periods left after a renewal uses one. `couponPeriodsRemaining`
+ * counts the period being paid for, so a once-only code (1) is spent by its
+ * first period and a renewal leaves it at 0; null is a code that never runs out.
+ */
+function usePeriod(remaining: number | null): number | null {
+  return remaining === null ? null : Math.max(0, remaining - 1)
+}
+
+/**
  * Moves the subscription onto the ordered plan. The only path that grants
  * entitlements — see the file header.
  */
@@ -481,19 +533,53 @@ async function applyActivation(
       currencyCode: string
       subtotalCents: number
       discountCents: number
+      lineItems: Prisma.JsonValue
+      kind: PlanOrderKind
+      couponId: string | null
     }
     addons: { addonId: string; quantity: number }[]
     couponPeriodsRemaining: number | null
     trialDays: number
+    /**
+     * Where the paid period begins. Now for a new plan; the end of the current
+     * period when an on-time payment continues it, so paying early never costs
+     * the days already paid for (or the rest of a trial).
+     */
+    periodStart?: Date
   }
 ): Promise<void> {
   const now = new Date()
   const { order } = input
+  const periodStart = input.periodStart ?? now
 
+  // A coupon's trial days, on a checkout that cost nothing. The trial is the
+  // period: its end is when the first bill falls due.
   const trialEndsAt =
     input.trialDays > 0
       ? new Date(now.getTime() + input.trialDays * 24 * 60 * 60 * 1000)
       : null
+  const currentPeriodEnd = trialEndsAt ?? periodEnd(periodStart, order.interval)
+
+  // The plan line, not the order's subtotal: add-ons are priced on their own
+  // rows, and a renewal bill re-reads this as the plan's price.
+  const lines = Array.isArray(order.lineItems)
+    ? (order.lineItems as unknown as QuoteLine[])
+    : []
+  const planLine = lines.find((line) => line.kind === 'PLAN')
+  const unitPriceCents = planLine?.unitPriceCents ?? order.subtotalCents
+
+  // A new purchase sets the code its renewals are discounted by (or clears an
+  // old one); a renewal keeps the code and counts down its periods.
+  const couponFields =
+    order.kind === 'RENEWAL'
+      ? { couponPeriodsRemaining: input.couponPeriodsRemaining }
+      : {
+          couponId: order.couponId,
+          couponAppliedAt: order.couponId ? now : null,
+          couponPeriodsRemaining: order.couponId
+            ? input.couponPeriodsRemaining
+            : null,
+        }
 
   const subscription = await tx.subscription.upsert({
     where: { organizationId: input.organizationId },
@@ -503,31 +589,49 @@ async function applyActivation(
       interval: order.interval,
       status: trialEndsAt ? 'TRIALING' : 'ACTIVE',
       currencyCode: order.currencyCode,
-      unitPriceCents: order.subtotalCents,
+      unitPriceCents,
       discountCents: order.discountCents,
-      currentPeriodStart: now,
-      currentPeriodEnd: periodEnd(now, order.interval),
+      currentPeriodStart: periodStart,
+      currentPeriodEnd,
       trialEndsAt,
-      couponPeriodsRemaining: input.couponPeriodsRemaining,
+      trialUsedAt: trialEndsAt ? now : null,
+      ...couponFields,
     },
     update: {
       planId: order.planId,
       interval: order.interval,
       status: trialEndsAt ? 'TRIALING' : 'ACTIVE',
       currencyCode: order.currencyCode,
-      unitPriceCents: order.subtotalCents,
+      unitPriceCents,
       discountCents: order.discountCents,
-      currentPeriodStart: now,
-      currentPeriodEnd: periodEnd(now, order.interval),
+      currentPeriodStart: periodStart,
+      currentPeriodEnd,
       trialEndsAt,
-      couponPeriodsRemaining: input.couponPeriodsRemaining,
+      ...couponFields,
       // A plan change re-opens a cancelled subscription: the tenant just paid
       // (or redeemed) for a new period, so a pending cancellation is stale.
       cancelAtPeriodEnd: false,
       canceledAt: null,
       endedAt: null,
+      // Paid: whatever was locked opens again on the next request.
+      restrictedAt: null,
     },
   })
+  if (trialEndsAt) {
+    await tx.subscription.updateMany({
+      where: { id: subscription.id, trialUsedAt: null },
+      data: { trialUsedAt: now },
+    })
+  }
+
+  // Any other bill still open on this workspace is for a period it no longer
+  // needs — the plan changed, or this payment covered it.
+  await cancelOpenBills(
+    tx,
+    subscription.id,
+    'Replaced by a later payment.',
+    order.id
+  )
 
   // Add-on lines are replaced wholesale rather than merged. The checkout screen
   // submits the complete set the tenant wants, so a merge would make it
@@ -619,6 +723,12 @@ export async function activateOrder(
     .filter((line) => line.kind === 'ADDON')
     .map((line) => ({ addonId: line.refId, quantity: line.quantity }))
 
+  // The workspace's subscription as it stands, whichever order it came from —
+  // an order placed before the workspace had one carries no link to it.
+  const current = await prisma.subscription.findUnique({
+    where: { organizationId: order.organizationId },
+  })
+
   const activated = await prisma.$transaction(async (tx) => {
     // Claimed first, from a state that can still be activated: a payment's
     // webhook and the owner's return from the payment page can arrive at
@@ -651,16 +761,28 @@ export async function activateOrder(
       )
     }
 
+    const continues = continuesCurrentPeriod(order, current)
+    const currentEnd = current ? periodEndOf(current) : null
+    const now = new Date()
+
     await applyActivation(tx, {
       organizationId: order.organizationId,
       order,
       addons,
       // A coupon's remaining periods were computed at checkout; re-deriving
       // them here would need the coupon's rules again, so the subscription
-      // keeps whatever the order recorded.
+      // keeps whatever the order recorded — less the one a renewal uses up.
       couponPeriodsRemaining:
-        order.subscription?.couponPeriodsRemaining ?? null,
+        order.kind === 'RENEWAL'
+          ? usePeriod(current?.couponPeriodsRemaining ?? null)
+          : order.couponId
+            ? await couponPeriods(order.couponId)
+            : null,
       trialDays: 0,
+      // Paid on time, the new period follows the one being paid for; paid
+      // late, it starts now — the days in between were not paid for.
+      periodStart:
+        continues && currentEnd && currentEnd > now ? currentEnd : now,
     })
     return true
   })
@@ -707,6 +829,445 @@ export async function cancelOrder(
   )
 }
 
+/**
+ * Cancels the bills still open on a subscription — they were for a plan or a
+ * period it no longer needs.
+ */
+async function cancelOpenBills(
+  tx: Prisma.TransactionClient,
+  subscriptionId: string,
+  reason: string,
+  exceptOrderId?: string
+): Promise<void> {
+  const open = await tx.planOrder.findMany({
+    where: {
+      subscriptionId,
+      kind: 'RENEWAL',
+      status: 'AWAITING_PAYMENT',
+      ...(exceptOrderId ? { id: { not: exceptOrderId } } : {}),
+    },
+    select: { id: true },
+  })
+  if (open.length === 0) return
+  await tx.planOrder.updateMany({
+    where: { id: { in: open.map((bill) => bill.id) } },
+    data: { status: 'CANCELED', canceledAt: new Date(), failureReason: reason },
+  })
+  for (const bill of open) {
+    await voidOrderInvoice(tx, { kind: 'plan', id: bill.id })
+  }
+}
+
+// ── Trials ────────────────────────────────────────────────────────────────
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
+export interface TrialEligibility {
+  /** A trial can be started — or, while one runs, moved to another package. */
+  eligible: boolean
+  /** Why not, in words for the owner. */
+  reason: string | null
+  /** The trial running now: switching package keeps its end date. */
+  runningUntil: Date | null
+}
+
+/**
+ * Whether this workspace may start a no-payment trial.
+ *
+ * One per workspace, ever — and none for a workspace that has already paid,
+ * which has nothing left to try. A person who has started a trial on another
+ * workspace does not get a fresh one by making a new workspace either. A
+ * trial that is running can be moved to another package that offers one; its
+ * end date stays where it was.
+ */
+export async function trialEligibility(
+  organizationId: string,
+  userId: string,
+  now: Date = new Date()
+): Promise<TrialEligibility> {
+  const subscription = await prisma.subscription.findUnique({
+    where: { organizationId },
+    select: { status: true, trialEndsAt: true, trialUsedAt: true },
+  })
+  if (
+    subscription?.status === 'TRIALING' &&
+    subscription.trialEndsAt &&
+    subscription.trialEndsAt > now
+  ) {
+    return {
+      eligible: true,
+      reason: null,
+      runningUntil: subscription.trialEndsAt,
+    }
+  }
+  if (subscription?.trialUsedAt) {
+    return {
+      eligible: false,
+      reason: 'This workspace has already used its free trial.',
+      runningUntil: null,
+    }
+  }
+
+  const [paid, elsewhere] = await Promise.all([
+    prisma.planOrder.count({
+      where: {
+        organizationId,
+        status: { in: ['PAID', 'ACTIVATED'] },
+        totalCents: { gt: 0 },
+      },
+    }),
+    prisma.planOrder.count({
+      where: {
+        kind: 'TRIAL',
+        createdById: userId,
+        organizationId: { not: organizationId },
+      },
+    }),
+  ])
+  if (paid > 0) {
+    return {
+      eligible: false,
+      reason:
+        'Free trials are for workspaces that have not paid for a package yet.',
+      runningUntil: null,
+    }
+  }
+  if (elsewhere > 0) {
+    return {
+      eligible: false,
+      reason: 'You have already used a free trial on another workspace.',
+      runningUntil: null,
+    }
+  }
+  return { eligible: true, reason: null, runningUntil: null }
+}
+
+/**
+ * Starts a package on its free trial — no payment, nothing to fill in.
+ *
+ * The package's `trialDays` (set per package in /admin/plans) is the trial;
+ * a package with none cannot be trialled. The trial is the subscription's
+ * period, so when it ends the first bill falls due, exactly like a renewal:
+ * see billingCycleService. Add-ons are not part of a trial.
+ */
+export async function startTrial(input: {
+  organizationId: string
+  planId: string
+  interval: SubscriptionInterval
+}): Promise<{ trialEndsAt: Date; planName: string }> {
+  const { session } = await requireHumanOrgAccess(
+    input.organizationId,
+    'OWNER',
+    PAYING
+  )
+
+  const plan = await prisma.plan.findFirst({
+    where: { id: input.planId, isActive: true },
+  })
+  if (!plan) throw new CheckoutError('That package is not available.')
+  if (plan.isContactSalesOnly) {
+    throw new CheckoutError(
+      'This package is arranged with our sales team — get in touch and we will set it up for you.'
+    )
+  }
+  if (plan.trialDays <= 0) {
+    throw new CheckoutError(
+      `${plan.name} does not come with a free trial — choose it and pay to start.`
+    )
+  }
+  const price = priceFor(plan, input.interval)
+
+  const now = new Date()
+  const eligibility = await trialEligibility(
+    input.organizationId,
+    session.user.id,
+    now
+  )
+  if (!eligibility.eligible) {
+    throw new CheckoutError(
+      eligibility.reason ?? 'A free trial is not available on this workspace.'
+    )
+  }
+  const trialEndsAt =
+    eligibility.runningUntil ??
+    new Date(now.getTime() + plan.trialDays * DAY_MS)
+
+  const lines: QuoteLine[] = [
+    {
+      kind: 'PLAN',
+      refId: plan.id,
+      label: `${plan.name} (${input.interval === 'ANNUAL' ? 'annual' : 'monthly'}) — free trial`,
+      quantity: 1,
+      unitPriceCents: price,
+      amountCents: 0,
+    },
+  ]
+
+  const order = await prisma.$transaction(async (tx) => {
+    const terms = {
+      planId: plan.id,
+      interval: input.interval,
+      status: 'TRIALING' as const,
+      currencyCode: plan.currencyCode,
+      unitPriceCents: price,
+      discountCents: 0,
+      currentPeriodEnd: trialEndsAt,
+      trialEndsAt,
+    }
+    const subscription = await tx.subscription.upsert({
+      where: { organizationId: input.organizationId },
+      create: {
+        organizationId: input.organizationId,
+        ...terms,
+        currentPeriodStart: now,
+        trialUsedAt: now,
+      },
+      update: {
+        ...terms,
+        // Moving a running trial to another package keeps when it began.
+        ...(eligibility.runningUntil ? {} : { currentPeriodStart: now }),
+        couponId: null,
+        couponAppliedAt: null,
+        couponPeriodsRemaining: null,
+        cancelAtPeriodEnd: false,
+        canceledAt: null,
+        endedAt: null,
+        restrictedAt: null,
+      },
+    })
+    await tx.subscription.updateMany({
+      where: { id: subscription.id, trialUsedAt: null },
+      data: { trialUsedAt: now },
+    })
+    await tx.subscriptionAddon.deleteMany({
+      where: { subscriptionId: subscription.id },
+    })
+    await cancelOpenBills(
+      tx,
+      subscription.id,
+      'The trial moved to another package.'
+    )
+
+    return tx.planOrder.create({
+      data: {
+        organizationId: input.organizationId,
+        subscriptionId: subscription.id,
+        planId: plan.id,
+        interval: input.interval,
+        currencyCode: plan.currencyCode,
+        subtotalCents: 0,
+        discountCents: 0,
+        totalCents: 0,
+        status: 'AUTO_ACTIVATED',
+        kind: 'TRIAL',
+        dueAt: trialEndsAt,
+        lineItems: lines as unknown as Prisma.InputJsonValue,
+        createdById: session.user.id,
+        activatedAt: now,
+      },
+    })
+  })
+
+  await logAudit(session.user.id, 'plan.trial.started', 'PlanOrder', order.id, {
+    planId: plan.id,
+    interval: input.interval,
+    trialEndsAt: trialEndsAt.toISOString(),
+  })
+  return { trialEndsAt, planName: plan.name }
+}
+
+// ── Renewal bills ─────────────────────────────────────────────────────────
+
+export interface RenewalBill {
+  orderId: string
+  /** False when the bill already existed. */
+  created: boolean
+  totalCents: number
+  currencyCode: string
+  dueAt: Date
+  /** Nothing to pay (a ৳0 plan, a full discount): the period was extended. */
+  activated: boolean
+}
+
+/**
+ * The bill for the next period of the plan the workspace already holds — after
+ * a trial, the first one.
+ *
+ * Raised by the billing sweep a few days before the period ends, or at once
+ * when the owner presses Pay. One per period: a second call finds the first.
+ * Priced from the subscription's own snapshot (what was agreed, not today's
+ * list price), with its add-ons, and with the coupon still running on it.
+ * Paying it goes through Enfinito Pay like any order, and `activateOrder` then
+ * starts the new period where the old one ends.
+ *
+ * Null when nothing is owed: no subscription, no end date (terms an admin
+ * keeps by hand), a cancellation at period end, or a package arranged with
+ * sales.
+ */
+export async function raiseRenewalBill(
+  organizationId: string,
+  options: { actorUserId?: string | null } = {}
+): Promise<RenewalBill | null> {
+  const subscription = await prisma.subscription.findUnique({
+    where: { organizationId },
+    include: {
+      plan: true,
+      coupon: { select: { code: true } },
+      addons: { include: { addon: true } },
+    },
+  })
+  if (!subscription) return null
+  if (subscription.status === 'CANCELED' || subscription.status === 'EXPIRED') {
+    return null
+  }
+  if (subscription.cancelAtPeriodEnd || subscription.plan.isContactSalesOnly) {
+    return null
+  }
+  const dueAt = periodEndOf(subscription)
+  if (!dueAt) return null
+
+  const { plan, interval } = subscription
+  const lines: QuoteLine[] = [
+    {
+      kind: 'PLAN',
+      refId: plan.id,
+      label: `${plan.name} (${interval === 'ANNUAL' ? 'annual' : 'monthly'})`,
+      quantity: 1,
+      unitPriceCents: subscription.unitPriceCents,
+      amountCents: subscription.unitPriceCents,
+    },
+    ...subscription.addons.map((line) => ({
+      kind: 'ADDON' as const,
+      refId: line.addonId,
+      label: line.addon.name,
+      quantity: line.quantity,
+      unitPriceCents: line.unitPriceCents,
+      amountCents: line.unitPriceCents * line.quantity,
+    })),
+  ]
+  const subtotalCents = lines.reduce((sum, line) => sum + line.amountCents, 0)
+  const couponRuns =
+    subscription.couponId !== null &&
+    (subscription.couponPeriodsRemaining === null ||
+      subscription.couponPeriodsRemaining > 1)
+  const discountCents = couponRuns
+    ? Math.min(subtotalCents, subscription.discountCents)
+    : 0
+  const isFree = subtotalCents - discountCents === 0
+
+  // Tax is worked out before the transaction: it may need the CRM's settings,
+  // and an invoice that cannot be priced must not leave a half-made bill.
+  const policy = isFree ? null : await billingPolicy()
+  const priced = policy
+    ? priceOrder(
+        policy,
+        await billingNumberOf(organizationId),
+        lines,
+        discountCents
+      )
+    : null
+  const totalCents = priced?.totalCents ?? 0
+  const description = `${plan.name} · ${isFree ? 'renewal' : interval === 'ANNUAL' ? 'next year' : 'next month'}`
+
+  const result = await prisma.$transaction(async (tx) => {
+    // One bill per period, however many sweeps and Pay buttons arrive at once:
+    // the subscription row is held while the check and the write happen.
+    await tx.$executeRaw`SELECT 1 FROM "Subscription" WHERE id = ${subscription.id} FOR UPDATE`
+    const existing = await tx.planOrder.findFirst({
+      where: {
+        subscriptionId: subscription.id,
+        kind: 'RENEWAL',
+        dueAt,
+        status: {
+          in: ['AWAITING_PAYMENT', 'PAID', 'ACTIVATED', 'AUTO_ACTIVATED'],
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    })
+    if (existing) return { order: existing, created: false }
+
+    const order = await tx.planOrder.create({
+      data: {
+        organizationId,
+        subscriptionId: subscription.id,
+        planId: plan.id,
+        interval,
+        currencyCode: subscription.currencyCode,
+        subtotalCents,
+        discountCents,
+        totalCents,
+        couponId: couponRuns ? subscription.couponId : null,
+        couponCode: couponRuns ? (subscription.coupon?.code ?? null) : null,
+        status: isFree ? 'AUTO_ACTIVATED' : 'AWAITING_PAYMENT',
+        kind: 'RENEWAL',
+        dueAt,
+        lineItems: lines as unknown as Prisma.InputJsonValue,
+        createdById: options.actorUserId ?? null,
+      },
+    })
+
+    if (priced && policy) {
+      await createInvoice(tx, {
+        organizationId,
+        order: { kind: 'plan', id: order.id },
+        description,
+        priced,
+        seller: policy.seller ?? null,
+        dueAt,
+      })
+    }
+
+    if (isFree) {
+      const now = new Date()
+      await applyActivation(tx, {
+        organizationId,
+        order,
+        addons: subscription.addons.map((line) => ({
+          addonId: line.addonId,
+          quantity: line.quantity,
+        })),
+        couponPeriodsRemaining: usePeriod(subscription.couponPeriodsRemaining),
+        trialDays: 0,
+        periodStart: dueAt > now ? dueAt : now,
+      })
+      await tx.planOrder.update({
+        where: { id: order.id },
+        data: { activatedAt: now },
+      })
+    }
+    return { order, created: true }
+  })
+
+  if (result.created) {
+    await logAudit(
+      options.actorUserId ?? null,
+      'plan.renewal.billed',
+      'PlanOrder',
+      result.order.id,
+      { totalCents, dueAt: dueAt.toISOString() }
+    )
+    if (priced) scheduleCrmSync()
+  }
+
+  return {
+    orderId: result.order.id,
+    created: result.created,
+    totalCents: result.order.totalCents,
+    currencyCode: result.order.currencyCode,
+    dueAt,
+    activated: result.order.status === 'AUTO_ACTIVATED',
+  }
+}
+
+/** The bill waiting to be paid on this workspace, if any. */
+export async function findOpenBill(organizationId: string) {
+  return prisma.planOrder.findFirst({
+    where: { organizationId, kind: 'RENEWAL', status: 'AWAITING_PAYMENT' },
+    orderBy: { createdAt: 'desc' },
+    include: { plan: { select: { name: true } } },
+  })
+}
+
 // ── Subscription lifecycle ────────────────────────────────────────────────
 
 /**
@@ -721,7 +1282,11 @@ export async function cancelSubscription(
   organizationId: string,
   options: { immediate?: boolean } = {}
 ): Promise<void> {
-  const { session } = await requireHumanOrgAccess(organizationId, 'OWNER')
+  const { session } = await requireHumanOrgAccess(
+    organizationId,
+    'OWNER',
+    PAYING
+  )
 
   const subscription = await prisma.subscription.findUnique({
     where: { organizationId },
@@ -729,17 +1294,44 @@ export async function cancelSubscription(
   if (!subscription) throw new CheckoutError('No active subscription.')
 
   if (!options.immediate) {
-    await prisma.subscription.update({
-      where: { organizationId },
-      data: { cancelAtPeriodEnd: true, canceledAt: new Date() },
+    await prisma.$transaction(async (tx) => {
+      await tx.subscription.update({
+        where: { organizationId },
+        data: { cancelAtPeriodEnd: true, canceledAt: new Date() },
+      })
+      // Not renewing: the bill for the next period is no longer owed.
+      await cancelOpenBills(
+        tx,
+        subscription.id,
+        'The subscription was cancelled.'
+      )
     })
   } else {
     const defaultPlan = await prisma.plan.findFirst({
       where: { isDefault: true, isActive: true },
     })
-    if (!defaultPlan) throw new CheckoutError('No default plan configured.')
 
     await prisma.$transaction(async (tx) => {
+      await cancelOpenBills(
+        tx,
+        subscription.id,
+        'The subscription was cancelled.'
+      )
+      // No free package to fall back to: the subscription ends here and the
+      // workspace is locked until a package is chosen again.
+      if (!defaultPlan) {
+        await tx.subscription.update({
+          where: { organizationId },
+          data: {
+            status: 'CANCELED',
+            cancelAtPeriodEnd: false,
+            canceledAt: new Date(),
+            endedAt: new Date(),
+          },
+        })
+        return
+      }
+
       await tx.subscriptionAddon.deleteMany({
         where: { subscriptionId: subscription.id },
       })
@@ -776,7 +1368,7 @@ export async function cancelSubscription(
 export async function resumeSubscription(
   organizationId: string
 ): Promise<void> {
-  await requireOrgAccess(organizationId, 'OWNER')
+  await requireOrgAccess(organizationId, 'OWNER', PAYING)
   await prisma.subscription.update({
     where: { organizationId },
     data: { cancelAtPeriodEnd: false, canceledAt: null },

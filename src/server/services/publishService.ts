@@ -5,6 +5,7 @@ import { redis } from '@/server/redis/client'
 import type { PageTheme } from '@/modules/sections/types'
 import type { PageRole, SiteKind } from '@/generated/prisma/enums'
 import { resolveSiteHandle } from './siteHandleService'
+import { isWorkspaceRestricted } from './entitlementService'
 
 const PROJECT_CACHE_TTL_SECONDS = 300
 
@@ -340,7 +341,11 @@ export async function getPublishedPageForRender(
 
 /** For the per-tenant sitemap.xml/robots.txt routes. */
 export async function getStoreForSeoRoutes(handle: string) {
-  return resolveStoreByHandle(handle)
+  const store = await resolveStoreByHandle(handle)
+  // Paused for an unpaid bill: no sitemap, and no orders through the
+  // storefront order API, which finds its store here too.
+  if (store && (await isWorkspaceRestricted(store.organizationId))) return null
+  return store
 }
 
 export async function listIndexablePages(storeId: string) {

@@ -8,6 +8,7 @@ import {
   type ApiKeyIdentity,
 } from '@/server/services/apiKeyService'
 import { runAsMachine } from '@/server/auth/actor'
+import { isWorkspaceRestricted } from '@/server/services/entitlementService'
 import { checkRateLimit, getClientIp } from '@/lib/rate-limit'
 import type { ApiScope } from '@/generated/prisma/client'
 
@@ -49,6 +50,7 @@ export type ApiErrorCode =
   | 'invalid_request'
   | 'rate_limited'
   | 'conflict'
+  | 'payment_required'
   | 'server_error'
 
 const STATUS_BY_CODE: Record<ApiErrorCode, number> = {
@@ -58,6 +60,7 @@ const STATUS_BY_CODE: Record<ApiErrorCode, number> = {
   invalid_request: 422,
   rate_limited: 429,
   conflict: 409,
+  payment_required: 402,
   server_error: 500,
 }
 
@@ -177,6 +180,14 @@ export async function withApiKey(
       'forbidden',
       `This key does not have the \`${scope}\` permission.`,
       { requiredScope: scope }
+    )
+  }
+
+  // A workspace paused for an unpaid bill answers nothing through its keys.
+  if (await isWorkspaceRestricted(key.organizationId)) {
+    return apiError(
+      'payment_required',
+      'This workspace is paused until its NCOM bill is paid. The owner can pay from Plan & billing; the API works again as soon as the payment goes through.'
     )
   }
 

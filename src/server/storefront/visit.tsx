@@ -10,7 +10,10 @@ import {
   trackingConfigFrom,
   type PageOfferSnapshot,
 } from '@/server/services/trackingService'
-import { isOverTrafficAllowance } from '@/server/services/entitlementService'
+import {
+  isOverTrafficAllowance,
+  isWorkspaceRestricted,
+} from '@/server/services/entitlementService'
 import {
   estimateHtmlBytes,
   monthlyVisitorHash,
@@ -55,6 +58,12 @@ export async function prepareVisit(input: {
   fallbackHost: string
 }): Promise<{ blocked: ReactNode | null; scripts: ReactNode | null }> {
   const { store, integration } = input
+
+  // Paused for an unpaid NCOM bill: the shopper sees the holding page, and
+  // the visit is not counted against a plan that is not running.
+  if (await isWorkspaceRestricted(store.organizationId)) {
+    return { blocked: <AllowanceReachedPage reason="paused" />, scripts: null }
+  }
 
   // Two switches have to agree before a site is replaced by a holding page —
   // the platform flag and the plan's own `enforceTrafficCap` — because taking

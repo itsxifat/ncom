@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import { Client } from 'pg'
 import Redis from 'ioredis'
 import { FakeShop } from './support/product-source'
+import { startTrial } from './support/trial'
 
 /**
  * Offers and discounts, driven through the screens a merchant actually uses.
@@ -118,6 +119,7 @@ test.beforeAll(async ({ browser }) => {
   ])
 
   await page.goto('/dashboard')
+  await startTrial(page)
 
   organizationId = (
     await one<{ organizationId: string }>(

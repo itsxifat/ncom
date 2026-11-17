@@ -4,6 +4,7 @@ import { getEntitlements } from '@/server/services/entitlementService'
 import {
   listSelectableAddons,
   listSelectablePlans,
+  trialEligibility,
 } from '@/server/services/planCheckoutService'
 import { getPlatformFlag } from '@/server/services/platformFlagService'
 import { onlinePaymentAvailable } from '@/server/services/enfinitoPaySettingsService'
@@ -11,17 +12,20 @@ import { PageHeader } from '@/components/app/page-header'
 import { FEATURE_KEYS, FEATURE_PLAN_COLUMN, formatQuota } from '@/lib/plans'
 import { PlanPicker, type PickerAddon, type PickerPlan } from './PlanPicker'
 
-export const metadata = { title: 'Change plan' }
+export const metadata = { title: 'Choose a package' }
 
 export default async function ChangePlanPage() {
-  const { organization, role } = await getActiveOrganization()
+  const { organization, role, session } = await getActiveOrganization()
 
   if (role !== 'OWNER') redirect('/billing')
   if (!(await getPlatformFlag('billing.selfServeUpgrades')))
     redirect('/billing')
 
-  const entitlements = await getEntitlements(organization.id)
-  const plans = await listSelectablePlans()
+  const [entitlements, plans, trial] = await Promise.all([
+    getEntitlements(organization.id),
+    listSelectablePlans(),
+    trialEligibility(organization.id, session.user.id),
+  ])
 
   // Add-ons are fetched per plan and merged, so the picker can filter client-side
   // as the customer switches plan without a round trip for each one.
@@ -67,7 +71,8 @@ export default async function ChangePlanPage() {
     trialDays: plan.trialDays,
     fairUseNote: plan.fairUseNote,
     quotaLabels: [
-      { label: 'Landing pages', value: formatQuota(plan.maxPages, 'count') },
+      { label: 'Sites', value: formatQuota(plan.maxStores, 'count') },
+      { label: 'Pages', value: formatQuota(plan.maxPages, 'count') },
       {
         label: 'Custom domains',
         value: formatQuota(plan.maxCustomDomains, 'count'),
@@ -102,8 +107,10 @@ export default async function ChangePlanPage() {
     <div className="flex flex-col gap-8">
       <PageHeader
         eyebrow="Workspace"
-        title="Change plan"
-        description="Pick a plan, add anything you need on top, and apply a code if you have one."
+        title={
+          entitlements.subscriptionId ? 'Change package' : 'Choose a package'
+        }
+        description="Start a package on its free trial, or pick one, add anything you need on top, and pay."
         backHref="/billing"
         backLabel="Plan & billing"
       />
@@ -116,6 +123,11 @@ export default async function ChangePlanPage() {
         couponsEnabled={await getPlatformFlag('billing.couponsEnabled')}
         showPaymentStep={await getPlatformFlag('billing.showPaymentStep')}
         payOnline={await onlinePaymentAvailable()}
+        trial={{
+          eligible: trial.eligible,
+          reason: trial.reason,
+          runningUntil: trial.runningUntil?.toISOString() ?? null,
+        }}
       />
     </div>
   )

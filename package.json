@@ -25,7 +25,9 @@
     "check:cold-start": "tsx --conditions=react-server scripts/check-cold-start.mts",
     "check:offer-exclusions": "tsx --conditions=react-server scripts/check-offer-exclusions.mts",
     "backfill:order-images": "tsx --conditions=react-server scripts/backfill-order-line-images.mts",
-    "check:order-handoff": "tsx --conditions=react-server scripts/check-order-handoff.mts"
+    "check:order-handoff": "tsx --conditions=react-server scripts/check-order-handoff.mts",
+    "check:billing-cycle": "tsx --require ./scripts/support/no-server-only.cjs scripts/check-billing-cycle.mts",
+    "plans:apply-lineup": "tsx scripts/apply-plan-lineup.mts"
   },
   "lint-staged": {
     "*.{ts,tsx,js,jsx}": [

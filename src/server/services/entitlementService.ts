@@ -33,6 +33,12 @@ import {
   usagePeriodKey,
   type UsageSnapshot,
 } from '@/server/services/usageService'
+import {
+  billingAccess,
+  withoutRestriction,
+  type BillingAccess,
+} from '@/lib/billing-access'
+import { getPlatformFlag } from '@/server/services/platformFlagService'
 
 /**
  * The single answer to "what is this organisation allowed to do?".
@@ -80,6 +86,11 @@ export interface ResolvedEntitlements {
   isDefaultPlan: boolean
   /** AI builder credits the plan includes: every month, and once on starting it. */
   aiCredits: { monthly: number; onStart: number }
+  /**
+   * Whether the workspace may be used at all — paid up, in its grace day, or
+   * locked until a bill is paid. See lib/billing-access.
+   */
+  access: BillingAccess
 }
 
 /** Raised when an action would exceed a quota. Carries what the UI needs to explain it. */
@@ -135,30 +146,59 @@ type SubscriptionWithPlan = Prisma.SubscriptionGetPayload<{
 }>
 
 /**
- * The plan an organisation falls back to when it has no subscription row.
+ * Where a new workspace starts, if anywhere.
  *
- * Every organisation gets one at signup, but rows created before this feature
- * existed (and any created by a path that forgets) must still resolve to
- * something. Failing closed on the free tier is the safe default: the
- * alternative is either throwing — breaking the dashboard for legacy tenants —
- * or defaulting to unlimited, which gives away the product.
+ * NCOM has no free tier: a workspace picks a package (and starts its trial)
+ * itself. An admin can still mark one package as the default, and then every
+ * new workspace begins on it straight away — on its trial if it has one.
+ * Without a default a workspace has no subscription until it chooses, which
+ * `billingAccess` reads as NO_PLAN. There is deliberately no fallback to "the
+ * first active plan": that quietly handed a paid package to everyone.
  */
 async function getDefaultPlan() {
-  return (
-    (await prisma.plan.findFirst({
-      where: { isDefault: true, isActive: true },
-      orderBy: { position: 'asc' },
-    })) ??
-    (await prisma.plan.findFirst({
-      where: { isActive: true },
-      orderBy: { position: 'asc' },
-    }))
-  )
+  return prisma.plan.findFirst({
+    where: { isDefault: true, isActive: true },
+    orderBy: { position: 'asc' },
+  })
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
+/**
+ * The subscription a workspace starts with on `plan`, for signup and the lazy
+ * path alike: on the plan's trial when it has one; free for good when it costs
+ * nothing; otherwise due at once, so a paid default with no trial is billed
+ * rather than given away.
+ */
+export function initialSubscriptionData(
+  plan: {
+    id: string
+    trialDays: number
+    currencyCode: string
+    monthlyPriceCents: number
+  },
+  now: Date = new Date()
+) {
+  const trialEndsAt =
+    plan.trialDays > 0
+      ? new Date(now.getTime() + plan.trialDays * DAY_MS)
+      : null
+  return {
+    planId: plan.id,
+    status: trialEndsAt ? ('TRIALING' as const) : ('ACTIVE' as const),
+    interval: 'MONTHLY' as const,
+    currencyCode: plan.currencyCode,
+    unitPriceCents: plan.monthlyPriceCents,
+    currentPeriodStart: now,
+    currentPeriodEnd: trialEndsAt ?? (plan.monthlyPriceCents > 0 ? now : null),
+    trialEndsAt,
+    trialUsedAt: trialEndsAt ? now : null,
+  }
 }
 
 /**
  * Ensures the organisation has a subscription, creating one on the default plan
- * if not. Called at signup and lazily by the resolver.
+ * if there is one. Called at signup and lazily by the resolver.
  */
 export async function ensureSubscription(
   organizationId: string
@@ -177,18 +217,7 @@ export async function ensureSubscription(
   // into a known error we can recover from by re-reading.
   try {
     return await prisma.subscription.create({
-      data: {
-        organizationId,
-        planId: plan.id,
-        status: plan.trialDays > 0 ? 'TRIALING' : 'ACTIVE',
-        interval: 'MONTHLY',
-        currencyCode: plan.currencyCode,
-        unitPriceCents: plan.monthlyPriceCents,
-        trialEndsAt:
-          plan.trialDays > 0
-            ? new Date(Date.now() + plan.trialDays * 24 * 60 * 60 * 1000)
-            : null,
-      },
+      data: { organizationId, ...initialSubscriptionData(plan) },
       include: subscriptionInclude,
     })
   } catch {
@@ -219,7 +248,8 @@ function applyOverride(
 }
 
 function resolveFromSubscription(
-  subscription: SubscriptionWithPlan
+  subscription: SubscriptionWithPlan,
+  access: BillingAccess
 ): ResolvedEntitlements {
   const { plan } = subscription
 
@@ -316,6 +346,7 @@ function resolveFromSubscription(
     cancelAtPeriodEnd: subscription.cancelAtPeriodEnd,
     isDefaultPlan: plan.isDefault,
     aiCredits: { monthly: plan.aiMonthlyCredits, onStart: plan.aiStartCredits },
+    access,
   }
 }
 
@@ -331,9 +362,9 @@ function mbOrNull(mb: number | null): number | null {
 }
 
 /**
- * Everything locked down. Used when there is not a single plan in the database
- * — a fresh install that has not been seeded — so the app renders and the admin
- * can go create plans instead of every page throwing.
+ * Everything locked down. Used for a workspace that has not chosen a package
+ * yet (and on a fresh install with no plans at all), so the app renders and
+ * sends the owner to pick one instead of every page throwing.
  */
 function lockedDownEntitlements(organizationId: string): ResolvedEntitlements {
   return {
@@ -371,6 +402,7 @@ function lockedDownEntitlements(organizationId: string): ResolvedEntitlements {
     cancelAtPeriodEnd: false,
     isDefaultPlan: false,
     aiCredits: { monthly: 0, onStart: 0 },
+    access: { state: 'RESTRICTED', reason: 'NO_PLAN', dueAt: null },
   }
 }
 
@@ -387,9 +419,27 @@ export const getEntitlements = cache(
   async (organizationId: string): Promise<ResolvedEntitlements> => {
     const subscription = await ensureSubscription(organizationId)
     if (!subscription) return lockedDownEntitlements(organizationId)
-    return resolveFromSubscription(subscription)
+
+    let access = billingAccess(subscription)
+    if (
+      access.state === 'RESTRICTED' &&
+      !(await getPlatformFlag('billing.restrictUnpaid'))
+    ) {
+      access = withoutRestriction(access)
+    }
+    return resolveFromSubscription(subscription, access)
   }
 )
+
+/**
+ * True while the workspace is locked for an unpaid bill (or has no package).
+ * What the public renderer, the API and every write check.
+ */
+export async function isWorkspaceRestricted(
+  organizationId: string
+): Promise<boolean> {
+  return (await getEntitlements(organizationId)).access.state === 'RESTRICTED'
+}
 
 /** Entitlements plus current consumption — what the billing page renders. */
 export interface EntitlementsWithUsage {

@@ -177,6 +177,8 @@ export async function createInvoice(
     description: string
     priced: PricedInvoice
     seller: Seller | null
+    /** When it must be paid by. Default: on issue. */
+    dueAt?: Date
   }
 ): Promise<BillingInvoice> {
   const customer = await customerOf(db, input.organizationId)
@@ -206,7 +208,7 @@ export async function createInvoice(
       serviceCode: priced.serviceCode,
       taxPolicyVersion: priced.taxPolicyVersion,
       pricesIncludeVat: priced.pricesIncludeVat,
-      dueAt: now,
+      dueAt: input.dueAt ?? now,
       buyer: customer.buyer as unknown as Prisma.InputJsonValue,
       seller: (input.seller ?? undefined) as Prisma.InputJsonValue | undefined,
       createdAt: now,

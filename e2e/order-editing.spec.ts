@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test'
 import path from 'node:path'
 import { Client } from 'pg'
 import { FakeShop } from './support/product-source'
+import { startTrial } from './support/trial'
 
 /**
  * Order editing, the status dropdown and the analytics plan gate.
@@ -108,6 +109,7 @@ test.beforeAll(async ({ browser }) => {
 
   await page.goto('/dashboard')
   await expect(page).toHaveURL(/\/dashboard/, { timeout: 30_000 })
+  await startTrial(page)
 
   organizationId = (
     await one<{ organizationId: string }>(

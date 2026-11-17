@@ -5,6 +5,7 @@ import type { Prisma } from '@/generated/prisma/client'
 import { slugify, withRandomSuffix } from '@/lib/slug'
 import { BCRYPT_COST } from '@/lib/security'
 import type { RegisterInput } from '@/lib/validation/auth'
+import { initialSubscriptionData } from '@/server/services/entitlementService'
 
 export class EmailAlreadyInUseError extends Error {
   constructor() {
@@ -176,21 +177,14 @@ export async function provisionPersonalWorkspace(
     orderBy: { position: 'asc' },
   })
 
-  // No plans seeded yet is a valid state for a fresh install: entitlements fall
-  // back to locked-down until an admin creates one, rather than signup failing.
+  // No default package is the normal state: the owner picks one (and starts
+  // its trial) on first sign-in, and until then the workspace reads as having
+  // no plan. A default an admin has marked starts the workspace on it here.
   if (defaultPlan) {
     await tx.subscription.create({
       data: {
         organizationId: organization.id,
-        planId: defaultPlan.id,
-        status: defaultPlan.trialDays > 0 ? 'TRIALING' : 'ACTIVE',
-        interval: 'MONTHLY',
-        currencyCode: defaultPlan.currencyCode,
-        unitPriceCents: defaultPlan.monthlyPriceCents,
-        trialEndsAt:
-          defaultPlan.trialDays > 0
-            ? new Date(Date.now() + defaultPlan.trialDays * 24 * 60 * 60 * 1000)
-            : null,
+        ...initialSubscriptionData(defaultPlan),
       },
     })
   }

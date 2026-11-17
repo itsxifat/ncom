@@ -1312,7 +1312,7 @@ model AuditLog {
 
 model Plan {
   id       String  @id @default(cuid())
-  code     String  @unique // stable machine name: FREE, STARTER, BUSINESS, ENTERPRISE
+  code     String  @unique // stable machine name: LITE, STARTER, BUSINESS, PRO, ENTERPRISE
   name     String
   tagline  String?
   position Int     @default(0)
@@ -1484,6 +1484,14 @@ model Subscription {
   canceledAt         DateTime?
   endedAt            DateTime?
   trialEndsAt        DateTime?
+  // A workspace gets one trial. Set when the first one starts and never
+  // cleared, so ending, cancelling or changing plan cannot earn another.
+  trialUsedAt        DateTime?
+  // When an unpaid bill locked the workspace (dashboard limited to Billing,
+  // sites offline). Bookkeeping for emails and the admin list: whether access
+  // is restricted is worked out from the dates every time (lib/billing-access),
+  // so a missed sweep can never leave a workspace locked after it paid.
+  restrictedAt       DateTime?
 
   // Snapshot of the price actually agreed, so raising a plan's price does not
   // silently re-price everyone already on it.
@@ -1585,6 +1593,18 @@ model PlanOrder {
 
   status PlanOrderStatus @default(AWAITING_PAYMENT)
 
+  // Why the order exists. A RENEWAL is the bill for another period of the plan
+  // the workspace already holds; billingCycleService raises it before the
+  // period (or trial) ends, and `dueAt` is that end — the moment access turns
+  // into a debt. A TRIAL is a record of a no-payment trial starting.
+  kind  PlanOrderKind @default(PURCHASE)
+  dueAt DateTime?
+
+  // Each billing email is sent once per bill, whichever sweep gets there first.
+  reminderSentAt         DateTime?
+  overdueNoticeSentAt    DateTime?
+  restrictedNoticeSentAt DateTime?
+
   // Snapshot of what was bought: plan name and price plus one line per add-on.
   lineItems Json
 
@@ -1608,6 +1628,13 @@ model PlanOrder {
 
   @@index([organizationId, createdAt])
   @@index([status])
+  @@index([subscriptionId, kind, status])
+}
+
+enum PlanOrderKind {
+  PURCHASE // the owner picked a plan at checkout
+  TRIAL // a trial started — nothing to pay
+  RENEWAL // the bill for the next period of the current plan
 }
 
 enum PlanOrderStatus {

@@ -197,7 +197,11 @@ export async function startPayment(
   kind: BillingOrderKind,
   orderId: string
 ): Promise<{ url: string }> {
-  const { session } = await requireHumanOrgAccess(organizationId, 'OWNER')
+  // A locked workspace must still be able to pay its way out — but only a
+  // plan bill: AI credits are not on the way back to a usable workspace.
+  const { session } = await requireHumanOrgAccess(organizationId, 'OWNER', {
+    allowRestricted: kind === 'plan',
+  })
   const credentials = await getEnfinitoPayCredentials()
   if (!credentials) {
     throw new BillingPaymentError(

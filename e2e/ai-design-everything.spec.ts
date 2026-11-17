@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
+import { startTrial } from './support/trial'
 
 /**
  * A design from the merchant's own AI reaches inside every block — each
@@ -117,6 +118,7 @@ async function register(page: Page, email: string) {
   await page.getByLabel('Password').fill('Sup3rSecure!Passw0rd')
   await page.getByRole('button', { name: 'Create account' }).click()
   await expect(page).toHaveURL(/\/dashboard/)
+  await startTrial(page)
 }
 
 /** A CSS custom property as the element sees it. */

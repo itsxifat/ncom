@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { startTrial } from './support/trial'
 
 /**
  * The path the product exists for: a new merchant registers, makes an online
@@ -24,6 +25,10 @@ test('register, make a store from a template, publish, view live', async ({
     await page.getByLabel('Password').fill('Sup3rSecure!Passw0rd')
     await page.getByRole('button', { name: 'Create account' }).click()
     await expect(page).toHaveURL(/\/dashboard/)
+  })
+
+  await test.step('start a package on its free trial', async () => {
+    await startTrial(page)
   })
 
   await test.step('make an online store from the Essentials design', async () => {

@@ -13,6 +13,7 @@ import {
   resolvePublicStore,
   type CachedStore,
 } from '@/server/services/publishService'
+import { isWorkspaceRestricted } from '@/server/services/entitlementService'
 import { getCustomerBySession } from '@/server/services/customerService'
 
 /**
@@ -39,7 +40,10 @@ export async function requestStore(): Promise<CachedStore | null> {
   if (!handle) return null
 
   const store = await resolvePublicStore(handle)
-  return store && store.kind === 'STORE' ? store : null
+  if (!store || store.kind !== 'STORE') return null
+  // A paused workspace takes no carts, sign-ins or orders.
+  if (await isWorkspaceRestricted(store.organizationId)) return null
+  return store
 }
 
 export async function readCartToken(): Promise<string | null> {

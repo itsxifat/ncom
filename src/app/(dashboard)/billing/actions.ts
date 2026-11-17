@@ -4,13 +4,18 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { z } from 'zod'
 import { getActiveOrganization } from '@/server/services/organizationService'
-import { AuthorizationError } from '@/server/auth/rbac'
+import {
+  AuthorizationError,
+  WorkspaceRestrictedError,
+} from '@/server/auth/rbac'
 import {
   CheckoutError,
   cancelSubscription,
   quoteCheckout,
+  raiseRenewalBill,
   resumeSubscription,
   startCheckout,
+  startTrial,
   type CheckoutQuote,
 } from '@/server/services/planCheckoutService'
 import { getPlatformFlag } from '@/server/services/platformFlagService'
@@ -218,7 +223,12 @@ export async function resumeSubscriptionAction(): Promise<BillingActionState> {
  * the caller's fallback.
  */
 function messageFor(error: unknown, fallback: string): string {
-  if (error instanceof CheckoutError || error instanceof InvoiceError)
+  if (
+    error instanceof CheckoutError ||
+    error instanceof InvoiceError ||
+    error instanceof BillingPaymentError ||
+    error instanceof WorkspaceRestrictedError
+  )
     return error.message
   if (error instanceof AuthorizationError) {
     return 'Only a workspace owner can change the plan.'
@@ -257,6 +267,9 @@ export async function orderCreditPackAction(
       cause instanceof InvoiceError
     )
       return { ok: false, error: cause.message }
+    if (cause instanceof WorkspaceRestrictedError) {
+      return { ok: false, error: cause.message }
+    }
     if (cause instanceof AuthorizationError) {
       return { ok: false, error: 'Only the workspace owner can buy credits.' }
     }
@@ -283,4 +296,92 @@ export async function payOrderAction(
     }
     throw cause
   }
+}
+
+const trialInputSchema = z.object({
+  planId: z.string().min(1),
+  interval: z.enum(['MONTHLY', 'ANNUAL']),
+})
+
+/**
+ * Starts the chosen package on its free trial — or moves a running trial to
+ * it. No payment and no checkout: the package is live as soon as this returns.
+ */
+export async function startTrialAction(
+  _prevState: BillingActionState,
+  formData: FormData
+): Promise<BillingActionState> {
+  const { organization, role } = await getActiveOrganization()
+  if (role !== 'OWNER') {
+    return { error: 'Only the workspace owner can choose a package.' }
+  }
+  if (!(await getPlatformFlag('billing.selfServeUpgrades'))) {
+    return {
+      error:
+        'Packages are set up by our team at the moment — get in touch and we will start your trial.',
+    }
+  }
+
+  const parsed = trialInputSchema.safeParse({
+    planId: formData.get('planId'),
+    interval: formData.get('interval'),
+  })
+  if (!parsed.success) return { error: 'Pick a package first.' }
+
+  try {
+    await startTrial({
+      organizationId: organization.id,
+      planId: parsed.data.planId,
+      interval: parsed.data.interval,
+    })
+  } catch (error) {
+    return { error: messageFor(error, 'Could not start the trial.') }
+  }
+
+  revalidatePath('/', 'layout')
+  redirect('/billing?trial=started')
+}
+
+/**
+ * Pays the workspace's bill: the next period of its package — after a trial,
+ * the first. The bill is raised now if the billing sweep has not yet, and the
+ * owner goes straight to Enfinito Pay. Everything locked opens again the
+ * moment the payment is confirmed.
+ */
+export async function payBillAction(): Promise<BillingActionState> {
+  const { organization, role, session } = await getActiveOrganization()
+  if (role !== 'OWNER') {
+    return { error: 'Only the workspace owner can pay the bill.' }
+  }
+
+  let bill
+  try {
+    bill = await raiseRenewalBill(organization.id, {
+      actorUserId: session.user.id,
+    })
+  } catch (error) {
+    return { error: messageFor(error, 'Could not prepare the bill.') }
+  }
+  if (!bill) {
+    return { error: 'There is nothing to pay on this workspace right now.' }
+  }
+  if (bill.activated) {
+    revalidatePath('/', 'layout')
+    redirect('/billing?activated=1')
+  }
+  if (!(await onlinePaymentAvailable())) {
+    revalidatePath('/billing')
+    return {
+      notice:
+        'Your bill is ready. Online payment isn’t open yet, so our team will contact you to settle it.',
+    }
+  }
+
+  let url: string
+  try {
+    url = (await startPayment(organization.id, 'plan', bill.orderId)).url
+  } catch (error) {
+    return { error: messageFor(error, 'Could not open the payment page.') }
+  }
+  redirect(url)
 }

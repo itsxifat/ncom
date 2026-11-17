@@ -4,6 +4,7 @@ import { authenticateApiKey, hasScope } from '@/server/services/apiKeyService'
 import { runAsMachine } from '@/server/auth/actor'
 import { checkRateLimit, getClientIp } from '@/lib/rate-limit'
 import { isTrustedOrigin } from '@/lib/security'
+import { isWorkspaceRestricted } from '@/server/services/entitlementService'
 import {
   handleMessage,
   refuseMessage,
@@ -92,6 +93,22 @@ export async function POST(request: Request) {
         },
       },
       { status: 403 }
+    )
+  }
+
+  // A workspace paused for an unpaid bill answers nothing through its keys.
+  if (await isWorkspaceRestricted(key.organizationId)) {
+    return NextResponse.json(
+      {
+        jsonrpc: '2.0',
+        id: null,
+        error: {
+          code: -32002,
+          message:
+            'This NCOM workspace is paused until its bill is paid. The owner can pay from Plan & billing; it works again as soon as the payment goes through.',
+        },
+      },
+      { status: 402 }
     )
   }
 

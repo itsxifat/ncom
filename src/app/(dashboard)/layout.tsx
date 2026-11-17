@@ -3,13 +3,42 @@ import { countOrdersNeedingAction } from '@/server/services/homeService'
 import { signOutAction } from '@/app/(dashboard)/actions'
 import { requireVerifiedEmail } from '@/server/auth/emailGate'
 import { DashboardShell } from '@/components/dashboard/dashboard-shell'
+import { getEntitlements } from '@/server/services/entitlementService'
+import type { BillingAccess } from '@/lib/billing-access'
+import type { BillingAccessView } from '@/components/dashboard/billing-gate'
+
+/** The access answer with its dates as strings, for the client gate. */
+function accessView(access: BillingAccess): BillingAccessView {
+  switch (access.state) {
+    case 'OK':
+      return {
+        state: 'OK',
+        endsAt: access.endsAt?.toISOString() ?? null,
+        trial: access.trial,
+      }
+    case 'GRACE':
+      return {
+        state: 'GRACE',
+        reason: access.reason,
+        dueAt: access.dueAt.toISOString(),
+        restrictsAt: access.restrictsAt.toISOString(),
+      }
+    case 'RESTRICTED':
+      return {
+        state: 'RESTRICTED',
+        reason: access.reason,
+        dueAt: access.dueAt?.toISOString() ?? null,
+      }
+  }
+}
 
 export default async function DashboardLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
-  const { session, organization, memberships } = await getActiveOrganization()
+  const { session, organization, memberships, role } =
+    await getActiveOrganization()
 
   // Every dashboard route renders through this layout, so gating here covers
   // all of them — including ones added later, which is the point.
@@ -19,7 +48,12 @@ export default async function DashboardLayout({
   // that revalidates the page — not on every client navigation, since layouts
   // persist across those. A number a few minutes behind is fine for a badge;
   // the order list it opens is always current.
-  const ordersNeedingAction = await countOrdersNeedingAction(organization.id)
+  const [ordersNeedingAction, entitlements] = await Promise.all([
+    countOrdersNeedingAction(organization.id),
+    // Paid up, in its grace day, or locked: decides whether the pages below
+    // render at all (BillingGate), and the warnings above them.
+    getEntitlements(organization.id),
+  ])
 
   const initials =
     session.user.name
@@ -42,6 +76,11 @@ export default async function DashboardLayout({
       initials={initials}
       ordersNeedingAction={ordersNeedingAction}
       signOutAction={signOutAction}
+      billing={{
+        access: accessView(entitlements.access),
+        planName: entitlements.planName,
+        isOwner: role === 'OWNER',
+      }}
     >
       {children}
     </DashboardShell>
