@@ -22,8 +22,7 @@ export function FinalCta() {
         style={{
           maxWidth: '1200px',
           margin: '0 auto',
-          padding:
-            'clamp(96px, 12vw, 160px) clamp(16px, 4vw, 40px) clamp(56px, 7vw, 88px)',
+          padding: 'clamp(96px, 12vw, 160px) clamp(16px, 4vw, 40px)',
           boxSizing: 'border-box',
           textAlign: 'center',
         }}
@@ -91,55 +90,6 @@ export function FinalCta() {
               <path d="M5 12h14M13 6l6 6-6 6"></path>
             </svg>
           </Link>
-        </div>
-      </div>
-      <div
-        aria-hidden="true"
-        style={{
-          borderTop: '2px solid #0b0b0c',
-          padding: '18px 0',
-          overflow: 'hidden',
-        }}
-      >
-        <div
-          style={{
-            display: 'flex',
-            width: 'max-content',
-            gap: '40px',
-            paddingRight: '40px',
-            animation: 'ncom-marquee 30s linear infinite',
-            fontFamily:
-              'var(--font-space-grotesk), var(--font-manrope), var(--font-bangla), sans-serif',
-            fontSize: '22px',
-            fontWeight: '600',
-            whiteSpace: 'nowrap',
-            letterSpacing: '-0.01em',
-          }}
-        >
-          <span>7-day free trial</span>
-          <span>·</span>
-          <span>Bangla &amp; English</span>
-          <span>·</span>
-          <span>Cash on delivery</span>
-          <span>·</span>
-          <span>Steadfast &amp; Pathao</span>
-          <span>·</span>
-          <span>No cut of your sales</span>
-          <span>·</span>
-          <span>Fake-order check</span>
-          <span>·</span>
-          <span>7-day free trial</span>
-          <span>·</span>
-          <span>Bangla &amp; English</span>
-          <span>·</span>
-          <span>Cash on delivery</span>
-          <span>·</span>
-          <span>Steadfast &amp; Pathao</span>
-          <span>·</span>
-          <span>No cut of your sales</span>
-          <span>·</span>
-          <span>Fake-order check</span>
-          <span>·</span>
         </div>
       </div>
     </section>

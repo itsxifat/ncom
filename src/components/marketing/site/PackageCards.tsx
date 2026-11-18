@@ -288,8 +288,8 @@ export function PackageCards({
                   featured
                     ? {
                         ...BUTTON,
-                        color: '#0b0b0c',
-                        background: 'var(--accent)',
+                        color: 'var(--s-cta-fg)',
+                        background: 'var(--s-cta)',
                         fontWeight: 800,
                       }
                     : {

@@ -177,8 +177,8 @@ export function SiteHeaderBar() {
             href="/register"
             data-hover="btn"
             style={{
-              background: 'var(--accent)',
-              color: '#0b0b0c',
+              background: 'var(--s-cta)',
+              color: 'var(--s-cta-fg)',
               textDecoration: 'none',
               fontWeight: '700',
               fontSize: '14px',

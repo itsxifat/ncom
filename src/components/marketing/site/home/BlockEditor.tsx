@@ -352,9 +352,10 @@ export function BlockEditor() {
                 position: 'relative',
                 flex: '1 1 240px',
                 minWidth: '0',
-                minHeight: '360px',
+                height: '440px',
+                overflow: 'hidden',
                 background: 'var(--s-bg-alt)',
-                padding: 'clamp(16px, 3vw, 36px)',
+                padding: 'clamp(16px, 3vw, 36px) clamp(16px, 3vw, 36px) 0',
                 boxSizing: 'border-box',
                 display: 'flex',
                 justifyContent: 'center',
@@ -365,8 +366,9 @@ export function BlockEditor() {
                 style={{
                   width: '100%',
                   maxWidth: '560px',
+                  height: '100%',
                   background: '#fffaf0',
-                  borderRadius: '16px',
+                  borderRadius: '16px 16px 0 0',
                   overflow: 'hidden',
                   fontFamily: 'var(--font-bangla), sans-serif',
                   color: '#2b1d0e',
@@ -489,6 +491,51 @@ export function BlockEditor() {
                     >
                       ৳৮৫০
                     </span>
+                  </div>
+                </div>
+                <div
+                  style={{
+                    borderTop: '1px solid #efe4d2',
+                    padding: '20px 22px',
+                  }}
+                >
+                  <p
+                    style={{ margin: '0', fontSize: '15px', fontWeight: '700' }}
+                  >
+                    প্যাকেজ বেছে নিন
+                  </p>
+                  <div
+                    style={{
+                      marginTop: '12px',
+                      display: 'grid',
+                      gridTemplateColumns:
+                        'repeat(auto-fit, minmax(min(100%, 150px), 1fr))',
+                      gap: '10px',
+                    }}
+                  >
+                    {[
+                      ['১ বোতল · ৫০০ গ্রাম', '৳৮৫০', false],
+                      ['ফ্যামিলি প্যাক · ২ বোতল', '৳১,৫৫০', true],
+                    ].map(([name, price, on]) => (
+                      <span
+                        key={String(name)}
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          gap: '8px',
+                          padding: '10px 12px',
+                          borderRadius: '10px',
+                          background: '#ffffff',
+                          border: on
+                            ? '1.5px solid #a14a05'
+                            : '1.5px solid #ead8bb',
+                          fontSize: '13px',
+                        }}
+                      >
+                        {name}
+                        <b style={{ color: '#a14a05' }}>{price}</b>
+                      </span>
+                    ))}
                   </div>
                 </div>
               </div>
@@ -688,103 +735,6 @@ export function BlockEditor() {
               </div>
             </div>
           </div>
-        </div>
-        <div
-          style={{
-            marginTop: '40px',
-            display: 'grid',
-            gridTemplateColumns:
-              'repeat(auto-fit, minmax(min(100%, 330px), 1fr))',
-            gap: '0 40px',
-          }}
-        >
-          <p
-            style={{
-              margin: '0',
-              padding: '20px 0',
-              borderTop: '1px solid rgba(var(--s-ink), 0.08)',
-              color: 'var(--s-muted)',
-            }}
-          >
-            <strong style={{ color: 'var(--s-text)', fontWeight: '700' }}>
-              Blocks that sell.
-            </strong>{' '}
-            Drag in a hero, an offer, an FAQ and the order form, then
-            double-click any text to edit it.
-          </p>
-          <p
-            style={{
-              margin: '0',
-              padding: '20px 0',
-              borderTop: '1px solid rgba(var(--s-ink), 0.08)',
-              color: 'var(--s-muted)',
-            }}
-          >
-            <strong style={{ color: 'var(--s-text)', fontWeight: '700' }}>
-              Bangla or English.
-            </strong>{' '}
-            Every word and button, with Bangla digits:{' '}
-            <span
-              lang="bn"
-              style={{ fontFamily: 'var(--font-bangla), sans-serif' }}
-            >
-              ৳১,২৫০
-            </span>
-            .
-          </p>
-          <p
-            style={{
-              margin: '0',
-              padding: '20px 0',
-              borderTop: '1px solid rgba(var(--s-ink), 0.08)',
-              color: 'var(--s-muted)',
-            }}
-          >
-            <strong style={{ color: 'var(--s-text)', fontWeight: '700' }}>
-              Real Bangla fonts.
-            </strong>{' '}
-            11 Bangla typefaces, plus any Google Font.
-          </p>
-          <p
-            style={{
-              margin: '0',
-              padding: '20px 0',
-              borderTop: '1px solid rgba(var(--s-ink), 0.08)',
-              color: 'var(--s-muted)',
-            }}
-          >
-            <strong style={{ color: 'var(--s-text)', fontWeight: '700' }}>
-              Your web address.
-            </strong>{' '}
-            An NCOM address with SSL for every site. Your own domain from
-            Starter.
-          </p>
-          <p
-            style={{
-              margin: '0',
-              padding: '20px 0',
-              borderTop: '1px solid rgba(var(--s-ink), 0.08)',
-              color: 'var(--s-muted)',
-            }}
-          >
-            <strong style={{ color: 'var(--s-text)', fontWeight: '700' }}>
-              Offers.
-            </strong>{' '}
-            Combos, mix &amp; match, free gifts and discount codes.
-          </p>
-          <p
-            style={{
-              margin: '0',
-              padding: '20px 0',
-              borderTop: '1px solid rgba(var(--s-ink), 0.08)',
-              color: 'var(--s-muted)',
-            }}
-          >
-            <strong style={{ color: 'var(--s-text)', fontWeight: '700' }}>
-              History.
-            </strong>{' '}
-            Drafts save on their own, and History puts an older version back.
-          </p>
         </div>
       </div>
     </section>

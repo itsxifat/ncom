@@ -500,11 +500,11 @@ export function HeroStage() {
                     </p>
                   </div>
                   <div className="hx-actions">
-                    <span className="hx-btn">
+                    <span className="hx-dbtn">
                       <ScanLine size={14} />
                       Scan parcels
                     </span>
-                    <span className="hx-btn">
+                    <span className="hx-dbtn">
                       <Printer size={14} />
                       Print labels
                     </span>

@@ -40,28 +40,6 @@ export function Hero({ fromPrice }: { fromPrice: string }) {
   return (
     <section id="top" aria-labelledby="hero-title" className="hx">
       <div className="hx-inner">
-        <Link
-          href="/pricing"
-          className="hx-pill hx-fade"
-          style={{ ['--d' as string]: '0ms' }}
-        >
-          <b>New</b>
-          Every package starts with 7 days free
-          <svg
-            viewBox="0 0 24 24"
-            width="16"
-            height="16"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.25"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <path d="M5 12h14M13 6l6 6-6 6" />
-          </svg>
-        </Link>
-
         <h1 id="hero-title" className="hx-title">
           {LINES.map((line, lineIndex) => (
             <span
