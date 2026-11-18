@@ -117,20 +117,27 @@ export function NewSiteWizard({
   templates,
   askCurrency,
   initialKind,
+  initialTemplate = null,
+  initialName = '',
   aiAvailable,
 }: {
   rootDomain: string
   templates: TemplateSummary[]
   askCurrency: boolean
   initialKind: Kind | null
+  /** A design already picked (from onboarding): opens on the Name step. */
+  initialTemplate?: string | null
+  initialName?: string
   /** Whether this installation has the AI builder switched on. */
   aiAvailable: boolean
 }) {
-  const [step, setStep] = useState<Step>(initialKind ? 'design' : 'kind')
+  const [step, setStep] = useState<Step>(
+    initialTemplate ? 'details' : initialKind ? 'design' : 'kind'
+  )
   const [kind, setKind] = useState<Kind>(initialKind ?? 'LANDING')
   const [language, setLanguage] = useState<Language>('en')
   const [source, setSource] = useState<DesignSource>('templates')
-  const [templateKey, setTemplateKey] = useState<string | null>(null)
+  const [templateKey, setTemplateKey] = useState<string | null>(initialTemplate)
   const [draft, setDraft] = useState<SiteDraftSummary | null>(null)
   // The draft the merchant chose, kept apart from `draft`: an AI design still
   // running in the background, or a second paste, replaces `draft` when it
@@ -140,8 +147,8 @@ export function NewSiteWizard({
   // another tab (see where AiSiteDesigner is drawn).
   const [designing, setDesigning] = useState(false)
   const [previewing, setPreviewing] = useState<TemplateSummary | null>(null)
-  const [name, setName] = useState('')
-  const [subdomain, setSubdomain] = useState('')
+  const [name, setName] = useState(initialName)
+  const [subdomain, setSubdomain] = useState(() => slugify(initialName))
   const [subdomainTouched, setSubdomainTouched] = useState(false)
   const [state, action, pending] = useActionState(createStoreAction, undefined)
 

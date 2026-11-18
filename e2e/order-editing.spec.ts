@@ -95,20 +95,22 @@ test.beforeAll(async ({ browser }) => {
   await page.goto('/register')
   await page.getByLabel('Name').fill('Order Edit Owner')
   await page.getByLabel('Email').fill(email)
-  await page.getByLabel('Password').fill(PASSWORD)
+  await page.getByLabel('Password', { exact: true }).fill(PASSWORD)
   await page.getByRole('button', { name: 'Create account' }).click()
 
   // Either straight through, or held at the verification screen — which of the
   // two depends on the `auth.requireEmailVerification` platform flag, and a
   // test that only passes with it off is a test that stops running.
-  await page.waitForURL(/\/(dashboard|verify-email)/, { timeout: 30_000 })
+  await page.waitForURL(/\/(dashboard|verify-email|onboarding)/, {
+    timeout: 30_000,
+  })
 
   await db.query(`UPDATE "User" SET "emailVerified" = now() WHERE email = $1`, [
     email,
   ])
 
   await page.goto('/dashboard')
-  await expect(page).toHaveURL(/\/dashboard/, { timeout: 30_000 })
+  await expect(page).toHaveURL(/\/(dashboard|onboarding)/, { timeout: 30_000 })
   await startTrial(page)
 
   organizationId = (

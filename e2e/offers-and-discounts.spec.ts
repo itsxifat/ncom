@@ -107,7 +107,7 @@ test.beforeAll(async ({ browser }) => {
   await page.goto('/register')
   await page.getByLabel('Name').fill('Offers Owner')
   await page.getByLabel('Email').fill(email)
-  await page.getByLabel('Password').fill(PASSWORD)
+  await page.getByLabel('Password', { exact: true }).fill(PASSWORD)
   await page.getByRole('button', { name: 'Create account' }).click()
 
   await page.waitForURL(/\/(dashboard|verify-email|onboarding)/, {

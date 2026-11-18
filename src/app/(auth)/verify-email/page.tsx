@@ -4,6 +4,7 @@ import { prisma } from '@/server/db/client'
 import { getPlatformFlag } from '@/server/services/platformFlagService'
 import { isEmailConfigured } from '@/server/services/emailService'
 import { safeCallbackPath } from '@/lib/auth-redirect'
+import { signupSteps } from '@/lib/onboarding'
 import { VerifyEmailForm } from './VerifyEmailForm'
 
 export const metadata = { title: 'Confirm your email' }
@@ -38,6 +39,10 @@ export default async function VerifyEmailPage({
       email={session.user.email}
       mailerConfigured={await isEmailConfigured('EMAIL_VERIFICATION')}
       callbackUrl={callbackUrl ? destination : undefined}
+      // Part of signing up unless the code is on its way to an invitation.
+      steps={
+        callbackUrl && destination !== '/onboarding' ? null : signupSteps(true)
+      }
     />
   )
 }

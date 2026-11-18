@@ -1,4 +1,6 @@
+import { redirect } from 'next/navigation'
 import { getActiveOrganization } from '@/server/services/organizationService'
+import { shouldOnboard } from '@/server/onboarding'
 import { countOrdersNeedingAction } from '@/server/services/homeService'
 import { signOutAction } from '@/app/(dashboard)/actions'
 import { requireVerifiedEmail } from '@/server/auth/emailGate'
@@ -54,6 +56,19 @@ export default async function DashboardLayout({
     // render at all (BillingGate), and the warnings above them.
     getEntitlements(organization.id),
   ])
+
+  // A new owner whose workspace has never had a package goes through
+  // onboarding first, rather than meeting a locked dashboard.
+  if (
+    await shouldOnboard({
+      userId: session.user.id,
+      role,
+      platformRole: session.user.platformRole,
+      access: entitlements.access,
+    })
+  ) {
+    redirect('/onboarding')
+  }
 
   const initials =
     session.user.name

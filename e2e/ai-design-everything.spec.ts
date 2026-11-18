@@ -115,9 +115,11 @@ async function register(page: Page, email: string) {
   await page.goto('/register')
   await page.getByLabel('Name').fill('E2E AI Designer')
   await page.getByLabel('Email').fill(email)
-  await page.getByLabel('Password').fill('Sup3rSecure!Passw0rd')
+  await page
+    .getByLabel('Password', { exact: true })
+    .fill('Sup3rSecure!Passw0rd')
   await page.getByRole('button', { name: 'Create account' }).click()
-  await expect(page).toHaveURL(/\/dashboard/)
+  await expect(page).toHaveURL(/\/(dashboard|onboarding|verify-email)/)
   await startTrial(page)
 }
 

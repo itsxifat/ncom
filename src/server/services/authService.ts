@@ -227,3 +227,33 @@ export async function registerUser({
     return { ...user, isFirstAdmin }
   })
 }
+
+/**
+ * Sets a new password for the account at this address, after its owner has
+ * proved they read the inbox (a PASSWORD_RESET code — see the reset action).
+ * Proving that also confirms the address, so a reset marks it verified.
+ * Returns the account's address as stored (what signing in matches on), or
+ * null when no account has this address.
+ */
+export async function setPasswordByEmail(
+  email: string,
+  password: string
+): Promise<string | null> {
+  // Addresses are stored as typed at signup, and the code was sent to the
+  // lower-cased form, so match without regard to case.
+  const user = await prisma.user.findFirst({
+    where: { email: { equals: email.trim(), mode: 'insensitive' } },
+    select: { id: true, email: true, emailVerified: true },
+  })
+  if (!user) return null
+
+  const passwordHash = await bcrypt.hash(password, BCRYPT_COST)
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      passwordHash,
+      ...(user.emailVerified ? {} : { emailVerified: new Date() }),
+    },
+  })
+  return user.email
+}

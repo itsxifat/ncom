@@ -1,136 +1,147 @@
 'use client'
 
 import Link from 'next/link'
-import { useActionState } from 'react'
+import { useActionState, useState } from 'react'
 import { registerAction } from '@/app/(auth)/actions'
-import { SIGNUP_PURPOSES } from '@/lib/validation/auth'
+import { GoogleSignInButton } from '@/components/app/google-sign-in-button'
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
-import {
+  AuthHeader,
   Field,
-  FieldDescription,
-  FieldError,
-  FieldGroup,
-  FieldLabel,
-} from '@/components/ui/field'
-import { Input } from '@/components/ui/input'
-import { Button } from '@/components/ui/button'
-import { FormSelect } from '@/components/store/form-controls'
-import {
-  AuthDivider,
-  GoogleSignInButton,
-} from '@/components/app/google-sign-in-button'
+  FormAlert,
+  OrDivider,
+  PasswordInput,
+  PasswordRules,
+  StepIndicator,
+  SubmitButton,
+  TextInput,
+} from '@/components/auth/auth-ui'
 
+/**
+ * The first step of signing up: just the account. What the business is and
+ * which package it starts on come next, in /onboarding, one question at a
+ * time.
+ */
 export function RegisterForm({
   googleEnabled,
   callbackUrl,
+  steps,
 }: {
   googleEnabled: boolean
   callbackUrl?: string
+  /** The signup steps, or null when this sign-up is joining someone else's workspace. */
+  steps: string[] | null
 }) {
   const [state, action, pending] = useActionState(registerAction, undefined)
+  const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
 
   const loginHref = callbackUrl
     ? `/login?callbackUrl=${encodeURIComponent(callbackUrl)}`
     : '/login'
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="font-display text-2xl font-semibold">
-          Create your account
-        </CardTitle>
-        <CardDescription>
-          Start your 7-day free trial — no payment needed.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
+    <div className="flex flex-col gap-8">
+      <AuthHeader
+        title={callbackUrl ? 'Create your account' : 'Start your free trial'}
+        subtitle={
+          callbackUrl
+            ? 'Make an account to accept your invitation.'
+            : '7 days free on any package. No payment needed, and it takes about two minutes.'
+        }
+      >
+        {steps && <StepIndicator steps={steps} current={0} className="mb-3" />}
+      </AuthHeader>
+
+      <div className="au-rise-2 flex flex-col gap-6">
         {googleEnabled && (
           <>
             <GoogleSignInButton
               label="Sign up with Google"
-              callbackUrl={callbackUrl}
+              callbackUrl={callbackUrl ?? '/onboarding'}
+              className="h-12 rounded-xl text-[15px]"
             />
-            <AuthDivider />
+            <OrDivider label="or sign up with email" />
           </>
         )}
 
-        <form action={action}>
+        <form action={action} className="flex flex-col gap-5">
           {callbackUrl && (
             <input type="hidden" name="callbackUrl" value={callbackUrl} />
           )}
-          <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor="name">Name</FieldLabel>
-              <Input id="name" name="name" autoComplete="name" required />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="email">Email</FieldLabel>
-              <Input
-                id="email"
-                name="email"
-                type="email"
-                autoComplete="email"
-                required
-              />
-              <FieldDescription>
-                We&apos;ll send a 6-digit code here to confirm it&apos;s yours.
-              </FieldDescription>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="password">Password</FieldLabel>
-              <Input
-                id="password"
-                name="password"
-                type="password"
-                autoComplete="new-password"
-                required
-              />
-              <FieldDescription>
-                At least 8 characters, with a letter and a number.
-              </FieldDescription>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="purpose">What brings you here?</FieldLabel>
-              <FormSelect id="purpose" name="purpose" defaultValue="">
-                <option value="">Prefer not to say</option>
-                {SIGNUP_PURPOSES.map((purpose) => (
-                  <option key={purpose.value} value={purpose.value}>
-                    {purpose.label}
-                  </option>
-                ))}
-              </FormSelect>
-              <FieldDescription>
-                Used to set up your first store — you can change anything later.
-              </FieldDescription>
-            </Field>
-            {state?.error && <FieldError>{state.error}</FieldError>}
-            {state?.notice && (
-              <p className="text-sm text-emerald-600">{state.notice}</p>
-            )}
-            <Field>
-              <Button type="submit" disabled={pending}>
-                {pending ? 'Creating account…' : 'Create account'}
-              </Button>
-            </Field>
-          </FieldGroup>
-        </form>
-
-        <p className="text-muted-foreground mt-6 text-center text-sm">
-          Already have an account?{' '}
-          <Link
-            href={loginHref}
-            className="text-foreground underline underline-offset-4"
+          <Field label="Your name" htmlFor="name">
+            <TextInput
+              id="name"
+              name="name"
+              autoComplete="name"
+              placeholder="Your full name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              required
+              autoFocus
+            />
+          </Field>
+          <Field
+            label="Email"
+            htmlFor="email"
+            hint="We’ll send a 6-digit code here to confirm it’s yours."
           >
-            Sign in
-          </Link>
-        </p>
-      </CardContent>
-    </Card>
+            <TextInput
+              id="email"
+              name="email"
+              type="email"
+              autoComplete="email"
+              placeholder="you@business.com"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              required
+            />
+          </Field>
+          <Field label="Password" htmlFor="password">
+            <PasswordInput
+              id="password"
+              name="password"
+              autoComplete="new-password"
+              placeholder="Make a password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              required
+            />
+            <PasswordRules value={password} />
+          </Field>
+
+          {state?.error && <FormAlert>{state.error}</FormAlert>}
+          {state?.notice && (
+            <FormAlert tone="success">{state.notice}</FormAlert>
+          )}
+
+          <SubmitButton pending={pending} pendingLabel="Creating your account…">
+            Create account
+          </SubmitButton>
+
+          <p className="text-muted-foreground text-center text-xs leading-relaxed">
+            By creating an account you agree to the{' '}
+            <Link href="/terms" className="hover:text-foreground underline">
+              Terms
+            </Link>{' '}
+            and{' '}
+            <Link href="/privacy" className="hover:text-foreground underline">
+              Privacy Policy
+            </Link>
+            .
+          </p>
+        </form>
+      </div>
+
+      <p className="au-rise-3 text-muted-foreground text-center text-sm">
+        Already have an account?{' '}
+        <Link
+          href={loginHref}
+          className="text-foreground font-semibold underline-offset-4 hover:underline"
+        >
+          Sign in
+        </Link>
+      </p>
+    </div>
   )
 }

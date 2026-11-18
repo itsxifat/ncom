@@ -32,6 +32,7 @@ const PROTECTED_PREFIXES = [
   '/invitations',
   '/labels',
   '/media',
+  '/onboarding',
   '/orders',
   '/organization',
   '/preview-render',

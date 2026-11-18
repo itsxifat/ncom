@@ -36,6 +36,16 @@ export default async function NewSitePage({
 
   const kind =
     query.kind === 'STORE' || query.kind === 'LANDING' ? query.kind : null
+  // Sent from the end of onboarding: a design suggested for what the business
+  // sells, and its name — the wizard opens on the last step with both filled.
+  const template =
+    typeof query.template === 'string'
+      ? templates.find(
+          (entry) => entry.key === query.template && entry.kind === kind
+        )
+      : undefined
+  const name =
+    typeof query.name === 'string' ? query.name.trim().slice(0, 80) : ''
 
   return (
     <NewSiteWizard
@@ -43,6 +53,8 @@ export default async function NewSitePage({
       templates={templates}
       askCurrency={!settings}
       initialKind={kind}
+      initialTemplate={template?.key ?? null}
+      initialName={template ? name : ''}
       aiAvailable={await aiBuilderAvailable()}
     />
   )

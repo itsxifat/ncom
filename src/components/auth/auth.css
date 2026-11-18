@@ -1,0 +1,221 @@
+/* Sign in, sign up and onboarding: the motion and the showcase panel.
+ * Everything else is Tailwind on the app's own tokens. */
+
+.au-rise {
+  animation: au-rise 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.au-rise-2 {
+  animation: au-rise 0.6s 0.08s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.au-rise-3 {
+  animation: au-rise 0.6s 0.16s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes au-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+.au-fill {
+  transform-origin: 0 50%;
+  animation: au-fill 0.9s 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes au-fill {
+  from {
+    transform: scaleX(0);
+  }
+}
+
+/* The panel beside the form: always ink, in both themes. */
+.au-panel {
+  position: sticky;
+  top: 0;
+  height: 100dvh;
+  padding: 12px;
+  box-sizing: border-box;
+}
+.au-panel-in {
+  position: relative;
+  height: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 32px;
+  padding: clamp(32px, 3.4vw, 56px);
+  border-radius: 28px;
+  overflow: hidden;
+  background: #0b0b0c;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  color: #f5f5f6;
+}
+.au-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #c4c4cc;
+}
+.au-eyebrow i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #d8f84e;
+}
+.au-title {
+  margin: 0;
+  max-width: 15ch;
+  font-family: var(--font-display);
+  font-size: clamp(34px, 3.3vw, 54px);
+  font-weight: 600;
+  line-height: 1.02;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+}
+.au-sub {
+  margin: 18px 0 0;
+  max-width: 440px;
+  font-size: 16px;
+  line-height: 1.6;
+  color: #b4b4bd;
+}
+
+/* Four notifications from one order, arriving newest-on-top: each holds a
+ * slot for 3s, moves down a slot, and leaves after the third. */
+.au-feed {
+  position: relative;
+  height: 244px;
+  max-width: 440px;
+}
+.au-note {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 72px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px 0 12px;
+  border-radius: 18px;
+  background: #17171b;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 24px 40px -24px rgba(0, 0, 0, 0.8);
+  opacity: 0;
+  animation: au-note 12s cubic-bezier(0.2, 0.8, 0.2, 1) infinite;
+  animation-delay: calc((var(--i) - 3) * 3s - 0.5s);
+}
+@keyframes au-note {
+  0% {
+    opacity: 0;
+    transform: translateY(-14px) scale(0.97);
+  }
+  4%,
+  25% {
+    opacity: 1;
+    transform: none;
+  }
+  29%,
+  50% {
+    opacity: 0.78;
+    transform: translateY(86px) scale(0.975);
+  }
+  54%,
+  75% {
+    opacity: 0.45;
+    transform: translateY(172px) scale(0.95);
+  }
+  79%,
+  100% {
+    opacity: 0;
+    transform: translateY(210px) scale(0.93);
+  }
+}
+.au-note-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.08);
+  color: #e4e4e7;
+}
+.au-note-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.au-note-icon[data-kind='shield'] {
+  background: rgba(74, 222, 128, 0.13);
+  color: #4ade80;
+}
+.au-note-icon[data-kind='cash'] {
+  background: #d8f84e;
+  color: #0b0b0c;
+}
+.au-note-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+.au-note-text b {
+  font-size: 14px;
+  font-weight: 600;
+  color: #f5f5f6;
+}
+.au-note-text span {
+  font-size: 12.5px;
+  color: #a1a1aa;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.au-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 22px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 14px;
+  font-weight: 600;
+  color: #e4e4e7;
+}
+.au-facts li {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.au-facts svg {
+  color: #d8f84e;
+}
+
+/* A short window: drop the feed rather than squeeze the headline. */
+@media (max-height: 760px) {
+  .au-feed {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .au-rise,
+  .au-rise-2,
+  .au-rise-3,
+  .au-fill {
+    animation: none;
+  }
+  .au-note {
+    animation: none;
+    opacity: 1;
+    transform: translateY(calc((3 - var(--i)) * 86px));
+  }
+  .au-note:first-child {
+    opacity: 0;
+  }
+}

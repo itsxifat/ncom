@@ -1,6 +1,12 @@
 'use client'
 
-import { useActionState, useState, useTransition } from 'react'
+import {
+  useActionState,
+  useEffect,
+  useRef,
+  useState,
+  useTransition,
+} from 'react'
 import { MailCheck } from 'lucide-react'
 import {
   resendVerificationCodeAction,
@@ -8,30 +14,26 @@ import {
 } from '@/app/(auth)/actions'
 import { signOutAction } from '@/app/(dashboard)/actions'
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
-import {
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldGroup,
-  FieldLabel,
-} from '@/components/ui/field'
-import { Input } from '@/components/ui/input'
-import { Button } from '@/components/ui/button'
+  AuthHeader,
+  CodeInput,
+  FormAlert,
+  StepIndicator,
+  SubmitButton,
+} from '@/components/auth/auth-ui'
+
+/** How long before "send a new code" can be pressed again. */
+const RESEND_AFTER_S = 45
 
 export function VerifyEmailForm({
   email,
   mailerConfigured,
   callbackUrl,
+  steps,
 }: {
   email: string
   mailerConfigured: boolean
   callbackUrl?: string
+  steps: string[] | null
 }) {
   const [state, action, pending] = useActionState(verifyEmailAction, undefined)
   // Not `useActionState`: the resend needs its own trigger, and a second form
@@ -41,96 +43,108 @@ export function VerifyEmailForm({
     notice?: string
   }>({})
   const [resending, startResend] = useTransition()
+  const [wait, setWait] = useState(RESEND_AFTER_S)
+  const formRef = useRef<HTMLFormElement>(null)
+  // A fresh set of boxes after a wrong code, so the next try starts clean.
+  const [attempt, setAttempt] = useState(0)
+  const [lastError, setLastError] = useState<string | undefined>()
+
+  if (state?.error !== lastError) {
+    setLastError(state?.error)
+    if (state?.error) setAttempt((n) => n + 1)
+  }
+
+  useEffect(() => {
+    if (wait <= 0) return
+    const timer = window.setTimeout(() => setWait((s) => s - 1), 1000)
+    return () => window.clearTimeout(timer)
+  }, [wait])
+
+  const stepIndex = steps?.indexOf('Confirm email') ?? -1
 
   return (
-    <Card>
-      <CardHeader>
-        <div className="bg-lime text-lime-foreground mb-4 flex size-11 items-center justify-center rounded-full">
-          <MailCheck className="size-5" />
-        </div>
-        <CardTitle className="font-display text-2xl font-semibold">
-          Confirm your email
-        </CardTitle>
-        <CardDescription>
-          We sent a 6-digit code to <strong>{email}</strong>. Enter it below to
-          finish setting up your account.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <form action={action}>
-          {callbackUrl && (
-            <input type="hidden" name="callbackUrl" value={callbackUrl} />
-          )}
-          <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor="code">Verification code</FieldLabel>
-              <Input
-                id="code"
-                name="code"
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                // 7 rather than 6: a browser that trims the value on paste
-                // should not silently drop a digit before validation sees it.
-                maxLength={7}
-                placeholder="123456"
-                className="text-center font-mono text-lg tracking-[0.3em]"
-                autoFocus
-                required
-              />
-              <FieldDescription>
-                The code expires 10 minutes after it was sent.
-              </FieldDescription>
-            </Field>
+    <div className="flex flex-col gap-8">
+      <AuthHeader
+        icon={<MailCheck className="size-5" />}
+        title="Check your inbox"
+        subtitle={
+          <>
+            We sent a 6-digit code to{' '}
+            <span className="text-foreground font-semibold">{email}</span>.
+            Enter it below — it works for 10 minutes.
+          </>
+        }
+      >
+        {steps && stepIndex >= 0 && (
+          <StepIndicator steps={steps} current={stepIndex} className="mb-3" />
+        )}
+      </AuthHeader>
 
-            {state?.error && <FieldError>{state.error}</FieldError>}
-            {resendState.error && <FieldError>{resendState.error}</FieldError>}
-            {resendState.notice && (
-              <p className="text-sm text-emerald-600">{resendState.notice}</p>
-            )}
+      <form
+        ref={formRef}
+        action={action}
+        className="au-rise-2 flex flex-col gap-5"
+      >
+        {callbackUrl && (
+          <input type="hidden" name="callbackUrl" value={callbackUrl} />
+        )}
+        <CodeInput
+          key={attempt}
+          name="code"
+          disabled={pending}
+          invalid={Boolean(state?.error)}
+          onComplete={() => formRef.current?.requestSubmit()}
+        />
 
-            <Field>
-              <Button type="submit" disabled={pending}>
-                {pending ? 'Checking…' : 'Confirm email'}
-              </Button>
-            </Field>
-          </FieldGroup>
+        {state?.error && <FormAlert>{state.error}</FormAlert>}
+        {resendState.error && <FormAlert>{resendState.error}</FormAlert>}
+        {resendState.notice && !state?.error && (
+          <FormAlert tone="success">{resendState.notice}</FormAlert>
+        )}
+        {!mailerConfigured && (
+          <FormAlert>
+            No mail server is set up on this platform yet, so codes can’t be
+            sent. Contact your administrator.
+          </FormAlert>
+        )}
+
+        <SubmitButton pending={pending} pendingLabel="Checking…">
+          Confirm email
+        </SubmitButton>
+      </form>
+
+      <div className="au-rise-3 flex flex-col items-center gap-3 text-sm">
+        <p className="text-muted-foreground">
+          Didn’t get it? Check spam, or{' '}
+          <button
+            type="button"
+            disabled={resending || !mailerConfigured || wait > 0}
+            onClick={() =>
+              startResend(async () => {
+                const result = (await resendVerificationCodeAction()) ?? {}
+                setResendState(result)
+                if (!result.error) setWait(RESEND_AFTER_S)
+              })
+            }
+            className="text-foreground font-semibold underline-offset-4 hover:underline disabled:cursor-default disabled:no-underline disabled:opacity-60"
+          >
+            {resending
+              ? 'sending…'
+              : wait > 0
+                ? `send a new code in ${wait}s`
+                : 'send a new code'}
+          </button>
+        </p>
+
+        <form action={signOutAction}>
+          <button
+            type="submit"
+            className="text-muted-foreground hover:text-foreground text-[13px] underline-offset-4 hover:underline"
+          >
+            Wrong address? Sign out and start again
+          </button>
         </form>
-
-        <div className="mt-6 flex flex-col gap-3 text-center text-sm">
-          <p className="text-muted-foreground">
-            Didn&apos;t get it? Check spam, then{' '}
-            <button
-              type="button"
-              disabled={resending || !mailerConfigured}
-              onClick={() =>
-                startResend(async () => {
-                  setResendState((await resendVerificationCodeAction()) ?? {})
-                })
-              }
-              className="text-foreground underline underline-offset-4 disabled:opacity-50"
-            >
-              {resending ? 'sending…' : 'send a new code'}
-            </button>
-            .
-          </p>
-
-          {!mailerConfigured && (
-            <p className="text-destructive text-xs">
-              No mail server is configured on this platform yet, so codes cannot
-              be sent. Contact your administrator.
-            </p>
-          )}
-
-          <form action={signOutAction}>
-            <button
-              type="submit"
-              className="text-muted-foreground hover:text-foreground text-xs underline underline-offset-4"
-            >
-              Sign out and use a different account
-            </button>
-          </form>
-        </div>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   )
 }

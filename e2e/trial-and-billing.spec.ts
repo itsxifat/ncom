@@ -26,34 +26,42 @@ test('trial: choose a package, build, let the trial lapse, get locked', async ({
   await db.connect()
 
   try {
-    await test.step('register: no package yet, so the dashboard asks for one', async () => {
+    await test.step('register: onboarding asks for the business, then a package', async () => {
       await page.goto('/register')
       await page.getByLabel('Name').fill('Trial Owner')
       await page.getByLabel('Email').fill(email)
-      await page.getByLabel('Password').fill('Sup3rSecure!Passw0rd')
+      await page
+        .getByLabel('Password', { exact: true })
+        .fill('Sup3rSecure!Passw0rd')
       await page.getByRole('button', { name: 'Create account' }).click()
-      await page.waitForURL(/\/(dashboard|verify-email)/, { timeout: 30_000 })
+      await page.waitForURL(/\/(onboarding|verify-email)/, { timeout: 30_000 })
       await db.query(
         `UPDATE "User" SET "emailVerified" = now() WHERE email = $1`,
         [email]
       )
+      // No package yet, so the dashboard sends a new owner to onboarding.
       await page.goto('/dashboard')
+      await expect(page).toHaveURL(/\/onboarding/)
+      await page.getByLabel('Business name').fill('Trial Shop')
+      await page.getByRole('button', { name: 'Continue' }).click()
       await expect(
-        page.getByRole('heading', { name: 'Choose a package to get started' })
+        page.getByRole('heading', { name: /The first 7 days are free/ })
       ).toBeVisible()
     })
 
     await test.step('start Starter on its free trial, no payment', async () => {
-      await page.getByText('See packages').first().click()
-      await expect(page).toHaveURL(/\/billing\/plans/)
+      await page.getByRole('radio', { name: /^Starter\b/ }).click()
       await page
-        .getByRole('heading', { name: 'Starter', exact: true, level: 3 })
+        .getByRole('button', { name: /Start my free trial on Starter/ })
         .click()
-      await expect(page.getByText('Try Starter free for 7 days')).toBeVisible()
-      await page.getByRole('button', { name: 'Start free trial' }).click()
-      await expect(page).toHaveURL(/\/billing\?trial=started/)
+      await expect(page.getByText(/Starter is free until/)).toBeVisible({
+        timeout: 30_000,
+      })
+      await page.goto('/billing')
+      // Next keeps the page it came from mounted but hidden, so match the one
+      // on screen.
       await expect(
-        page.getByText(/Free trial of Starter — 7 days left/)
+        page.getByText(/Free trial of Starter — 7 days left/).last()
       ).toBeVisible()
     })
 

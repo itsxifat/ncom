@@ -2,7 +2,11 @@ import 'server-only'
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { prisma } from '@/server/db/client'
-import { requireAuth, requireOrgAccess } from '@/server/auth/rbac'
+import {
+  requireAuth,
+  requireOrgAccess,
+  type OrgAccessOptions,
+} from '@/server/auth/rbac'
 import { slugify, withRandomSuffix } from '@/lib/slug'
 
 const ACTIVE_ORG_COOKIE = 'ncom_active_org'
@@ -61,9 +65,11 @@ export async function setActiveOrganizationCookie(organizationId: string) {
  */
 export async function updateOrganization(
   organizationId: string,
-  input: { name: string }
+  input: { name: string },
+  /** Onboarding names a workspace before it has a package — see rbac. */
+  options: OrgAccessOptions = {}
 ) {
-  await requireOrgAccess(organizationId, 'ADMIN')
+  await requireOrgAccess(organizationId, 'ADMIN', options)
 
   const slug = await uniqueOrgSlugExcluding(input.name, organizationId)
 

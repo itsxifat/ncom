@@ -4,6 +4,7 @@ import { useActionState } from 'react'
 import { googleSignInAction } from '@/app/(auth)/actions'
 import { Button } from '@/components/ui/button'
 import { FieldError } from '@/components/ui/field'
+import { cn } from '@/lib/utils'
 
 /**
  * The Google mark, inline.
@@ -39,9 +40,11 @@ function GoogleMark() {
 export function GoogleSignInButton({
   label,
   callbackUrl,
+  className,
 }: {
   label: string
   callbackUrl?: string
+  className?: string
 }) {
   const [state, action, pending] = useActionState(googleSignInAction, undefined)
 
@@ -54,7 +57,7 @@ export function GoogleSignInButton({
         type="submit"
         variant="outline"
         disabled={pending}
-        className="w-full"
+        className={cn('w-full', className)}
       >
         <GoogleMark />
         {pending ? 'Redirecting…' : label}

@@ -1,8 +1,12 @@
 import { redirect } from 'next/navigation'
 import { isGoogleAuthConfigured } from '@/server/auth/auth'
 import { getPlatformFlag } from '@/server/services/platformFlagService'
+import { emailStepRequired } from '@/server/onboarding'
 import { safeCallbackPath } from '@/lib/auth-redirect'
+import { signupSteps } from '@/lib/onboarding'
 import { RegisterForm } from './RegisterForm'
+
+export const metadata = { title: 'Start your free trial' }
 
 export default async function RegisterPage({
   searchParams,
@@ -14,11 +18,15 @@ export default async function RegisterPage({
     isGoogleAuthConfigured && (await getPlatformFlag('auth.googleLoginEnabled'))
 
   const { callbackUrl } = await searchParams
+  const callback = callbackUrl ? safeCallbackPath(callbackUrl) : undefined
 
   return (
     <RegisterForm
       googleEnabled={googleEnabled}
-      callbackUrl={callbackUrl ? safeCallbackPath(callbackUrl) : undefined}
+      callbackUrl={callback}
+      // Someone signing up to accept an invitation joins that workspace; the
+      // onboarding steps are for people starting their own.
+      steps={callback ? null : signupSteps(await emailStepRequired())}
     />
   )
 }

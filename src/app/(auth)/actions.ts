@@ -7,10 +7,13 @@ import { prisma } from '@/server/db/client'
 import {
   loginSchema,
   otpCodeSchema,
+  passwordResetRequestSchema,
+  passwordResetSchema,
   registerSchema,
 } from '@/lib/validation/auth'
 import {
   registerUser,
+  setPasswordByEmail,
   EmailAlreadyInUseError,
 } from '@/server/services/authService'
 import { checkRateLimit, getClientIp } from '@/lib/rate-limit'
@@ -135,11 +138,12 @@ export async function registerAction(
 
   // The account that claimed the administrator seat lands in the admin panel,
   // so a fresh install's first act is obvious rather than something to go
-  // looking for. An explicit callback outranks that: someone who got here from
-  // an invitation link came to join a workspace, not to tour the admin panel.
+  // looking for. Everyone else carries on into onboarding — their business,
+  // then a package. An explicit callback outranks both: someone who got here
+  // from an invitation link came to join a workspace.
   const destination = safeCallbackPath(
     formData.get('callbackUrl'),
-    isFirstAdmin ? '/admin' : '/dashboard'
+    isFirstAdmin ? '/admin' : '/onboarding'
   )
 
   try {
@@ -263,4 +267,123 @@ export async function resendVerificationCodeAction(): Promise<AuthActionState> {
   }
 
   return { notice: 'A new code is on its way.' }
+}
+
+export type PasswordResetState =
+  | { error?: string; notice?: string; stage?: 'code'; email?: string }
+  | undefined
+
+/**
+ * Sends a password-reset code. The answer is the same whether or not an
+ * account uses the address, so this cannot be used to find out who has one.
+ */
+export async function requestPasswordResetAction(
+  _prevState: PasswordResetState,
+  formData: FormData
+): Promise<PasswordResetState> {
+  const ip = await getClientIp()
+  const rateLimit = await checkRateLimit(`reset-request:${ip}`, 5, 15 * 60)
+  if (!rateLimit.allowed) {
+    return { error: 'Too many requests. Wait a few minutes and try again.' }
+  }
+
+  const parsed = passwordResetRequestSchema.safeParse({
+    email: formData.get('email'),
+  })
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? 'Enter your email.' }
+  }
+  const email = parsed.data.email
+
+  if (!(await isEmailConfigured('PASSWORD_RESET'))) {
+    return {
+      error:
+        'Password reset emails aren’t set up on this platform yet. Contact us and we’ll help you back in.',
+    }
+  }
+
+  const user = await prisma.user.findFirst({
+    where: { email: { equals: email, mode: 'insensitive' } },
+    select: { id: true, isSuspended: true },
+  })
+
+  if (user && !user.isSuspended) {
+    try {
+      await issueOtp({ email, purpose: 'PASSWORD_RESET', userId: user.id })
+    } catch (error) {
+      if (error instanceof OtpError) return { error: error.message }
+      console.error('Could not send a password reset code:', error)
+      return { error: 'Could not send the code. Try again shortly.' }
+    }
+  }
+
+  return {
+    stage: 'code',
+    email,
+    notice: 'If an account uses this address, a 6-digit code is on its way.',
+  }
+}
+
+/** Checks the emailed code, sets the new password and signs the person in. */
+export async function resetPasswordAction(
+  _prevState: PasswordResetState,
+  formData: FormData
+): Promise<PasswordResetState> {
+  const ip = await getClientIp()
+  const rateLimit = await checkRateLimit(`reset:${ip}`, 20, 15 * 60)
+  const email = String(formData.get('email') ?? '')
+  if (!rateLimit.allowed) {
+    return {
+      stage: 'code',
+      email,
+      error: 'Too many attempts. Try again in a few minutes.',
+    }
+  }
+
+  const parsed = passwordResetSchema.safeParse({
+    email,
+    code: formData.get('code'),
+    password: formData.get('password'),
+  })
+  if (!parsed.success) {
+    return {
+      stage: 'code',
+      email,
+      error: parsed.error.issues[0]?.message ?? 'Check the code and password.',
+    }
+  }
+
+  try {
+    await verifyOtp({
+      email: parsed.data.email,
+      purpose: 'PASSWORD_RESET',
+      code: parsed.data.code,
+    })
+  } catch (error) {
+    if (error instanceof OtpError) {
+      return { stage: 'code', email, error: error.message }
+    }
+    throw error
+  }
+
+  const storedEmail = await setPasswordByEmail(
+    parsed.data.email,
+    parsed.data.password
+  )
+  if (!storedEmail) {
+    return { stage: 'code', email, error: 'Request a new code to continue.' }
+  }
+
+  try {
+    await signIn('credentials', {
+      email: storedEmail,
+      password: parsed.data.password,
+      redirectTo: '/dashboard',
+    })
+  } catch (error) {
+    if (error instanceof AuthError) {
+      redirect('/login?reset=1')
+    }
+    throw error
+  }
 }

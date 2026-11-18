@@ -17,7 +17,12 @@
 export const DEFAULT_POST_AUTH_PATH = '/dashboard'
 
 /** Bouncing back to an auth screen after authenticating is just a loop. */
-const AUTH_PATHS = new Set(['/login', '/register', '/verify-email'])
+const AUTH_PATHS = new Set([
+  '/login',
+  '/register',
+  '/verify-email',
+  '/forgot-password',
+])
 
 export function safeCallbackPath(
   raw: unknown,
