@@ -1,9 +1,14 @@
+import Image from 'next/image'
 import { SectionIntro } from '../ui'
 
 /**
  * Building with AI, three ways — each card a complete little scene that plays
  * on a loop and never sits empty: a prompt becoming a page, a chat ending in a
  * pasted design, and a code editor saving a draft.
+ *
+ * The page the prompt makes is drawn as a real one — the product's photo
+ * (Unsplash, free licence: photo-1669281393011-c335050cf0e9) and its Bangla
+ * copy — not grey placeholder bars.
  */
 
 function Badge({
@@ -53,24 +58,35 @@ export function AiBuilder() {
               </span>
               <i className="ai-caret" />
             </div>
-            <div className="ai-page">
+            <div className="ai-page" lang="bn">
               <div className="ai-block ai-b1">
-                <span className="ai-dot" />
-                <span className="ai-line" style={{ width: '62%' }} />
-                <span
-                  className="ai-line ai-line-strong"
-                  style={{ width: '84%' }}
-                />
+                <span className="ai-photo">
+                  <Image
+                    src="/marketing/showcase/hair-oil.jpg"
+                    alt=""
+                    width={80}
+                    height={80}
+                    sizes="36px"
+                  />
+                </span>
+                <span className="ai-hero">
+                  <b>অর্গানিক রোজমেরি হেয়ার অয়েল</b>
+                  <span>
+                    ১০০ মিলি · <strong>৳৬৫০</strong> <s>৳৮৫০</s>
+                  </span>
+                </span>
               </div>
               <div className="ai-block ai-b2">
-                <span className="ai-pill" />
-                <span className="ai-pill" data-on="" />
-                <span className="ai-pill" />
+                <span className="ai-pill">১ বোতল</span>
+                <span className="ai-pill" data-on="">
+                  ২ বোতল · ৳১,২০০
+                </span>
+                <span className="ai-pill">৩ বোতল</span>
               </div>
               <div className="ai-block ai-b3">
-                <span className="ai-field" />
-                <span className="ai-field" />
-                <span className="ai-cta">অর্ডার কনফার্ম করুন</span>
+                <span className="ai-field">আপনার নাম</span>
+                <span className="ai-field">মোবাইল</span>
+                <span className="ai-cta">অর্ডার করুন</span>
               </div>
             </div>
             <span className="ai-status">

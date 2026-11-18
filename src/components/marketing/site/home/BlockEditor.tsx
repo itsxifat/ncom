@@ -1,8 +1,12 @@
+import Image from 'next/image'
+
 /**
  * The editor: any block, styled separately for computer, tablet and phone.
  *
  * Ported from the NCOM homepage design (Claude Design canvas, Main.dc.html):
  * inline styles and data-hover hooks as designed; keyframes live in site.css.
+ * The page on the canvas carries the product's real photo
+ * (public/marketing/showcase/honey-white.jpg).
  */
 export function BlockEditor() {
   return (
@@ -382,7 +386,22 @@ export function BlockEditor() {
                 >
                   ঢাকার ভেতরে ফ্রি ডেলিভারি
                 </div>
-                <div style={{ padding: '44px 22px 26px' }}>
+                <div
+                  style={{
+                    position: 'relative',
+                    height: '150px',
+                    background: '#f4efe6',
+                  }}
+                >
+                  <Image
+                    src="/marketing/showcase/honey-white.jpg"
+                    alt=""
+                    fill
+                    sizes="(max-width: 760px) 90vw, 560px"
+                    style={{ objectFit: 'cover', objectPosition: '50% 62%' }}
+                  />
+                </div>
+                <div style={{ padding: '40px 22px 26px' }}>
                   <div
                     style={{
                       position: 'relative',

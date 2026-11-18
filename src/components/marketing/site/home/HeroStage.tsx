@@ -1,156 +1,288 @@
 'use client'
 
+import Image from 'next/image'
 import { useEffect, useRef, useState } from 'react'
 import {
-  BarChart3,
+  ChartColumn,
   Check,
-  Home,
-  LayoutTemplate,
+  ChevronDown,
+  Ellipsis,
+  House,
+  Lock,
+  MapPin,
   Package,
+  PanelsTopLeft,
+  Printer,
+  ScanLine,
+  Search,
   Settings,
   ShieldCheck,
   ShoppingBag,
+  Tag,
   Truck,
   Users,
+  X,
 } from 'lucide-react'
 
 /**
- * The hero's product scene: a seller's landing page on a phone takes an order,
- * the order lands in the NCOM dashboard, the buyer's delivery record is
- * checked, the parcel is booked with Steadfast, and the cash is collected —
- * on a loop, with the counters moving as it goes.
+ * The hero's product scene, drawn as the real thing: a buyer orders from a
+ * seller's Bangla landing page on a phone (opened from a Facebook ad, so in
+ * Facebook's in-app browser), and the order lands in the NCOM dashboard —
+ * the same menu, wording and order panel as the app. There the buyer's
+ * delivery record is checked, the parcel is booked with Steadfast, and the
+ * cash comes in. On a loop, one buyer after another.
  *
- * Drawn at a fixed 1200×660 and scaled to its column, so it reads the same at
- * any width. It only runs while on screen, follows the pointer a little for
- * depth, and holds still for anyone who prefers reduced motion.
+ * Product photos are Unsplash free-licence shots in public/marketing/showcase
+ * (see PagesAndStores.tsx for the source IDs).
+ *
+ * Drawn at a fixed 1200×660 (620×760 on phones) and scaled to its column. It
+ * only runs while on screen, follows the pointer a little for depth, and holds
+ * still for anyone who prefers reduced motion.
  */
+
+type PackKey = 'single' | 'family' | 'trio'
+
+const PACKS: Record<
+  PackKey,
+  {
+    en: string
+    bn: string
+    bnNote: string
+    price: number
+    photo: string
+    tag?: string
+  }
+> = {
+  single: {
+    en: 'Single · 500 g',
+    bn: '১ বোতল',
+    bnNote: '৫০০ গ্রাম',
+    price: 850,
+    photo: '/marketing/showcase/honey-jar.jpg',
+  },
+  family: {
+    en: 'Family pack · 2 × 500 g',
+    bn: 'ফ্যামিলি প্যাক',
+    bnNote: '২ বোতল · ১ কেজি',
+    price: 1550,
+    photo: '/marketing/showcase/honey-white.jpg',
+    tag: 'জনপ্রিয়',
+  },
+  trio: {
+    en: '3 bottles + dipper',
+    bn: '৩ বোতল + ডিপার',
+    bnNote: '১.৫ কেজি · কাঠের ডিপার ফ্রি',
+    price: 2200,
+    photo: '/marketing/showcase/honey-comb.jpg',
+  },
+}
+const PACK_ORDER: PackKey[] = ['single', 'family', 'trio']
+
+interface Buyer {
+  name: string
+  nameBn: string
+  phone: string
+  area: string
+  areaBn: string
+  pack: PackKey
+  delivered: number
+  refused: number
+}
+
+/** Who orders next, in turn, with their record across couriers. */
+const BUYERS: Buyer[] = [
+  {
+    name: 'Rahima Akter',
+    nameBn: 'রহিমা আক্তার',
+    phone: '01712-345678',
+    area: 'Mirpur 10, Dhaka',
+    areaBn: 'বাসা ১২, রোড ৫, মিরপুর ১০',
+    pack: 'family',
+    delivered: 23,
+    refused: 1,
+  },
+  {
+    name: 'Tanvir Hasan',
+    nameBn: 'তানভীর হাসান',
+    phone: '01819-224466',
+    area: 'Agrabad, Chattogram',
+    areaBn: 'সিডিএ আবাসিক, আগ্রাবাদ',
+    pack: 'single',
+    delivered: 11,
+    refused: 1,
+  },
+  {
+    name: 'Nusrat Jahan',
+    nameBn: 'নুসরাত জাহান',
+    phone: '01555-781203',
+    area: 'Zindabazar, Sylhet',
+    areaBn: 'জিন্দাবাজার, সিলেট',
+    pack: 'trio',
+    delivered: 31,
+    refused: 2,
+  },
+  {
+    name: 'Arif Chowdhury',
+    nameBn: 'আরিফ চৌধুরী',
+    phone: '01911-603954',
+    area: 'Uttara, Dhaka',
+    areaBn: 'সেক্টর ৭, উত্তরা',
+    pack: 'family',
+    delivered: 8,
+    refused: 0,
+  },
+  {
+    name: 'Sharmin Sultana',
+    nameBn: 'শারমিন সুলতানা',
+    phone: '01633-918275',
+    area: 'Shaheb Bazar, Rajshahi',
+    areaBn: 'সাহেব বাজার, রাজশাহী',
+    pack: 'single',
+    delivered: 17,
+    refused: 1,
+  },
+]
+
+type Status = 'New' | 'Booked' | 'In transit' | 'Delivered' | 'Held'
 
 interface Order {
   id: number
   name: string
+  phone: string
   area: string
-  item: string
-  total: number
+  pack: PackKey
   check: 'checking' | 'ok' | 'warn'
-  courier: string
-  status: 'New' | 'Booked' | 'In transit' | 'Delivered' | 'Held'
+  delivered: number
+  refused: number
+  status: Status
+  consignment?: string
 }
-
-/** Who orders next, in turn. Totals are the Madhuban price list. */
-const BUYERS = [
-  {
-    name: 'Rahima Akter',
-    area: 'Mirpur 10, Dhaka',
-    item: 'Family pack · 2 × 500 g',
-    total: 1550,
-  },
-  {
-    name: 'Tanvir Hasan',
-    area: 'Agrabad, Chattogram',
-    item: 'Single · 500 g',
-    total: 850,
-  },
-  {
-    name: 'Nusrat Jahan',
-    area: 'Zindabazar, Sylhet',
-    item: '3 bottles + dipper',
-    total: 2200,
-  },
-  {
-    name: 'Arif Chowdhury',
-    area: 'Uttara, Dhaka',
-    item: 'Family pack · 2 × 500 g',
-    total: 1550,
-  },
-  {
-    name: 'Sharmin Sultana',
-    area: 'Shaheb Bazar, Rajshahi',
-    item: 'Single · 500 g',
-    total: 850,
-  },
-]
 
 const START: Order[] = [
   {
     id: 10482,
     name: 'Mahfuz Rahman',
+    phone: '01715-660231',
     area: 'Dhanmondi, Dhaka',
-    item: 'Single · 500 g',
-    total: 850,
+    pack: 'single',
     check: 'ok',
-    courier: 'Pathao',
+    delivered: 14,
+    refused: 0,
     status: 'In transit',
+    consignment: 'SF-128472911',
   },
   {
     id: 10481,
     name: 'Farzana Islam',
+    phone: '01822-417790',
     area: 'Khulna Sadar',
-    item: 'Family pack · 2 × 500 g',
-    total: 1550,
+    pack: 'family',
     check: 'ok',
-    courier: 'Steadfast',
+    delivered: 9,
+    refused: 1,
     status: 'Delivered',
+    consignment: 'SF-128472907',
   },
   {
     id: 10480,
     name: 'Sabbir Ahmed',
+    phone: '01688-102938',
     area: 'Cumilla Sadar',
-    item: '3 bottles + dipper',
-    total: 2200,
+    pack: 'trio',
     check: 'warn',
-    courier: '—',
+    delivered: 2,
+    refused: 5,
     status: 'Held',
   },
   {
     id: 10479,
     name: 'Jannatul Ferdous',
+    phone: '01521-339874',
     area: 'Bashundhara, Dhaka',
-    item: 'Single · 500 g',
-    total: 850,
+    pack: 'single',
     check: 'ok',
-    courier: 'Steadfast',
+    delivered: 26,
+    refused: 1,
     status: 'Delivered',
+    consignment: 'PT-DHK-55102',
+  },
+  {
+    id: 10478,
+    name: 'Mehedi Hasan',
+    phone: '01913-770412',
+    area: 'Boalia, Rajshahi',
+    pack: 'family',
+    check: 'ok',
+    delivered: 5,
+    refused: 0,
+    status: 'Delivered',
+    consignment: 'SF-128472893',
   },
 ]
 
 type Phase =
-  'idle' | 'press' | 'sent' | 'row' | 'checked' | 'booked' | 'delivered'
+  | 'idle'
+  | 'scroll'
+  | 'pick'
+  | 'type'
+  | 'press'
+  | 'sent'
+  | 'row'
+  | 'checked'
+  | 'booking'
+  | 'booked'
+  | 'delivered'
 
 /** When each phase starts, in ms from the top of the loop. */
 const TIMELINE: [Phase, number][] = [
   ['idle', 0],
-  ['press', 900],
-  ['sent', 1250],
-  ['row', 2150],
-  ['checked', 3500],
-  ['booked', 4900],
-  ['delivered', 6600],
+  ['scroll', 700],
+  ['pick', 1500],
+  ['type', 1900],
+  ['press', 3400],
+  ['sent', 3700],
+  ['row', 4600],
+  ['checked', 6000],
+  ['booking', 7100],
+  ['booked', 7400],
+  ['delivered', 9100],
 ]
-const LOOP_MS = 9200
+const LOOP_MS = 11600
 
 const taka = (n: number) => `৳${n.toLocaleString('en-IN')}`
+const BN_DIGITS = '০১২৩৪৫৬৭৮৯'
+const bn = (text: string | number) =>
+  String(text).replace(/\d/g, (d) => BN_DIGITS[Number(d)]!)
+const bnTaka = (n: number) => `৳${bn(n.toLocaleString('en-IN'))}`
+const rate = (o: { delivered: number; refused: number }) =>
+  Math.round((o.delivered / Math.max(1, o.delivered + o.refused)) * 100)
+const masked = (phone: string) => `${phone.slice(0, 6)}•••${phone.slice(-3)}`
 
 export function HeroStage() {
   const scalerRef = useRef<HTMLDivElement>(null)
   const stageRef = useRef<HTMLDivElement>(null)
+  const viewRef = useRef<HTMLDivElement>(null)
+  const pageRef = useRef<HTMLDivElement>(null)
   const [ready, setReady] = useState(false)
   const [phase, setPhase] = useState<Phase>('idle')
   const [turn, setTurn] = useState(0)
   const [rows, setRows] = useState<Order[]>(START)
-  const [ordersToday, setOrdersToday] = useState(127)
+  const [ordersToday, setOrdersToday] = useState(132)
   const [collected, setCollected] = useState(184350)
   const [bump, setBump] = useState<'orders' | 'collected' | null>(null)
   const [running, setRunning] = useState(false)
 
   const buyer = BUYERS[turn % BUYERS.length]!
   const nextId = 10483 + turn
+  const pack = PACKS[buyer.pack]
 
-  // Scale the 1200px stage to its column.
+  // Scale the stage to its column, and measure how far the landing page
+  // scrolls to bring the order button into view.
   useEffect(() => {
     const scaler = scalerRef.current
     const stage = stageRef.current
     if (!scaler || !stage) return
-    // Phones get their own composition (see site.css): 620px wide, same
+    // Phones get their own composition (see site.css), at the same
     // breakpoint as the CSS that gives the box its height.
     const compactQuery = window.matchMedia('(max-width: 760px)')
     const fit = () => {
@@ -160,6 +292,14 @@ export function HeroStage() {
         '--s',
         String(scaler.clientWidth / (compact ? 620 : 1200))
       )
+      const view = viewRef.current
+      const page = pageRef.current
+      if (view && page) {
+        stage.style.setProperty(
+          '--hx-end',
+          `${Math.max(0, page.scrollHeight - view.clientHeight)}px`
+        )
+      }
       setReady(true)
     }
     fit()
@@ -169,7 +309,7 @@ export function HeroStage() {
   }, [])
 
   // Run only while visible, and never for reduced motion — that visitor
-  // sees the dashboard as a still picture.
+  // sees the scene as a still picture.
   useEffect(() => {
     const scaler = scalerRef.current
     if (!scaler) return
@@ -182,8 +322,8 @@ export function HeroStage() {
     return () => observer.disconnect()
   }, [])
 
-  // The loop: one order, start to cash. Each step changes the dashboard as it
-  // happens, from its timer.
+  // The loop: one order, from the buyer's tap to the cash. Each step changes
+  // the dashboard as it happens, from its timer.
   useEffect(() => {
     if (!running) return
     const id = 10483 + turn
@@ -192,43 +332,48 @@ export function HeroStage() {
       setRows((current) =>
         current.map((row) => (row.id === id ? change(row) : row))
       )
-    const steps: Record<Phase, () => void> = {
-      idle: () => {},
-      press: () => {},
-      sent: () => {},
+    const steps: Partial<Record<Phase, () => void>> = {
       row: () => {
         setRows((current) =>
           [
             {
               id,
-              ...who,
+              name: who.name,
+              phone: who.phone,
+              area: who.area,
+              pack: who.pack,
+              delivered: who.delivered,
+              refused: who.refused,
               check: 'checking' as const,
-              courier: '—',
               status: 'New' as const,
             },
             ...current,
-          ].slice(0, 5)
+          ].slice(0, 6)
         )
         setOrdersToday((n) => n + 1)
         setBump('orders')
       },
       checked: () => update((row) => ({ ...row, check: 'ok' })),
       booked: () =>
-        update((row) => ({ ...row, courier: 'Steadfast', status: 'Booked' })),
+        update((row) => ({
+          ...row,
+          status: 'Booked',
+          consignment: `SF-${128472913 + turn}`,
+        })),
       delivered: () => {
         update((row) => ({ ...row, status: 'Delivered' }))
-        setCollected((n) => n + who.total)
+        setCollected((n) => n + PACKS[who.pack].price)
         setBump('collected')
       },
     }
     const timers = TIMELINE.map(([next, at]) =>
       window.setTimeout(() => {
         setPhase(next)
-        steps[next]()
+        steps[next]?.()
       }, at)
     )
-    timers.push(window.setTimeout(() => setBump(null), 2150 + 1400))
-    timers.push(window.setTimeout(() => setBump(null), 6600 + 1400))
+    timers.push(window.setTimeout(() => setBump(null), 4600 + 1400))
+    timers.push(window.setTimeout(() => setBump(null), 9100 + 1400))
     timers.push(
       window.setTimeout(() => {
         setPhase('idle')
@@ -238,7 +383,7 @@ export function HeroStage() {
     return () => timers.forEach((timer) => window.clearTimeout(timer))
   }, [running, turn])
 
-  // A little depth: layers drift with the pointer.
+  // A little depth: the phone and the window drift with the pointer.
   useEffect(() => {
     const stage = stageRef.current
     if (
@@ -265,19 +410,19 @@ export function HeroStage() {
     }
   }, [])
 
-  const after = (p: Phase) =>
-    TIMELINE.findIndex(([name]) => name === phase) >=
-    TIMELINE.findIndex(([name]) => name === p)
-  const checking = phase === 'row'
-  const toast =
-    phase === 'booked' ? 'booked' : phase === 'delivered' ? 'delivered' : null
+  const at = TIMELINE.findIndex(([name]) => name === phase)
+  const after = (p: Phase) => at >= TIMELINE.findIndex(([name]) => name === p)
+  const picked: PackKey = after('pick') ? buyer.pack : 'single'
+  const selected = rows[0]!
+  const isNew = selected.id === nextId
+  const pendingOrders = 3 + (after('row') && !after('booked') ? 1 : 0)
 
   return (
     <div
       ref={scalerRef}
       className="hx-scaler"
       role="img"
-      aria-label="NCOM in action: an order from a seller's Bangla landing page arrives in the NCOM dashboard, the buyer's delivery record is checked, the parcel is booked with Steadfast, and the cash is collected."
+      aria-label="NCOM in action: a buyer orders from a seller's Bangla landing page on a phone, and the order arrives in the NCOM dashboard, where the buyer's delivery record is checked, the parcel is booked with Steadfast, and the cash is collected."
     >
       <div
         ref={stageRef}
@@ -286,7 +431,7 @@ export function HeroStage() {
         aria-hidden="true"
       >
         <div className="hx-tilt">
-          {/* Dashboard */}
+          {/* The NCOM dashboard */}
           <div className="hx-layer hx-win">
             <div className="hx-bar">
               <div className="hx-dots">
@@ -294,61 +439,78 @@ export function HeroStage() {
                 <i />
                 <i />
               </div>
-              <div className="hx-url">ncom.bd/orders</div>
+              <div className="hx-url">
+                <Lock size={10} strokeWidth={2.5} />
+                ncom.bd/orders
+              </div>
               <span style={{ width: 52 }} />
             </div>
             <div className="hx-body">
               <nav className="hx-side">
                 <div className="hx-ws">
-                  <span>ম</span>Madhuban Organics
+                  <span className="hx-ws-logo">ম</span>
+                  <span className="hx-ws-name">
+                    Madhuban Organics
+                    <small>Business</small>
+                  </span>
+                  <ChevronDown size={14} />
                 </div>
                 <div className="hx-nav">
-                  <Home size={15} />
+                  <House size={16} />
                   Home
                 </div>
                 <div className="hx-nav" data-on="">
-                  <ShoppingBag size={15} />
+                  <ShoppingBag size={16} />
                   Orders
-                  <em>{3 + (after('row') && !after('booked') ? 1 : 0)}</em>
+                  <em>{pendingOrders}</em>
                 </div>
                 <div className="hx-nav">
-                  <Package size={15} />
+                  <Package size={16} />
                   Products
                 </div>
                 <div className="hx-nav">
-                  <LayoutTemplate size={15} />
-                  Sites
-                </div>
-                <div className="hx-nav">
-                  <Users size={15} />
+                  <Users size={16} />
                   Customers
                 </div>
                 <div className="hx-nav">
-                  <Truck size={15} />
-                  Couriers
+                  <Tag size={16} />
+                  Discounts
                 </div>
                 <div className="hx-nav">
-                  <BarChart3 size={15} />
+                  <PanelsTopLeft size={16} />
+                  Websites
+                </div>
+                <div className="hx-nav">
+                  <ChartColumn size={16} />
                   Analytics
                 </div>
-                <div className="hx-nav">
-                  <Settings size={15} />
+                <div className="hx-nav hx-nav-end">
+                  <Settings size={16} />
                   Settings
                 </div>
               </nav>
+
               <div className="hx-main">
                 <div className="hx-head">
                   <div>
-                    <h4>
-                      Orders{' '}
-                      <span className="hx-live">
-                        <i />
-                        Live
-                      </span>
-                    </h4>
-                    <p>Today · all sites</p>
+                    <h4>Orders</h4>
+                    <p>
+                      Every order from your pages, from the first check to the
+                      customer’s door.
+                    </p>
+                  </div>
+                  <div className="hx-actions">
+                    <span className="hx-btn">
+                      <ScanLine size={14} />
+                      Scan parcels
+                    </span>
+                    <span className="hx-btn">
+                      <Printer size={14} />
+                      Print labels
+                    </span>
                   </div>
                 </div>
+
                 <div className="hx-kpis">
                   <div className="hx-kpi">
                     <p>Orders today</p>
@@ -363,7 +525,7 @@ export function HeroStage() {
                     </strong>
                   </div>
                   <div className="hx-kpi">
-                    <p>Delivery success</p>
+                    <p>Delivery rate</p>
                     <strong>
                       94.2% <small>▲ 3.1</small>
                     </strong>
@@ -373,187 +535,333 @@ export function HeroStage() {
                     <strong>2</strong>
                   </div>
                 </div>
-                <div className="hx-table">
-                  <div className="hx-tr hx-th">
-                    <span>Order</span>
-                    <span>Customer</span>
-                    <span>Total</span>
-                    <span>Fake-order check</span>
-                    <span>Courier</span>
-                    <span>Status</span>
-                  </div>
-                  {rows.map((row) => (
-                    <div
-                      key={row.id}
-                      className="hx-tr hx-row"
-                      data-fresh={
-                        row.id === nextId && after('row') ? '' : undefined
-                      }
-                    >
+
+                <div className="hx-split">
+                  {/* The order list */}
+                  <div className="hx-list">
+                    <div className="hx-list-head">
                       <span>
-                        <b>#NC-{row.id}</b>
-                        <span className="hx-muted">
-                          {row.id === nextId
-                            ? 'just now'
-                            : `${(10483 + turn - row.id) * 6} min ago`}
-                        </span>
+                        <b>{ordersToday}</b> orders today
                       </span>
-                      <span>
-                        <b>{row.name}</b>
-                        <span className="hx-muted">{row.area}</span>
-                      </span>
-                      <span>
-                        <b>{taka(row.total)}</b>
-                        <span className="hx-muted">COD</span>
-                      </span>
-                      <span>
-                        {row.check === 'checking' ? (
-                          <span className="hx-chip" data-tone="neutral">
-                            <span className="hx-spin" />
-                            Checking
-                          </span>
-                        ) : row.check === 'ok' ? (
-                          <span className="hx-chip" data-tone="ok">
-                            <ShieldCheck size={12} />
-                            Reliable
-                          </span>
-                        ) : (
-                          <span className="hx-chip" data-tone="warn">
-                            Check first
-                          </span>
-                        )}
-                      </span>
-                      <span>
-                        {row.courier === '—' ? (
-                          <span className="hx-muted">—</span>
-                        ) : (
-                          <b style={{ fontWeight: 600 }}>{row.courier}</b>
-                        )}
-                      </span>
-                      <span>
-                        <span
-                          className="hx-chip"
-                          data-tone={
-                            row.status === 'Delivered'
-                              ? 'lime'
-                              : row.status === 'Held'
-                                ? 'warn'
-                                : 'neutral'
-                          }
-                        >
-                          {row.status}
-                        </span>
+                      <span className="hx-search">
+                        <Search size={12} />
+                        Name, phone or order
                       </span>
                     </div>
-                  ))}
+                    {rows.map((row) => (
+                      <div
+                        key={row.id}
+                        className="hx-row"
+                        data-status={row.status}
+                        data-fresh={
+                          row.id === nextId && after('row') ? '' : undefined
+                        }
+                        data-on={row.id === selected.id ? '' : undefined}
+                      >
+                        <span className="hx-thumb">
+                          <Image
+                            src={PACKS[row.pack].photo}
+                            alt=""
+                            width={68}
+                            height={68}
+                            sizes="34px"
+                          />
+                        </span>
+                        <span className="hx-who">
+                          <b>{row.name}</b>
+                          <span>
+                            #NC-{row.id} ·{' '}
+                            {row.id === nextId
+                              ? 'just now'
+                              : `${(10483 + turn - row.id) * 7} min ago`}
+                          </span>
+                        </span>
+                        <CheckChip check={row.check} />
+                        <span className="hx-total">
+                          <b>{taka(PACKS[row.pack].price)}</b>
+                          <span>COD</span>
+                        </span>
+                        <StatusChip status={row.status} />
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* The selected order */}
+                  <div className="hx-panel" key={`panel-${selected.id}`}>
+                    <div className="hx-p-head">
+                      <span>
+                        <b>#NC-{selected.id}</b>
+                        <small>
+                          Landing page · {isNew ? 'just now' : 'today'}
+                        </small>
+                      </span>
+                      <StatusChip status={selected.status} />
+                    </div>
+
+                    <div className="hx-p-buyer">
+                      <span className="hx-avatar">
+                        {selected.name
+                          .split(' ')
+                          .map((part) => part[0])
+                          .join('')}
+                      </span>
+                      <span>
+                        <b>{selected.name}</b>
+                        <small>{masked(selected.phone)}</small>
+                      </span>
+                    </div>
+                    <p className="hx-p-addr">
+                      <MapPin size={12} />
+                      {selected.area}
+                    </p>
+
+                    <div className="hx-p-item">
+                      <span className="hx-thumb hx-thumb-lg">
+                        <Image
+                          src={PACKS[selected.pack].photo}
+                          alt=""
+                          width={84}
+                          height={84}
+                          sizes="42px"
+                        />
+                      </span>
+                      <span>
+                        <b>Sundarbans Honey</b>
+                        <small>{PACKS[selected.pack].en}</small>
+                      </span>
+                      <b>{taka(PACKS[selected.pack].price)}</b>
+                    </div>
+
+                    <div className="hx-p-check">
+                      <div className="hx-p-label">
+                        Delivery history
+                        <CheckChip check={selected.check} />
+                      </div>
+                      {selected.check === 'checking' ? (
+                        <div className="hx-p-loading">
+                          <i />
+                          <i />
+                          <span>Looking up this number with couriers…</span>
+                        </div>
+                      ) : (
+                        <>
+                          <div
+                            className="hx-p-bar"
+                            data-tone={selected.check}
+                            style={{
+                              ['--rate' as string]: `${rate(selected)}%`,
+                            }}
+                          >
+                            <i />
+                          </div>
+                          <dl className="hx-p-stats">
+                            <div>
+                              <dt>Delivery rate</dt>
+                              <dd>{rate(selected)}%</dd>
+                            </div>
+                            <div>
+                              <dt>Delivered</dt>
+                              <dd>{selected.delivered}</dd>
+                            </div>
+                            <div>
+                              <dt>Refused</dt>
+                              <dd>{selected.refused}</dd>
+                            </div>
+                          </dl>
+                        </>
+                      )}
+                    </div>
+
+                    <div className="hx-p-courier">
+                      {selected.status === 'New' ? (
+                        <span
+                          className="hx-book"
+                          data-press={phase === 'booking' ? '' : undefined}
+                          data-ready={selected.check === 'ok' ? '' : undefined}
+                        >
+                          <Truck size={15} />
+                          Book with Steadfast
+                        </span>
+                      ) : selected.status === 'Held' ? (
+                        <span className="hx-p-note" data-tone="warn">
+                          Call the buyer before booking
+                        </span>
+                      ) : (
+                        <span
+                          className="hx-p-note"
+                          data-tone={
+                            selected.status === 'Delivered' ? 'done' : undefined
+                          }
+                        >
+                          {selected.status === 'Delivered' ? (
+                            <Check size={14} strokeWidth={3} />
+                          ) : (
+                            <Truck size={14} />
+                          )}
+                          <span>
+                            <b>
+                              {selected.status === 'Delivered'
+                                ? `${taka(PACKS[selected.pack].price)} collected`
+                                : selected.consignment?.startsWith('PT')
+                                  ? 'Booked with Pathao'
+                                  : 'Booked with Steadfast'}
+                            </b>
+                            <small>
+                              {selected.consignment} · label printed
+                            </small>
+                          </span>
+                        </span>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
+
+            {/* A toast, as the app shows one */}
+            <div
+              className="hx-toast"
+              data-show={phase === 'delivered' ? '' : undefined}
+            >
+              <span className="hx-toast-icon">
+                <Check size={14} strokeWidth={3} />
+              </span>
+              <span>
+                <b>
+                  #NC-{nextId} delivered · {taka(pack.price)} collected
+                </b>
+                <span>Steadfast will pay it out with the next settlement.</span>
+              </span>
+            </div>
           </div>
 
-          {/* The seller's landing page */}
+          {/* The seller's landing page, in Facebook's in-app browser */}
           <div className="hx-layer hx-phone">
-            <div className="hx-screen" lang="bn">
-              <div className="hx-notch" />
-              <div className="hx-strip">
-                ঢাকায় ডেলিভারি ফ্রি · ক্যাশ অন ডেলিভারি
+            <div className="hx-screen">
+              <div className="hx-status">
+                <b>9:41</b>
+                <span className="hx-island" />
+                <span className="hx-sys">
+                  <i className="hx-signal" />
+                  <i className="hx-battery" />
+                </span>
               </div>
-              <div className="hx-shot">
-                <svg viewBox="0 0 160 124">
-                  <polygon
-                    points="22,86 31,81 40,86 40,96 31,101 22,96"
-                    fill="#e9b45a"
-                  />
-                  <polygon
-                    points="128,30 137,25 146,30 146,40 137,45 128,40"
-                    fill="#e9b45a"
-                  />
-                  <polygon
-                    points="138,50 145,46 152,50 152,58 145,62 138,58"
-                    fill="#efc77e"
-                  />
-                  <rect
-                    x="52"
-                    y="10"
-                    width="56"
-                    height="16"
-                    rx="4"
-                    fill="#3b2a17"
-                  />
-                  <rect
-                    x="58"
-                    y="25"
-                    width="44"
-                    height="8"
-                    rx="2"
-                    fill="#c98a2b"
-                  />
-                  <rect
-                    x="40"
-                    y="32"
-                    width="80"
-                    height="86"
-                    rx="20"
-                    fill="#e39a2f"
-                  />
-                  <rect
-                    x="49"
-                    y="42"
-                    width="9"
-                    height="62"
-                    rx="4.5"
-                    fill="#f4c26a"
-                  />
-                  <rect
-                    x="58"
-                    y="56"
-                    width="46"
-                    height="36"
-                    rx="7"
-                    fill="#fff6e3"
-                  />
-                  <rect
-                    x="65"
-                    y="64"
-                    width="32"
-                    height="6"
-                    rx="3"
-                    fill="#7a4b12"
-                  />
-                  <rect
-                    x="68"
-                    y="75"
-                    width="26"
-                    height="4"
-                    rx="2"
-                    fill="#c08a3e"
-                  />
-                </svg>
+              <div className="hx-browser">
+                <X size={15} strokeWidth={2.4} />
+                <span>
+                  <b>Madhuban Organics</b>
+                  <small>
+                    <Lock size={8} strokeWidth={3} />
+                    madhuban.ncom.bd
+                  </small>
+                </span>
+                <Ellipsis size={16} />
               </div>
-              <div className="hx-copy">
-                <small>মধুবন অর্গানিক্স · ল্যাব-টেস্টেড</small>
-                <h5>সুন্দরবনের কাঁচা মধু</h5>
-                <div className="hx-price">
-                  <strong>৳৮৫০</strong>
-                  <s>৳১,০৫০</s>
-                  <em>১৯% ছাড়</em>
+
+              <div className="hx-view" ref={viewRef}>
+                <div
+                  className="hx-page"
+                  ref={pageRef}
+                  lang="bn"
+                  data-down={
+                    after('scroll') && !after('booked') ? '' : undefined
+                  }
+                >
+                  <div className="hx-strip">
+                    ঢাকায় ডেলিভারি ফ্রি · ক্যাশ অন ডেলিভারি
+                  </div>
+                  <div className="hx-photo">
+                    <Image
+                      src="/marketing/showcase/honey-white.jpg"
+                      alt=""
+                      fill
+                      sizes="250px"
+                      priority
+                    />
+                    <em>১৯% ছাড়</em>
+                    <span className="hx-pager">
+                      <i data-on="" />
+                      <i />
+                      <i />
+                      <i />
+                    </span>
+                  </div>
+                  <div className="hx-copy">
+                    <small>মধুবন অর্গানিক্স · ল্যাব-টেস্টেড</small>
+                    <h5>সুন্দরবনের কাঁচা মধু</h5>
+                    <div className="hx-stars">
+                      <span>★★★★★</span>
+                      ৪.৯ · ৩১২ রিভিউ
+                    </div>
+                    <div className="hx-price">
+                      <strong>৳৮৫০</strong>
+                      <s>৳১,০৫০</s>
+                    </div>
+                  </div>
+
+                  <p className="hx-label">প্যাকেজ বেছে নিন</p>
+                  <div className="hx-packs">
+                    {PACK_ORDER.map((key) => (
+                      <div
+                        key={key}
+                        className="hx-pack"
+                        data-on={picked === key ? '' : undefined}
+                      >
+                        <i />
+                        <span>
+                          {PACKS[key].bn}
+                          {PACKS[key].tag && <em>{PACKS[key].tag}</em>}
+                          <small>{bn(PACKS[key].bnNote)}</small>
+                        </span>
+                        <b>{bnTaka(PACKS[key].price)}</b>
+                      </div>
+                    ))}
+                  </div>
+
+                  <p className="hx-label">ডেলিভারির ঠিকানা</p>
+                  <div
+                    className="hx-form"
+                    key={`form-${turn}`}
+                    data-typed={after('type') ? '' : undefined}
+                  >
+                    <Field
+                      label="আপনার নাম"
+                      placeholder="পুরো নাম লিখুন"
+                      value={buyer.nameBn}
+                    />
+                    <Field
+                      label="মোবাইল নম্বর"
+                      placeholder="০১XXXXXXXXX"
+                      value={bn(buyer.phone)}
+                    />
+                    <Field
+                      label="ঠিকানা"
+                      placeholder="বাসা, রোড, এলাকা"
+                      value={buyer.areaBn}
+                    />
+                  </div>
+
+                  <div className="hx-sum">
+                    <span>ডেলিভারি চার্জ</span>
+                    <span>ফ্রি</span>
+                  </div>
+                  <div className="hx-sum hx-sum-total">
+                    <span>মোট</span>
+                    <b>{bnTaka(PACKS[picked].price)}</b>
+                  </div>
+                  <div
+                    className="hx-order"
+                    data-press={phase === 'press' ? '' : undefined}
+                  >
+                    অর্ডার কনফার্ম করুন
+                  </div>
+                  <p className="hx-cod">
+                    <ShieldCheck size={11} />
+                    পণ্য হাতে পেয়ে টাকা দিন · ২–৩ দিনে ডেলিভারি
+                  </p>
                 </div>
               </div>
-              <div className="hx-opts">
-                <div className="hx-opt">
-                  ১ বোতল · ৫০০ গ্রাম<b>৳৮৫০</b>
-                </div>
-                <div className="hx-opt" data-on="">
-                  ফ্যামিলি প্যাক · ২ বোতল<b>৳১,৫৫০</b>
-                </div>
-              </div>
-              <div
-                className="hx-order"
-                data-press={phase === 'press' ? '' : undefined}
-              >
-                অর্ডার কনফার্ম করুন
-              </div>
-              <p className="hx-cod">ক্যাশ অন ডেলিভারি · ২–৩ দিনে ডেলিভারি</p>
+
               <div
                 className="hx-sheet"
                 data-open={after('sent') && !after('booked') ? '' : undefined}
@@ -562,109 +870,77 @@ export function HeroStage() {
                   <Check size={18} strokeWidth={3} />
                 </i>
                 <b>অর্ডার নেওয়া হয়েছে!</b>
-                <span>অর্ডার #NC-{nextId} · শিগগিরই কল করা হবে</span>
+                <span>
+                  অর্ডার #NC-{bn(nextId)} · {bnTaka(pack.price)}
+                  <br />
+                  কনফার্ম করতে আমরা শিগগিরই কল করব
+                </span>
               </div>
             </div>
-          </div>
-
-          {/* The order on its way to the dashboard */}
-          <div
-            key={`fly-${turn}`}
-            className="hx-fly"
-            data-go={after('sent') ? '' : undefined}
-          >
-            + Order #NC-{nextId} · {taka(buyer.total)}
-          </div>
-
-          {/* Fake-order check */}
-          <div className="hx-layer hx-card hx-check">
-            <div className="hx-card-head">
-              <span>Fake-order check</span>
-              <span className="hx-tag">STEADFAST</span>
-            </div>
-            <div className="hx-check-body">
-              <div className="hx-ring">
-                <svg viewBox="0 0 64 64">
-                  <circle
-                    cx="32"
-                    cy="32"
-                    r="28"
-                    stroke="rgba(var(--s-ink), 0.1)"
-                  />
-                  <circle
-                    className="hx-ring-fill"
-                    cx="32"
-                    cy="32"
-                    r="28"
-                    style={{
-                      strokeDashoffset: after('checked')
-                        ? 176 * 0.08
-                        : checking
-                          ? 120
-                          : 176,
-                    }}
-                  />
-                </svg>
-                <strong>{after('checked') ? '92%' : '…'}</strong>
-              </div>
-              <p>
-                <b>{buyer.name}</b>
-                <br />
-                {after('checked')
-                  ? '23 delivered · 2 returned'
-                  : 'Reading delivery history…'}
-                <br />
-                {after('checked') ? (
-                  <span
-                    className="hx-chip"
-                    data-tone="ok"
-                    style={{ marginTop: 6 }}
-                  >
-                    <ShieldCheck size={12} />
-                    Reliable buyer
-                  </span>
-                ) : (
-                  <span
-                    className="hx-chip"
-                    data-tone="neutral"
-                    style={{ marginTop: 6 }}
-                  >
-                    <span className="hx-spin" />
-                    Checking
-                  </span>
-                )}
-              </p>
-            </div>
-          </div>
-
-          {/* Courier and cash */}
-          <div
-            className="hx-layer hx-card hx-toast"
-            data-hide={toast ? undefined : ''}
-            data-done={toast === 'delivered' ? '' : undefined}
-          >
-            <span className="hx-toast-icon">
-              {toast === 'delivered' ? (
-                <Check size={20} strokeWidth={3} />
-              ) : (
-                <Truck size={19} />
-              )}
-            </span>
-            <span>
-              <b>
-                {toast === 'delivered'
-                  ? `Delivered · ${taka(buyer.total)} collected`
-                  : 'Booked with Steadfast'}
-              </b>
-              <span>
-                {toast === 'delivered'
-                  ? `#NC-${nextId} · ${buyer.area}`
-                  : `Consignment SF-${128472913 + turn} · sticker printed`}
-              </span>
-            </span>
           </div>
         </div>
       </div>
     </div>
+  )
+}
+
+function Field({
+  label,
+  placeholder,
+  value,
+}: {
+  label: string
+  placeholder: string
+  value: string
+}) {
+  return (
+    <div className="hx-field">
+      <small>{label}</small>
+      <span className="hx-input">
+        <span className="hx-ph">{placeholder}</span>
+        <span className="hx-val">{value}</span>
+      </span>
+    </div>
+  )
+}
+
+function CheckChip({ check }: { check: Order['check'] }) {
+  if (check === 'checking')
+    return (
+      <span className="hx-chip" data-tone="neutral">
+        <span className="hx-spin" />
+        Checking
+      </span>
+    )
+  if (check === 'ok')
+    return (
+      <span className="hx-chip" data-tone="ok">
+        <ShieldCheck size={12} />
+        Reliable
+      </span>
+    )
+  return (
+    <span className="hx-chip" data-tone="warn">
+      Check first
+    </span>
+  )
+}
+
+function StatusChip({ status }: { status: Status }) {
+  return (
+    <span
+      className="hx-chip hx-status-chip"
+      data-tone={
+        status === 'Delivered'
+          ? 'lime'
+          : status === 'Held'
+            ? 'warn'
+            : status === 'New'
+              ? 'new'
+              : 'neutral'
+      }
+    >
+      {status}
+    </span>
   )
 }
